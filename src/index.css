@@ -1,0 +1,419 @@
+@import "tailwindcss";
+
+/* ============================================
+   Apple Liquid Glass Design System
+   ============================================ */
+
+:root {
+  /* Typography */
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+  color-scheme: light dark;
+
+  /* Accent Colors (from Arc) */
+  --accent-blue: #3139FB;
+  --accent-purple: #2702c2;
+  --accent-red: #FB3A4D;
+
+  /* Focus */
+  --focus-ring: #96C4FF;
+
+  /* Spacing (8px base) */
+  --spacing-1: 4px;
+  --spacing-2: 8px;
+  --spacing-3: 16px;
+  --spacing-4: 24px;
+  --spacing-5: 32px;
+
+  /* Border Radius - Liquid Glass uses larger radii */
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+  --radius-xl: 28px;
+
+  /* Transitions */
+  --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-normal: 200ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-slow: 300ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ============================================
+   Light Mode (Default)
+   ============================================ */
+:root,
+.light {
+  /* Background */
+  --bg-primary: #f5f5f7;
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #fafafa;
+
+  /* Text */
+  --text-primary: #1d1d1f;
+  --text-secondary: #6e6e73;
+  --text-tertiary: #86868b;
+
+  /* Borders */
+  --border-color: rgba(0, 0, 0, 0.08);
+  --border-strong: rgba(0, 0, 0, 0.12);
+
+  /* Liquid Glass - Light Mode */
+  --glass-bg: rgba(255, 255, 255, 0.72);
+  --glass-bg-hover: rgba(255, 255, 255, 0.85);
+  --glass-border: rgba(255, 255, 255, 0.5);
+  --glass-shadow:
+    0 2px 8px rgba(0, 0, 0, 0.04),
+    0 8px 24px rgba(0, 0, 0, 0.08);
+  --glass-shadow-elevated:
+    0 4px 12px rgba(0, 0, 0, 0.06),
+    0 16px 48px rgba(0, 0, 0, 0.12);
+  --glass-blur: 20px;
+  --glass-saturate: 180%;
+  --glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  --glass-highlight-edge: inset 0 0 0 1px rgba(255, 255, 255, 0.4);
+
+  /* Interactive States */
+  --hover-overlay: rgba(0, 0, 0, 0.04);
+  --active-overlay: rgba(0, 0, 0, 0.08);
+
+  /* Status Colors */
+  --success: #34c759;
+  --warning: #ff9f0a;
+  --error: #ff3b30;
+}
+
+/* ============================================
+   Dark Mode
+   ============================================ */
+.dark {
+  /* Background - Rich dark, not pure black */
+  --bg-primary: #161617;
+  --bg-secondary: #1c1c1e;
+  --bg-tertiary: #2c2c2e;
+
+  /* Text */
+  --text-primary: #f5f5f7;
+  --text-secondary: #a1a1a6;
+  --text-tertiary: #6e6e73;
+
+  /* Borders */
+  --border-color: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.12);
+
+  /* Liquid Glass - Dark Mode (frostier, more opaque) */
+  --glass-bg: rgba(38, 38, 40, 0.78);
+  --glass-bg-hover: rgba(50, 50, 52, 0.85);
+  --glass-border: rgba(255, 255, 255, 0.08);
+  --glass-shadow:
+    0 2px 8px rgba(0, 0, 0, 0.2),
+    0 8px 24px rgba(0, 0, 0, 0.35);
+  --glass-shadow-elevated:
+    0 4px 12px rgba(0, 0, 0, 0.3),
+    0 16px 48px rgba(0, 0, 0, 0.45);
+  --glass-blur: 24px;
+  --glass-saturate: 150%;
+  --glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  --glass-highlight-edge: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+
+  /* Interactive States */
+  --hover-overlay: rgba(255, 255, 255, 0.06);
+  --active-overlay: rgba(255, 255, 255, 0.1);
+
+  /* Status Colors (slightly adjusted for dark) */
+  --success: #32d74b;
+  --warning: #ffd60a;
+  --error: #ff453a;
+}
+
+/* ============================================
+   Base Styles
+   ============================================ */
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ============================================
+   Liquid Glass Components
+   ============================================ */
+
+/* Base Glass Effect */
+.glass {
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-shadow), var(--glass-highlight);
+}
+
+/* Header/Navigation Glass */
+.glass-header {
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  border-bottom: 1px solid var(--border-color);
+  box-shadow: var(--glass-highlight);
+}
+
+/* Footer Glass */
+.glass-footer {
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  border-top: 1px solid var(--border-color);
+}
+
+/* Modal/Panel Glass (elevated) */
+.glass-modal {
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--glass-shadow-elevated), var(--glass-highlight-edge);
+}
+
+/* Card Glass */
+.glass-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+/* Interactive Glass Button */
+.glass-button {
+  background: var(--glass-bg);
+  backdrop-filter: blur(12px) saturate(150%);
+  -webkit-backdrop-filter: blur(12px) saturate(150%);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--glass-highlight);
+  transition: all var(--transition-fast);
+}
+
+.glass-button:hover {
+  background: var(--glass-bg-hover);
+  box-shadow: var(--glass-shadow), var(--glass-highlight);
+}
+
+.glass-button:active {
+  transform: scale(0.98);
+}
+
+/* ============================================
+   Primary Button (Accent)
+   ============================================ */
+.btn-primary {
+  padding: 8px 18px;
+  border-radius: var(--radius-sm);
+  font-weight: 600;
+  font-size: 14px;
+  letter-spacing: -0.01em;
+  background: var(--accent-blue);
+  color: white;
+  border: none;
+  box-shadow: 0 2px 8px rgba(49, 57, 251, 0.25);
+  transition: all var(--transition-fast);
+}
+
+.btn-primary:hover {
+  background: var(--accent-purple);
+  box-shadow: 0 4px 12px rgba(49, 57, 251, 0.35);
+  transform: translateY(-1px);
+}
+
+.btn-primary:active {
+  transform: translateY(0);
+}
+
+.btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* ============================================
+   Form Elements
+   ============================================ */
+.input-glass {
+  padding: 10px 14px;
+  font-size: 14px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  transition: all var(--transition-fast);
+}
+
+.input-glass:focus {
+  outline: none;
+  border-color: var(--accent-blue);
+  box-shadow: 0 0 0 3px rgba(49, 57, 251, 0.15);
+}
+
+.input-glass::placeholder {
+  color: var(--text-tertiary);
+}
+
+/* Select Glass */
+.select-glass {
+  padding: 10px 14px;
+  font-size: 14px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.select-glass:focus {
+  outline: none;
+  border-color: var(--accent-blue);
+  box-shadow: 0 0 0 3px rgba(49, 57, 251, 0.15);
+}
+
+/* ============================================
+   Toggle Switch
+   ============================================ */
+.toggle-switch {
+  position: relative;
+  width: 44px;
+  height: 26px;
+  background: var(--bg-tertiary);
+  border-radius: 13px;
+  border: 1px solid var(--border-color);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.toggle-switch.active {
+  background: var(--accent-blue);
+  border-color: var(--accent-blue);
+}
+
+.toggle-switch-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 20px;
+  height: 20px;
+  background: white;
+  border-radius: 50%;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
+  transition: transform var(--transition-fast);
+}
+
+.toggle-switch.active .toggle-switch-knob {
+  transform: translateX(18px);
+}
+
+/* ============================================
+   Segmented Control (Theme Picker)
+   ============================================ */
+.segmented-control {
+  display: inline-flex;
+  padding: 3px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  gap: 2px;
+}
+
+.segmented-control-item {
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  border-radius: calc(var(--radius-sm) - 4px);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.segmented-control-item:hover {
+  color: var(--text-primary);
+}
+
+.segmented-control-item.active {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+/* ============================================
+   Scrollbar - Liquid Glass Style
+   ============================================ */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--text-tertiary);
+  border-radius: 4px;
+  opacity: 0.5;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-secondary);
+}
+
+/* ============================================
+   Focus States
+   ============================================ */
+*:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* ============================================
+   Status Indicators
+   ============================================ */
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.status-dot.success { background: var(--success); }
+.status-dot.warning { background: var(--warning); }
+.status-dot.error { background: var(--error); }
+.status-dot.inactive { background: var(--text-tertiary); }
+
+/* ============================================
+   Overlay/Backdrop
+   ============================================ */
+.backdrop-blur {
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.dark .backdrop-blur {
+  background: rgba(0, 0, 0, 0.6);
+}
+
+/* ============================================
+   Theme Transition
+   ============================================ */
+html {
+  transition: background-color var(--transition-slow), color var(--transition-slow);
+}
+
+/* Prevent transition on initial load */
+html.no-transition,
+html.no-transition * {
+  transition: none !important;
+}
