@@ -1,8 +1,10 @@
 # Lingo Leap
 
-Offline macOS translation and grammar correction app powered by local AI models.
+Offline translation and grammar correction app powered by local AI models. Available for **macOS**.
 
-![Lingo Leap](src-tauri/icons/128x128.png)
+<p align="center">
+  <img src="assets/logo.png" alt="Lingo Leap" width="200">
+</p>
 
 ## Features
 
@@ -19,7 +21,7 @@ Offline macOS translation and grammar correction app powered by local AI models.
 
 ## Requirements
 
-- macOS 12.0+
+- **macOS** 12.0+ or **Linux** (Ubuntu 20.04+, Fedora 35+, etc.)
 - [Ollama](https://ollama.com) installed and running
 - Required models:
   - `aya:8b` - Translation
@@ -28,20 +30,22 @@ Offline macOS translation and grammar correction app powered by local AI models.
 ## Quick Start
 
 1. **Install Ollama**
+
    ```bash
    curl -fsSL https://ollama.com/install.sh | sh
    ```
 
 2. **Pull required models**
+
    ```bash
    ollama pull aya:8b
    ollama pull qwen3:4b
    ```
 
 3. **Download and run Lingo Leap**
-   - Download the latest `.dmg` from [Releases](https://github.com/knguyen30111/tran-app/releases)
-   - Drag to Applications folder
-   - Launch Lingo Leap
+   - **macOS**: Download `.dmg`, drag to Applications
+   - **Linux**: Download `.deb` (Debian/Ubuntu), `.rpm` (Fedora), or `.AppImage`
+   - Get the latest release from [Releases](https://github.com/knguyen30111/lingo-leap/releases)
 
 ## Development
 
@@ -49,7 +53,8 @@ Offline macOS translation and grammar correction app powered by local AI models.
 
 - Node.js 18+
 - Rust (latest stable)
-- Xcode Command Line Tools
+- **macOS**: Xcode Command Line Tools
+- **Linux**: `build-essential`, `libwebkit2gtk-4.1-dev`, `libappindicator3-dev`, `librsvg2-dev`
 
 ### Setup
 
@@ -76,13 +81,13 @@ npm run tauri build
 
 Access settings via the gear icon:
 
-| Setting | Description |
-|---------|-------------|
-| Theme | Light / Dark / System |
-| Translation Model | Ollama model for translation |
-| Correction Model | Ollama model for grammar |
-| Ollama Host | API endpoint (default: localhost:11434) |
-| Streaming | Enable/disable streaming responses |
+| Setting           | Description                             |
+| ----------------- | --------------------------------------- |
+| Theme             | Light / Dark / System                   |
+| Translation Model | Ollama model for translation            |
+| Correction Model  | Ollama model for grammar                |
+| Ollama Host       | API endpoint (default: localhost:11434) |
+| Streaming         | Enable/disable streaming responses      |
 
 ## License
 
