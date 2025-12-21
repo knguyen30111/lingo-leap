@@ -417,3 +417,655 @@ html.no-transition,
 html.no-transition * {
   transition: none !important;
 }
+
+/* ============================================
+   Speech-to-Text Components
+   ============================================ */
+
+/* Mic Button - Idle */
+.mic-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 6px;
+  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  position: relative;
+}
+
+.mic-button:hover {
+  background: var(--hover-overlay);
+  color: var(--text-secondary);
+  border-color: var(--border-strong);
+}
+
+.mic-button:active {
+  transform: scale(0.95);
+}
+
+.mic-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Mic Button - Listening State */
+.mic-button.listening {
+  background: var(--accent-blue);
+  border-color: var(--accent-blue);
+  color: white;
+  box-shadow: 0 2px 8px rgba(49, 57, 251, 0.3);
+}
+
+.mic-button.listening:hover {
+  background: var(--accent-purple);
+  border-color: var(--accent-purple);
+}
+
+/* Pulse Ring Animation */
+.mic-button.listening::before {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: calc(var(--radius-sm) + 4px);
+  border: 2px solid var(--accent-blue);
+  opacity: 0;
+  animation: mic-pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes mic-pulse {
+  0% {
+    transform: scale(0.95);
+    opacity: 0.6;
+  }
+  50% {
+    transform: scale(1.05);
+    opacity: 0.3;
+  }
+  100% {
+    transform: scale(1.1);
+    opacity: 0;
+  }
+}
+
+/* Mic Icon */
+.mic-button svg {
+  width: 16px;
+  height: 16px;
+  transition: transform var(--transition-fast);
+}
+
+.mic-button.listening svg {
+  animation: mic-icon-pulse 1s ease-in-out infinite;
+}
+
+@keyframes mic-icon-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.1); }
+}
+
+/* Speech Language Quick Selector */
+.speech-lang-select {
+  appearance: none;
+  padding: 4px 20px 4px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: var(--glass-bg);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+
+  /* Custom dropdown arrow */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 4px center;
+  background-size: 12px;
+}
+
+.speech-lang-select:hover {
+  background-color: var(--bg-secondary);
+  border-color: var(--text-tertiary);
+  color: var(--text-primary);
+}
+
+.speech-lang-select:focus {
+  outline: none;
+  border-color: var(--accent-blue);
+  box-shadow: 0 0 0 2px rgba(49, 57, 251, 0.15);
+}
+
+.speech-lang-select option {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  padding: 8px;
+}
+
+/* Silence Detection State */
+.mic-button.silence-detected::after {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: calc(var(--radius-sm) + 3px);
+  border: 2px solid var(--warning, #f59e0b);
+  opacity: 0.7;
+  animation: silence-countdown 2.5s linear forwards;
+}
+
+@keyframes silence-countdown {
+  0% { opacity: 0.7; border-color: var(--warning, #f59e0b); }
+  70% { opacity: 0.5; border-color: var(--warning, #f59e0b); }
+  100% { opacity: 0.3; border-color: var(--text-tertiary); }
+}
+
+/* Clear Input Button */
+.clear-input-btn {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  background: var(--glass-bg);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text-tertiary);
+  cursor: pointer;
+  opacity: 0.6;
+  transform: scale(0.95);
+  transition:
+    opacity var(--transition-fast),
+    transform var(--transition-fast),
+    background var(--transition-fast),
+    color var(--transition-fast);
+  z-index: 10;
+}
+
+.clear-input-btn:hover {
+  opacity: 1;
+  transform: scale(1);
+  background: var(--bg-secondary);
+  border-color: var(--text-tertiary);
+  color: var(--text-secondary);
+}
+
+.clear-input-btn:active {
+  transform: scale(0.92);
+}
+
+.clear-input-btn:focus-visible {
+  outline: none;
+  border-color: var(--accent-blue);
+  box-shadow: 0 0 0 2px rgba(49, 57, 251, 0.15);
+}
+
+.clear-input-btn svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* Language Swap Button - Circular */
+.lang-swap-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border: 1px solid var(--glass-border);
+  border-radius: 50%;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-normal);
+  box-shadow: var(--glass-shadow);
+}
+
+.lang-swap-button:hover:not(:disabled) {
+  background: var(--accent-blue);
+  border-color: var(--accent-blue);
+  color: white;
+  transform: scale(1.05);
+}
+
+.lang-swap-button:active:not(:disabled) {
+  transform: scale(0.95);
+}
+
+.lang-swap-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.lang-swap-button svg {
+  transition: transform var(--transition-normal);
+}
+
+/* Speech Preview Container */
+.speech-preview {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  min-width: 240px;
+  max-width: 320px;
+  padding: 12px 16px;
+
+  /* Liquid Glass - elevated modal style */
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--glass-shadow-elevated), var(--glass-highlight-edge);
+
+  /* Animation */
+  opacity: 0;
+  transform: translateY(4px) scale(0.98);
+  transition: all var(--transition-normal);
+  pointer-events: none;
+  z-index: 50;
+}
+
+.speech-preview.visible {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  pointer-events: auto;
+}
+
+/* Pointer/Arrow */
+.speech-preview::after {
+  content: '';
+  position: absolute;
+  bottom: -6px;
+  left: 14px;
+  width: 12px;
+  height: 12px;
+  background: var(--glass-bg);
+  border-right: 1px solid var(--glass-border);
+  border-bottom: 1px solid var(--glass-border);
+  transform: rotate(45deg);
+  backdrop-filter: blur(var(--glass-blur));
+}
+
+/* Interim Text (as user speaks) */
+.speech-preview-text {
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  font-style: italic;
+  min-height: 21px;
+  word-break: break-word;
+}
+
+.speech-preview-text.final {
+  color: var(--text-primary);
+  font-style: normal;
+}
+
+.speech-preview-text.empty {
+  color: var(--text-tertiary);
+}
+
+/* Status Indicator */
+.speech-preview-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-color);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--accent-blue);
+  letter-spacing: 0.01em;
+}
+
+/* Animated listening dot */
+.speech-preview-status .listening-dot {
+  position: relative;
+  width: 6px;
+  height: 6px;
+}
+
+.speech-preview-status .listening-dot::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: var(--accent-blue);
+  animation: listening-ping 1s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+
+.speech-preview-status .listening-dot::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: var(--accent-blue);
+}
+
+@keyframes listening-ping {
+  0% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  75%, 100% {
+    transform: scale(2);
+    opacity: 0;
+  }
+}
+
+/* Cancel hint */
+.speech-preview-hint {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  margin-left: auto;
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .mic-button.listening::before,
+  .mic-button.listening svg,
+  .speech-preview-status .listening-dot::before {
+    animation: none;
+  }
+}
+
+/* ============================================
+   Settings Modal - Refined Design
+   ============================================ */
+
+.settings-modal {
+  width: 100%;
+  max-width: 440px;
+  margin: 0 16px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--glass-shadow-elevated);
+  overflow: hidden;
+  animation: settings-appear 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes settings-appear {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+/* Settings Header */
+.settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-tertiary);
+}
+
+.settings-title {
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: -0.02em;
+}
+
+.settings-close-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: var(--hover-overlay);
+  border: none;
+  border-radius: 50%;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.settings-close-btn:hover {
+  background: var(--active-overlay);
+  color: var(--text-primary);
+  transform: scale(1.05);
+}
+
+.settings-close-btn:active {
+  transform: scale(0.95);
+}
+
+/* Settings Content */
+.settings-content {
+  padding: 16px;
+  max-height: 65vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* Settings Section */
+.settings-section {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+}
+
+.settings-section-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: transparent;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.settings-section-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: var(--accent-blue);
+  border-radius: 8px;
+  color: white;
+  flex-shrink: 0;
+}
+
+.settings-section-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
+}
+
+.settings-section-content {
+  padding: 4px 0;
+}
+
+/* Setting Row */
+.setting-row {
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.setting-row + .setting-row {
+  border-top: 1px solid var(--border-color);
+}
+
+.setting-row-inline {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.setting-row-inline .setting-row-control {
+  flex-shrink: 0;
+}
+
+.setting-row-label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.setting-label-text {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.setting-label-desc {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  line-height: 1.3;
+}
+
+.setting-row-control {
+  width: 100%;
+}
+
+.setting-row-inline .setting-row-control {
+  width: auto;
+}
+
+/* Theme Selector */
+.theme-selector {
+  display: flex;
+  gap: 10px;
+  padding: 14px;
+}
+
+.theme-option {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 10px;
+  background: var(--bg-secondary);
+  border: 2px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.theme-option:hover {
+  border-color: var(--text-tertiary);
+  background: var(--bg-primary);
+}
+
+.theme-option.active {
+  background: var(--accent-blue);
+  border-color: var(--accent-blue);
+}
+
+.theme-option.active .theme-option-icon,
+.theme-option.active .theme-option-label {
+  color: white;
+}
+
+.theme-option-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  background: var(--bg-tertiary);
+  border-radius: 10px;
+  color: var(--text-secondary);
+  transition: all var(--transition-fast);
+}
+
+.theme-option.active .theme-option-icon {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.theme-option-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  transition: color var(--transition-fast);
+}
+
+/* Settings Footer */
+.settings-footer {
+  padding: 12px 20px;
+  border-top: 1px solid var(--border-color);
+  background: var(--bg-tertiary);
+}
+
+.settings-footer-content {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+/* Fine-tune select and input within settings */
+.settings-section .select-glass,
+.settings-section .input-glass {
+  padding: 10px 12px;
+  font-size: 13px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+}
+
+.settings-section .select-glass:hover,
+.settings-section .input-glass:hover {
+  border-color: var(--text-tertiary);
+}
+
+.settings-section .select-glass:focus,
+.settings-section .input-glass:focus {
+  background: var(--bg-secondary);
+  border-color: var(--accent-blue);
+}
+
+/* Smaller toggle in settings */
+.settings-section .toggle-switch {
+  width: 44px;
+  height: 26px;
+}
+
+.settings-section .toggle-switch-knob {
+  width: 20px;
+  height: 20px;
+}
+
+.settings-section .toggle-switch.active .toggle-switch-knob {
+  transform: translateX(18px);
+}
+
+/* Button in settings */
+.settings-section .btn-primary {
+  padding: 10px 16px;
+  font-size: 13px;
+}

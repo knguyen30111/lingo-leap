@@ -29,6 +29,8 @@ interface SettingsState {
   setDefaultTargetLang: (lang: string) => void;
   explanationLang: string; // 'auto' = match input, or specific lang code
   setExplanationLang: (lang: string) => void;
+  speechLang: string; // Language for speech recognition
+  setSpeechLang: (lang: string) => void;
 
   // Setup
   isSetupComplete: boolean;
@@ -67,6 +69,8 @@ export const useSettingsStore = create<SettingsState>()(
       setDefaultTargetLang: (lang) => set({ defaultTargetLang: lang }),
       explanationLang: "auto", // 'auto' = match input language
       setExplanationLang: (lang) => set({ explanationLang: lang }),
+      speechLang: "en", // Default speech recognition language
+      setSpeechLang: (lang) => set({ speechLang: lang }),
 
       // Setup
       isSetupComplete: false,

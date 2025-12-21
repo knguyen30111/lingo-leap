@@ -1,13 +1,53 @@
-import { useState } from 'react'
+import { useState, useCallback } from 'react'
 import { writeText } from '@tauri-apps/plugin-clipboard-manager'
 import { useAppStore } from '../stores/appStore'
+import { useSettingsStore } from '../stores/settingsStore'
 import { useTranslation } from '../hooks/useTranslation'
+import { useSpeechToText } from '../hooks/useSpeechToText'
+import { SUPPORTED_LANGUAGES } from '../lib/language'
 import { LanguageSelector } from './LanguageSelector'
+import { MicButton } from './MicButton'
+import { SpeechPreview } from './SpeechPreview'
+import { ClearInputButton } from './ClearInputButton'
+
+const SPEECH_LANGS = [
+  { code: 'en', label: 'EN' },
+  { code: 'ja', label: 'JA' },
+  { code: 'vi', label: 'VI' },
+  { code: 'zh', label: 'ZH' },
+  { code: 'ko', label: 'KO' },
+]
 
 export function TranslationView() {
-  const { inputText, setInputText, outputText, isLoading, error } = useAppStore()
+  const {
+    inputText, setInputText,
+    outputText, setOutputText,
+    isLoading, error, setError,
+    sourceLang, setSourceLang,
+    targetLang, setTargetLang
+  } = useAppStore()
+  const { speechLang, setSpeechLang } = useSettingsStore()
   const { translate } = useTranslation()
   const [copied, setCopied] = useState(false)
+
+  // Callback to append speech text to input
+  const handleTextReady = useCallback((text: string) => {
+    const current = useAppStore.getState().inputText
+    setInputText(current ? current + ' ' + text : text)
+  }, [setInputText])
+
+  // Speech-to-text hook with continuous mode
+  const {
+    isListening,
+    isSupported,
+    transcript,
+    interimTranscript,
+    silenceDetected,
+    toggleListening,
+  } = useSpeechToText({
+    lang: speechLang,
+    onTextReady: handleTextReady,
+  })
 
   const handleCopy = async () => {
     if (!outputText) return
@@ -26,37 +66,105 @@ export function TranslationView() {
     }
   }
 
+  const handleClearInput = () => {
+    setInputText('')
+    setOutputText('')
+    setError(null)
+  }
+
   return (
     <div className="flex flex-col h-full">
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border-color)]">
-        <LanguageSelector />
-      </div>
-
-      {/* Main Grid Layout - 1/3 input, 2/3 output */}
-      <div className="flex-1 grid grid-cols-3 gap-4 p-4 overflow-hidden">
-        {/* Left: Input (1/3) */}
-        <div className="flex flex-col glass-card overflow-hidden">
+      {/* Main Layout - Input | Swap | Output */}
+      <div className="flex-1 flex gap-2 p-4 overflow-hidden">
+        {/* Left: Input */}
+        <div className="flex-1 flex flex-col glass-card overflow-hidden relative">
+          {/* Source Language Header */}
+          <div className="px-3 py-2 border-b border-[var(--border-color)] flex items-center justify-between">
+            <select
+              value={sourceLang}
+              onChange={(e) => setSourceLang(e.target.value)}
+              className="select-glass text-sm"
+            >
+              {SUPPORTED_LANGUAGES.map((lang) => (
+                <option key={lang.code} value={lang.code}>
+                  {lang.code === 'auto' ? 'Auto Detect' : lang.nativeName}
+                </option>
+              ))}
+            </select>
+          </div>
+          <ClearInputButton
+            onClick={handleClearInput}
+            visible={inputText.length > 0}
+          />
           <textarea
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
             placeholder="Enter text to translate..."
             className="
-              flex-1 p-4 bg-transparent resize-none
+              flex-1 p-4 pr-10 bg-transparent resize-none
               text-[var(--text-primary)] text-base leading-relaxed
               placeholder:text-[var(--text-tertiary)]
               focus:outline-none
             "
           />
-          <div className="px-3 py-1.5 border-t border-[var(--border-color)] flex items-center justify-end">
+          <div className="px-3 py-1.5 border-t border-[var(--border-color)] flex items-center justify-between">
+            {/* Left: Mic button with language selector */}
+            <div className="flex items-center gap-1.5">
+              <div className="relative">
+                <MicButton
+                  isListening={isListening}
+                  isSupported={isSupported}
+                  silenceDetected={silenceDetected}
+                  onClick={toggleListening}
+                  disabled={isLoading}
+                />
+                <SpeechPreview
+                  isVisible={isListening}
+                  transcript={transcript}
+                  interimTranscript={interimTranscript}
+                />
+              </div>
+              {isSupported && (
+                <select
+                  value={speechLang}
+                  onChange={(e) => setSpeechLang(e.target.value)}
+                  className="speech-lang-select"
+                  title="Speech language"
+                >
+                  {SPEECH_LANGS.map(({ code, label }) => (
+                    <option key={code} value={code}>{label}</option>
+                  ))}
+                </select>
+              )}
+            </div>
+            {/* Right: Char count */}
             <span className="text-[10px] text-[var(--text-tertiary)]">
               {inputText.length} chars
             </span>
           </div>
         </div>
 
-        {/* Right: Output (2/3) */}
-        <div className="col-span-2 flex flex-col glass-card overflow-hidden">
+        {/* Center: Swap Button */}
+        <div className="flex items-center justify-center">
+          <LanguageSelector />
+        </div>
+
+        {/* Right: Output */}
+        <div className="flex-1 flex flex-col glass-card overflow-hidden">
+          {/* Target Language Header */}
+          <div className="px-3 py-2 border-b border-[var(--border-color)] flex items-center justify-between">
+            <select
+              value={targetLang}
+              onChange={(e) => setTargetLang(e.target.value)}
+              className="select-glass text-sm"
+            >
+              {SUPPORTED_LANGUAGES.filter(l => l.code !== 'auto').map((lang) => (
+                <option key={lang.code} value={lang.code}>
+                  {lang.nativeName}
+                </option>
+              ))}
+            </select>
+          </div>
           <div className="flex-1 p-4 overflow-auto">
             {isLoading ? (
               <div className="space-y-3 animate-pulse">

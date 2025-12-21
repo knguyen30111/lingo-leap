@@ -13,8 +13,11 @@ Offline translation and grammar correction app powered by local AI models. Avail
   - Light: Minor fixes only
   - Medium: Grammar and style improvements
   - Heavy: Full rewrite for clarity
+- **Speech-to-Text** - Voice input with continuous recording and silence detection
+- **Language Swap** - One-click swap between source and target languages
 - **Offline First** - All processing happens locally via Ollama
 - **Liquid Glass UI** - Modern design with light/dark/system themes
+- **Refined Settings** - Organized settings panel with grouped sections
 - **Menu Bar Integration** - Quick access from system tray
 - **Streaming Responses** - See results as they generate
 - **Smart Caching** - Instant results for repeated queries
@@ -81,13 +84,17 @@ npm run tauri build
 
 Access settings via the gear icon:
 
-| Setting           | Description                             |
-| ----------------- | --------------------------------------- |
-| Theme             | Light / Dark / System                   |
-| Translation Model | Ollama model for translation            |
-| Correction Model  | Ollama model for grammar                |
-| Ollama Host       | API endpoint (default: localhost:11434) |
-| Streaming         | Enable/disable streaming responses      |
+| Setting              | Description                             |
+| -------------------- | --------------------------------------- |
+| Theme                | Light / Dark / System                   |
+| Translation Model    | Ollama model for translation            |
+| Correction Model     | Ollama model for grammar                |
+| Ollama Host          | API endpoint (default: localhost:11434) |
+| Streaming            | Enable/disable streaming responses      |
+| Default Target       | Default target language for translation |
+| Explanation Language | Language for correction explanations    |
+| Speech Recognition   | Language for voice input                |
+| Microphone           | Select audio input device               |
 
 ## License
 
