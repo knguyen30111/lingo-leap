@@ -31,6 +31,8 @@ interface SettingsState {
   setExplanationLang: (lang: string) => void;
   speechLang: string; // Language for speech recognition
   setSpeechLang: (lang: string) => void;
+  ttsRate: number; // Text-to-speech rate (0.5 to 2.0)
+  setTtsRate: (rate: number) => void;
 
   // Setup
   isSetupComplete: boolean;
@@ -71,6 +73,8 @@ export const useSettingsStore = create<SettingsState>()(
       setExplanationLang: (lang) => set({ explanationLang: lang }),
       speechLang: "en", // Default speech recognition language
       setSpeechLang: (lang) => set({ speechLang: lang }),
+      ttsRate: 1.0, // Default TTS rate
+      setTtsRate: (rate) => set({ ttsRate: Math.round(rate * 100) / 100 }),
 
       // Setup
       isSetupComplete: false,

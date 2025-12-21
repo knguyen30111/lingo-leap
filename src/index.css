@@ -422,17 +422,55 @@ html.no-transition * {
    Speech-to-Text Components
    ============================================ */
 
+/* Button Group Container - unifies icon button + dropdown */
+.button-group {
+  display: inline-flex;
+  align-items: stretch;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px; /* matches Tailwind rounded-md */
+  transition: all var(--transition-fast);
+}
+
+/* First child gets left border radius */
+.button-group > *:first-child {
+  border-top-left-radius: 5px;
+  border-bottom-left-radius: 5px;
+}
+
+/* Last child gets right border radius */
+.button-group > *:last-child {
+  border-top-right-radius: 5px;
+  border-bottom-right-radius: 5px;
+}
+
+.button-group:hover {
+  border-color: var(--border-strong);
+}
+
+.button-group:focus-within {
+  border-color: var(--accent-blue);
+  box-shadow: 0 0 0 2px rgba(49, 57, 251, 0.1);
+}
+
+/* When mic/tts is in active state, style the container */
+.button-group:has(.listening),
+.button-group:has(.speaking) {
+  border-color: var(--accent-blue);
+  box-shadow: 0 0 0 2px rgba(49, 57, 251, 0.15);
+}
+
 /* Mic Button - Idle */
 .mic-button {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
-  padding: 6px;
+  width: 26px;
+  height: 26px;
+  padding: 0;
   background: transparent;
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
+  border: none;
+  border-right: 1px solid var(--border-color);
   color: var(--text-tertiary);
   cursor: pointer;
   transition: all var(--transition-fast);
@@ -442,7 +480,6 @@ html.no-transition * {
 .mic-button:hover {
   background: var(--hover-overlay);
   color: var(--text-secondary);
-  border-color: var(--border-strong);
 }
 
 .mic-button:active {
@@ -459,23 +496,22 @@ html.no-transition * {
   background: var(--accent-blue);
   border-color: var(--accent-blue);
   color: white;
-  box-shadow: 0 2px 8px rgba(49, 57, 251, 0.3);
 }
 
 .mic-button.listening:hover {
   background: var(--accent-purple);
-  border-color: var(--accent-purple);
 }
 
-/* Pulse Ring Animation */
+/* Pulse Ring Animation - adjusted for new container */
 .mic-button.listening::before {
   content: '';
   position: absolute;
-  inset: -4px;
-  border-radius: calc(var(--radius-sm) + 4px);
+  inset: -5px;
+  border-radius: 10px;
   border: 2px solid var(--accent-blue);
   opacity: 0;
   animation: mic-pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  pointer-events: none;
 }
 
 @keyframes mic-pulse {
@@ -495,8 +531,8 @@ html.no-transition * {
 
 /* Mic Icon */
 .mic-button svg {
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
   transition: transform var(--transition-fast);
 }
 
@@ -509,38 +545,74 @@ html.no-transition * {
   50% { transform: scale(1.1); }
 }
 
+/* TTS Button - matches mic-button */
+.tts-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-right: 1px solid var(--border-color);
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.tts-button svg {
+  width: 14px;
+  height: 14px;
+}
+
+.tts-button:hover {
+  background: var(--hover-overlay);
+  color: var(--text-secondary);
+}
+
+.tts-button:active {
+  transform: scale(0.95);
+}
+
+.tts-button.speaking {
+  background: var(--accent-blue);
+  border-color: transparent;
+  color: white;
+}
+
+.tts-button.speaking:hover {
+  background: var(--accent-purple);
+}
+
 /* Speech Language Quick Selector */
 .speech-lang-select {
   appearance: none;
-  padding: 4px 20px 4px 8px;
+  height: 26px;
+  padding: 0 20px 0 8px;
   font-size: 11px;
-  font-weight: 500;
+  font-weight: 600;
+  letter-spacing: 0.02em;
   color: var(--text-secondary);
-  background: var(--glass-bg);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
+  background: transparent;
+  border: none;
   cursor: pointer;
   transition: all var(--transition-fast);
 
   /* Custom dropdown arrow */
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
   background-repeat: no-repeat;
-  background-position: right 4px center;
-  background-size: 12px;
+  background-position: right 6px center;
+  background-size: 10px;
 }
 
 .speech-lang-select:hover {
-  background-color: var(--bg-secondary);
-  border-color: var(--text-tertiary);
+  background-color: var(--hover-overlay);
   color: var(--text-primary);
 }
 
 .speech-lang-select:focus {
   outline: none;
-  border-color: var(--accent-blue);
-  box-shadow: 0 0 0 2px rgba(49, 57, 251, 0.15);
 }
 
 .speech-lang-select option {
@@ -554,10 +626,11 @@ html.no-transition * {
   content: '';
   position: absolute;
   inset: -3px;
-  border-radius: calc(var(--radius-sm) + 3px);
+  border-radius: 10px;
   border: 2px solid var(--warning, #f59e0b);
   opacity: 0.7;
   animation: silence-countdown 2.5s linear forwards;
+  pointer-events: none;
 }
 
 @keyframes silence-countdown {
@@ -1068,4 +1141,213 @@ html.no-transition * {
 .settings-section .btn-primary {
   padding: 10px 16px;
   font-size: 13px;
+}
+
+/* ============================================
+   Speed Selector Component
+   ============================================ */
+.speed-selector {
+  position: relative;
+  display: inline-flex;
+}
+
+.speed-selector-trigger {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 26px;
+  padding: 0 6px 0 8px;
+  min-width: 44px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.speed-selector-trigger:hover:not(.disabled) {
+  background: var(--hover-overlay);
+  color: var(--text-primary);
+}
+
+.speed-selector-trigger.active {
+  background: var(--hover-overlay);
+  color: var(--text-primary);
+}
+
+.speed-selector-trigger.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.speed-selector-value {
+  min-width: 28px;
+  text-align: center;
+  cursor: text;
+}
+
+.speed-selector-value:hover {
+  color: var(--accent-blue);
+}
+
+.speed-selector-input {
+  width: 32px;
+  padding: 0;
+  font-size: 10px;
+  font-weight: 600;
+  text-align: center;
+  color: var(--text-primary);
+  background: transparent;
+  border: none;
+  outline: none;
+}
+
+.speed-selector-input::placeholder {
+  color: var(--text-tertiary);
+}
+
+.speed-selector-chevron {
+  width: 10px;
+  height: 10px;
+  flex-shrink: 0;
+  transition: transform var(--transition-fast);
+}
+
+.speed-selector-chevron.open {
+  transform: rotate(180deg);
+}
+
+/* Dropdown */
+.speed-selector-dropdown {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  right: 0;
+  min-width: 140px;
+  padding: 8px;
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--glass-shadow-elevated), var(--glass-highlight-edge);
+  z-index: 100;
+  animation: speed-dropdown-appear 0.15s ease-out;
+}
+
+@keyframes speed-dropdown-appear {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* Custom input section */
+.speed-selector-custom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 6px;
+}
+
+.speed-selector-custom-label {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.speed-selector-custom-input-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 8px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  transition: all var(--transition-fast);
+}
+
+.speed-selector-custom-input-wrapper:focus-within {
+  border-color: var(--accent-blue);
+  box-shadow: 0 0 0 2px rgba(49, 57, 251, 0.15);
+}
+
+.speed-selector-custom-input {
+  width: 36px;
+  padding: 0;
+  font-size: 11px;
+  font-weight: 500;
+  text-align: right;
+  color: var(--text-primary);
+  background: transparent;
+  border: none;
+  outline: none;
+}
+
+.speed-selector-custom-input::placeholder {
+  color: var(--text-tertiary);
+}
+
+.speed-selector-custom-suffix {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+/* Divider */
+.speed-selector-divider {
+  height: 1px;
+  margin: 6px 0;
+  background: var(--border-color);
+}
+
+/* Presets grid */
+.speed-selector-presets {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+}
+
+.speed-selector-preset {
+  padding: 6px 4px;
+  font-size: 10px;
+  font-weight: 600;
+  text-align: center;
+  color: var(--text-secondary);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.speed-selector-preset:hover {
+  background: var(--bg-tertiary);
+  border-color: var(--text-tertiary);
+  color: var(--text-primary);
+}
+
+.speed-selector-preset.active {
+  background: var(--accent-blue);
+  border-color: var(--accent-blue);
+  color: white;
+}
+
+/* Hint */
+.speed-selector-hint {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border-color);
+  font-size: 9px;
+  color: var(--text-tertiary);
+  text-align: center;
 }

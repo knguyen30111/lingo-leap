@@ -1,14 +1,16 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { writeText } from '@tauri-apps/plugin-clipboard-manager'
 import { useAppStore } from '../stores/appStore'
 import { useSettingsStore } from '../stores/settingsStore'
 import { useCorrection } from '../hooks/useCorrection'
 import { useSpeechToText } from '../hooks/useSpeechToText'
+import { useTextToSpeech } from '../hooks/useTextToSpeech'
 import { LanguageSelector } from './LanguageSelector'
 import { CorrectionTabs } from './CorrectionTabs'
 import { MicButton } from './MicButton'
 import { SpeechPreview } from './SpeechPreview'
 import { ClearInputButton } from './ClearInputButton'
+import { SpeedSelector } from './SpeedSelector'
 
 const SPEECH_LANGS = [
   { code: 'en', label: 'EN' },
@@ -20,9 +22,27 @@ const SPEECH_LANGS = [
 
 export function CorrectionView() {
   const { inputText, setInputText, outputText, setOutputText, isLoading, error, setError, changes, setChanges, isChangesLoading } = useAppStore()
-  const { speechLang, setSpeechLang } = useSettingsStore()
+  const { speechLang, setSpeechLang, ttsRate, setTtsRate } = useSettingsStore()
   const { correct } = useCorrection()
   const [copied, setCopied] = useState(false)
+
+  // Text-to-speech for corrected output
+  const { isSpeaking, isSupported: isTTSSupported, speak, stop } = useTextToSpeech({ rate: ttsRate })
+
+  const handleSpeak = () => {
+    if (!outputText) return
+    if (isSpeaking) {
+      stop()
+    } else {
+      // Use speechLang (input language) for corrected text TTS
+      speak(outputText, speechLang)
+    }
+  }
+
+  // Stop TTS when output changes (regenerate, new correction) or language changes
+  useEffect(() => {
+    stop()
+  }, [outputText, speechLang, stop])
 
   // Callback to append speech text to input
   const handleTextReady = useCallback((text: string) => {
@@ -98,33 +118,35 @@ export function CorrectionView() {
           />
           <div className="px-3 py-1.5 border-t border-[var(--border-color)] flex items-center justify-between">
             {/* Left: Mic button with language selector */}
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center">
               <div className="relative">
-                <MicButton
-                  isListening={isListening}
-                  isSupported={isSupported}
-                  silenceDetected={silenceDetected}
-                  onClick={toggleListening}
-                  disabled={isLoading}
-                />
+                <div className="button-group">
+                  <MicButton
+                    isListening={isListening}
+                    isSupported={isSupported}
+                    silenceDetected={silenceDetected}
+                    onClick={toggleListening}
+                    disabled={isLoading}
+                  />
+                  {isSupported && (
+                    <select
+                      value={speechLang}
+                      onChange={(e) => setSpeechLang(e.target.value)}
+                      className="speech-lang-select"
+                      title="Speech language"
+                    >
+                      {SPEECH_LANGS.map(({ code, label }) => (
+                        <option key={code} value={code}>{label}</option>
+                      ))}
+                    </select>
+                  )}
+                </div>
                 <SpeechPreview
                   isVisible={isListening}
                   transcript={transcript}
                   interimTranscript={interimTranscript}
                 />
               </div>
-              {isSupported && (
-                <select
-                  value={speechLang}
-                  onChange={(e) => setSpeechLang(e.target.value)}
-                  className="speech-lang-select"
-                  title="Speech language"
-                >
-                  {SPEECH_LANGS.map(({ code, label }) => (
-                    <option key={code} value={code}>{label}</option>
-                  ))}
-                </select>
-              )}
             </div>
             {/* Right: Char count */}
             <span className="text-[10px] text-[var(--text-tertiary)]">
@@ -134,9 +156,9 @@ export function CorrectionView() {
         </div>
 
         {/* Right: Output + Changes (2/3 - Two Stacked Rectangles) */}
-        <div className="col-span-2 flex flex-col gap-4 overflow-hidden">
+        <div className="col-span-2 flex flex-col gap-4">
           {/* Top Right: Corrected Output */}
-          <div className="flex-1 flex flex-col glass-card overflow-hidden min-h-0">
+          <div className="flex-1 flex flex-col glass-card min-h-0">
             <div className="flex-1 p-4 overflow-auto">
               {isLoading ? (
                 <div className="space-y-3 animate-pulse">
@@ -178,6 +200,31 @@ export function CorrectionView() {
                     <span className="text-xs">Done</span>
                   </div>
                   <div className="flex items-center gap-2">
+                    {isTTSSupported && (
+                      <div className="button-group">
+                        <button
+                          onClick={handleSpeak}
+                          className={`tts-button ${isSpeaking ? 'speaking' : ''}`}
+                          title={isSpeaking ? 'Stop speaking' : 'Speak text'}
+                        >
+                          {isSpeaking ? (
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <rect x="6" y="6" width="12" height="12" rx="1" />
+                            </svg>
+                          ) : (
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M11 5L6 9H2v6h4l5 4V5z" />
+                              <path d="M15.54 8.46a5 5 0 010 7.07" />
+                              <path d="M19.07 4.93a10 10 0 010 14.14" />
+                            </svg>
+                          )}
+                        </button>
+                        <SpeedSelector
+                          value={ttsRate}
+                          onChange={setTtsRate}
+                        />
+                      </div>
+                    )}
                     <button
                       onClick={handleRegenerate}
                       className="flex items-center gap-1.5 px-3 py-1 text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--glass-bg)] border border-[var(--border-color)] rounded-md transition-colors"

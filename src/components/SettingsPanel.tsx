@@ -69,6 +69,8 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
     setExplanationLang,
     speechLang,
     setSpeechLang,
+    ttsRate,
+    setTtsRate,
     useStreaming,
     setUseStreaming,
   } = useSettingsStore();
@@ -306,6 +308,26 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                   </option>
                 ))}
               </select>
+            </SettingRow>
+
+            <SettingRow
+              label="Speech Speed"
+              description="Text-to-speech rate"
+            >
+              <div className="flex items-center gap-2 w-full">
+                <input
+                  type="range"
+                  min="0.5"
+                  max="2.0"
+                  step="0.05"
+                  value={ttsRate}
+                  onChange={(e) => setTtsRate(parseFloat(e.target.value))}
+                  className="flex-1 h-1.5 bg-[var(--glass-bg)] rounded-lg appearance-none cursor-pointer accent-[var(--accent-blue)]"
+                />
+                <span className="text-xs text-[var(--text-secondary)] w-10 text-right">
+                  {ttsRate.toFixed(2)}x
+                </span>
+              </div>
             </SettingRow>
           </SettingsSection>
 
