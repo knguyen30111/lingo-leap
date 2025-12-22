@@ -85,6 +85,7 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeech
   const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastSpeechTimeRef = useRef<number>(0)
   const accumulatedTextRef = useRef('')
+  const interimTranscriptRef = useRef('')
 
   // Check browser support
   const isSupported = typeof window !== 'undefined' &&
@@ -161,11 +162,13 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeech
         onTextReady?.(confirmedText.trim())
         // Clear transcript for next segment (text is already in input)
         accumulatedTextRef.current = ''
+        interimTranscriptRef.current = ''
         setTranscript('')
         setInterimTranscript('')
       }
 
       if (interim) {
+        interimTranscriptRef.current = interim
         setInterimTranscript(interim)
       }
 
@@ -196,9 +199,10 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeech
       clearSilenceTimer()
       setIsListening(false)
 
-      // Include any pending interim text
-      if (interimTranscript) {
-        onTextReady?.(interimTranscript.trim())
+      // Include any pending interim text (use ref to avoid stale closure)
+      if (interimTranscriptRef.current) {
+        onTextReady?.(interimTranscriptRef.current.trim())
+        interimTranscriptRef.current = ''
       }
 
       if (!isStoppingRef.current) {
@@ -207,7 +211,7 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeech
     }
 
     return recognition
-  }, [isSupported, lang, getSpeechLang, onTextReady, onEnd, onError, startSilenceTimer, clearSilenceTimer, interimTranscript])
+  }, [isSupported, lang, getSpeechLang, onTextReady, onEnd, onError, startSilenceTimer, clearSilenceTimer])
 
   // Start listening
   const startListening = useCallback(() => {
@@ -215,6 +219,7 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeech
 
     // Reset state
     accumulatedTextRef.current = ''
+    interimTranscriptRef.current = ''
     setTranscript('')
     setInterimTranscript('')
     setSilenceDetected(false)
@@ -252,6 +257,7 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeech
   // Clear transcript
   const clearTranscript = useCallback(() => {
     accumulatedTextRef.current = ''
+    interimTranscriptRef.current = ''
     setTranscript('')
     setInterimTranscript('')
   }, [])
