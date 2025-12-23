@@ -69,9 +69,10 @@ export interface UseSpeechToTextReturn {
 
 // Check if running in Tauri dev mode (no Info.plist = will crash on speech recognition)
 function isDevMode(): boolean {
-  // In dev mode, the app runs from localhost
-  // In production, it runs from tauri://localhost or file://
-  return window.location.protocol === 'http:' || window.location.hostname === 'localhost'
+  // In dev mode, the app runs from http://localhost
+  // In production, it runs from tauri://localhost
+  // Check protocol - only http: is dev mode, tauri: is production
+  return window.location.protocol === 'http:'
 }
 
 // Check if microphone permission is granted (non-crashing check)
