@@ -32,6 +32,7 @@
   "bundle": {
     "active": true,
     "targets": ["dmg", "app"],
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -45,6 +46,14 @@
       "frameworks": [],
       "providerShortName": null,
       "signingIdentity": null
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDlCQjkzRjZBREZGMjQ3QzgKUldUSVIvTGZhais1bTZzMHd1eGxHVjJlK1dXekswTFdySVBvUVhHaTBZeGQ2aHcrZlpmN3cvemkK",
+      "endpoints": [
+        "https://github.com/knguyen30111/lingo-leap/releases/latest/download/latest.json"
+      ]
     }
   }
 }

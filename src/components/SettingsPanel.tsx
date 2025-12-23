@@ -2,6 +2,8 @@ import { useState } from "react";
 import { useSettingsStore, ThemeMode } from "../stores/settingsStore";
 import { useOllama } from "../hooks/useOllama";
 import { useAudioDevices } from "../hooks/useAudioDevices";
+import { useAppUpdater } from "../hooks/useAppUpdater";
+import { open } from "@tauri-apps/plugin-shell";
 
 interface SettingsPanelProps {
   onClose: () => void;
@@ -73,7 +75,20 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
     setTtsRate,
     useStreaming,
     setUseStreaming,
+    autoCheckUpdates,
+    setAutoCheckUpdates,
   } = useSettingsStore();
+
+  const {
+    checking,
+    downloading,
+    installing,
+    progressPercent,
+    update,
+    error: updateError,
+    checkForUpdate,
+    downloadAndInstall,
+  } = useAppUpdater();
 
   const { models } = useOllama();
   const [localHost, setLocalHost] = useState(ollamaHost);
@@ -358,6 +373,91 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                   ))
                 )}
               </select>
+            </SettingRow>
+          </SettingsSection>
+
+          {/* Updates Section */}
+          <SettingsSection
+            icon={
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+              </svg>
+            }
+            title="Updates"
+          >
+            <SettingRow label="Current Version">
+              <span className="text-sm text-[var(--text-secondary)]">v0.1.0</span>
+            </SettingRow>
+
+            <SettingRow label="Check for Updates">
+              <div className="flex gap-2">
+                <button
+                  onClick={() => checkForUpdate(false)}
+                  disabled={checking || downloading || installing}
+                  className="btn-primary text-xs px-3"
+                >
+                  {checking ? "Checking..." : "Check Now"}
+                </button>
+                <button
+                  onClick={() => open("https://github.com/knguyen30111/lingo-leap/releases")}
+                  className="btn-secondary text-xs px-3"
+                  title="Open releases page"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                  </svg>
+                </button>
+              </div>
+            </SettingRow>
+
+            {update && (
+              <div className="mt-2 p-3 rounded-lg bg-[var(--accent-green)]/10 border border-[var(--accent-green)]/20">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-[var(--accent-green)]">
+                      v{update.version} available
+                    </p>
+                    {update.body && (
+                      <p className="text-xs text-[var(--text-secondary)] mt-1 line-clamp-2">
+                        {update.body}
+                      </p>
+                    )}
+                  </div>
+                  <button
+                    onClick={downloadAndInstall}
+                    disabled={downloading || installing}
+                    className="btn-primary text-xs px-3 ml-2"
+                  >
+                    {downloading
+                      ? `${progressPercent}%`
+                      : installing
+                      ? "Installing..."
+                      : "Install"}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {updateError && (
+              <div className="mt-2 p-3 rounded-lg bg-[var(--accent-red)]/10 border border-[var(--accent-red)]/20">
+                <p className="text-xs text-[var(--accent-red)]">{updateError}</p>
+                <p className="text-xs text-[var(--text-tertiary)] mt-1">
+                  Try the releases page to download manually.
+                </p>
+              </div>
+            )}
+
+            <SettingRow
+              label="Auto-check on startup"
+              description="Check for updates when app opens"
+              inline
+            >
+              <button
+                onClick={() => setAutoCheckUpdates(!autoCheckUpdates)}
+                className={`toggle-switch ${autoCheckUpdates ? "active" : ""}`}
+              >
+                <span className="toggle-switch-knob" />
+              </button>
             </SettingRow>
           </SettingsSection>
         </div>

@@ -41,6 +41,10 @@ interface SettingsState {
   setOllamaInstalled: (installed: boolean) => void;
   modelsInstalled: boolean;
   setModelsInstalled: (installed: boolean) => void;
+
+  // Updates
+  autoCheckUpdates: boolean;
+  setAutoCheckUpdates: (value: boolean) => void;
 }
 
 export const useSettingsStore = create<SettingsState>()(
@@ -83,6 +87,10 @@ export const useSettingsStore = create<SettingsState>()(
       setOllamaInstalled: (installed) => set({ ollamaInstalled: installed }),
       modelsInstalled: false,
       setModelsInstalled: (installed) => set({ modelsInstalled: installed }),
+
+      // Updates
+      autoCheckUpdates: true,
+      setAutoCheckUpdates: (value) => set({ autoCheckUpdates: value }),
     }),
     {
       name: "tran-app-settings",
