@@ -34,6 +34,10 @@ interface SettingsState {
   ttsRate: number; // Text-to-speech rate (0.5 to 2.0)
   setTtsRate: (rate: number) => void;
 
+  // Voice Isolation
+  voiceIsolationPromptDismissed: boolean; // User dismissed the Voice Isolation prompt
+  setVoiceIsolationPromptDismissed: (dismissed: boolean) => void;
+
   // Setup
   isSetupComplete: boolean;
   setSetupComplete: (complete: boolean) => void;
@@ -75,6 +79,10 @@ export const useSettingsStore = create<SettingsState>()(
       setSpeechLang: (lang) => set({ speechLang: lang }),
       ttsRate: 1.0, // Default TTS rate
       setTtsRate: (rate) => set({ ttsRate: Math.round(rate * 100) / 100 }),
+
+      // Voice Isolation
+      voiceIsolationPromptDismissed: false,
+      setVoiceIsolationPromptDismissed: (dismissed) => set({ voiceIsolationPromptDismissed: dismissed }),
 
       // Setup
       isSetupComplete: false,

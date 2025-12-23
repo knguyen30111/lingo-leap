@@ -1351,3 +1351,144 @@ html.no-transition * {
   color: var(--text-tertiary);
   text-align: center;
 }
+
+/* ============================================
+   Voice Isolation Prompt
+   ============================================ */
+.voice-isolation-prompt {
+  position: absolute;
+  bottom: calc(100% + 12px);
+  left: 0;
+  min-width: 280px;
+  max-width: 320px;
+  padding: 14px 16px;
+
+  /* Liquid Glass - elevated style */
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--glass-shadow-elevated), var(--glass-highlight-edge);
+
+  /* Animation */
+  animation: voice-isolation-appear 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  z-index: 100;
+}
+
+@keyframes voice-isolation-appear {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* Pointer/Arrow */
+.voice-isolation-prompt::after {
+  content: '';
+  position: absolute;
+  bottom: -6px;
+  left: 20px;
+  width: 12px;
+  height: 12px;
+  background: var(--glass-bg);
+  border-right: 1px solid var(--glass-border);
+  border-bottom: 1px solid var(--glass-border);
+  transform: rotate(45deg);
+  backdrop-filter: blur(var(--glass-blur));
+}
+
+.voice-isolation-prompt-content {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.voice-isolation-prompt-icon {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
+  border-radius: 10px;
+  color: white;
+}
+
+.voice-isolation-prompt-icon svg {
+  width: 20px;
+  height: 20px;
+}
+
+.voice-isolation-prompt-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+}
+
+.voice-isolation-prompt-text strong {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
+}
+
+.voice-isolation-prompt-text span {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.voice-isolation-prompt-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.voice-isolation-btn-dismiss {
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.voice-isolation-btn-dismiss:hover {
+  background: var(--hover-overlay);
+  border-color: var(--text-tertiary);
+  color: var(--text-primary);
+}
+
+.voice-isolation-btn-enable {
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  color: white;
+  background: var(--accent-blue);
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  box-shadow: 0 2px 6px rgba(49, 57, 251, 0.25);
+}
+
+.voice-isolation-btn-enable:hover {
+  background: var(--accent-purple);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 10px rgba(49, 57, 251, 0.35);
+}
+
+.voice-isolation-btn-enable:active {
+  transform: translateY(0);
+}

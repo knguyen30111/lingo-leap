@@ -16,6 +16,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             audio_session::activate_voice_session,
             audio_session::deactivate_voice_session,
+            audio_session::get_mic_mode,
+            audio_session::show_mic_mode_picker,
+            audio_session::is_voice_isolation_supported,
         ])
         .setup(|app| {
             if cfg!(debug_assertions) {

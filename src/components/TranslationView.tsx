@@ -11,6 +11,7 @@ import { MicButton } from './MicButton'
 import { SpeechPreview } from './SpeechPreview'
 import { ClearInputButton } from './ClearInputButton'
 import { SpeedSelector } from './SpeedSelector'
+import { VoiceIsolationPrompt } from './VoiceIsolationPrompt'
 
 const SPEECH_LANGS = [
   { code: 'en', label: 'EN' },
@@ -28,9 +29,10 @@ export function TranslationView() {
     sourceLang, setSourceLang,
     targetLang, setTargetLang
   } = useAppStore()
-  const { speechLang, setSpeechLang, ttsRate, setTtsRate } = useSettingsStore()
+  const { speechLang, setSpeechLang, ttsRate, setTtsRate, voiceIsolationPromptDismissed } = useSettingsStore()
   const { translate } = useTranslation()
   const [copied, setCopied] = useState(false)
+  const [showVoiceIsolationPrompt, setShowVoiceIsolationPrompt] = useState(false)
 
   // Text-to-speech for output
   const { isSpeaking, isSupported: isTTSSupported, speak, stop } = useTextToSpeech({ rate: ttsRate })
@@ -67,6 +69,13 @@ export function TranslationView() {
     lang: speechLang,
     onTextReady: handleTextReady,
   })
+
+  // Show Voice Isolation prompt when user starts listening for the first time
+  useEffect(() => {
+    if (isListening && !voiceIsolationPromptDismissed) {
+      setShowVoiceIsolationPrompt(true)
+    }
+  }, [isListening, voiceIsolationPromptDismissed])
 
   const handleCopy = async () => {
     if (!outputText) return
@@ -155,6 +164,10 @@ export function TranslationView() {
                   isVisible={isListening}
                   transcript={transcript}
                   interimTranscript={interimTranscript}
+                />
+                <VoiceIsolationPrompt
+                  isVisible={showVoiceIsolationPrompt}
+                  onDismiss={() => setShowVoiceIsolationPrompt(false)}
                 />
               </div>
             </div>

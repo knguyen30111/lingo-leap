@@ -109,6 +109,66 @@ pub fn deactivate_voice_session() -> Result<(), String> {
     }
 }
 
+/// Check if Voice Isolation mic mode is currently enabled
+/// Returns: "voiceIsolation", "wideSpectrum", "standard", or "unknown"
+#[cfg(target_os = "macos")]
+#[tauri::command]
+pub fn get_mic_mode() -> Result<String, String> {
+    unsafe {
+        let av_capture_device_class = class!(AVCaptureDevice);
+
+        // Get preferredMicrophoneMode (returns NSInteger/enum)
+        let mode: i64 = msg_send![av_capture_device_class, preferredMicrophoneMode];
+
+        // AVCaptureDevice.MicrophoneMode values:
+        // 0 = standard, 1 = wideSpectrum, 2 = voiceIsolation
+        let mode_str = match mode {
+            0 => "standard",
+            1 => "wideSpectrum",
+            2 => "voiceIsolation",
+            _ => "unknown",
+        };
+
+        log::info!("Current mic mode: {} (raw: {})", mode_str, mode);
+        Ok(mode_str.to_string())
+    }
+}
+
+/// Show the system microphone mode picker UI
+/// User can select Standard, Voice Isolation, or Wide Spectrum
+#[cfg(target_os = "macos")]
+#[tauri::command]
+pub fn show_mic_mode_picker() -> Result<(), String> {
+    unsafe {
+        let av_capture_device_class = class!(AVCaptureDevice);
+
+        // AVCaptureDevice.SystemUserInterface.microphoneModes = 1
+        let _: () = msg_send![av_capture_device_class, showSystemUserInterface: 1i64];
+
+        log::info!("Opened system mic mode picker");
+        Ok(())
+    }
+}
+
+/// Check if Voice Isolation is supported on this device
+/// Requires macOS 12+ and compatible hardware
+#[cfg(target_os = "macos")]
+#[tauri::command]
+pub fn is_voice_isolation_supported() -> Result<bool, String> {
+    unsafe {
+        let av_capture_device_class = class!(AVCaptureDevice);
+
+        // Check if the class responds to preferredMicrophoneMode
+        // If it doesn't, Voice Isolation is not supported
+        let responds: bool = msg_send![
+            av_capture_device_class,
+            respondsToSelector: sel!(preferredMicrophoneMode)
+        ];
+
+        Ok(responds)
+    }
+}
+
 // Stub implementations for non-macOS platforms
 #[cfg(not(target_os = "macos"))]
 #[tauri::command]
@@ -122,4 +182,23 @@ pub fn activate_voice_session() -> Result<(), String> {
 pub fn deactivate_voice_session() -> Result<(), String> {
     log::info!("Audio session management not available on this platform");
     Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+#[tauri::command]
+pub fn get_mic_mode() -> Result<String, String> {
+    Ok("unknown".to_string())
+}
+
+#[cfg(not(target_os = "macos"))]
+#[tauri::command]
+pub fn show_mic_mode_picker() -> Result<(), String> {
+    log::info!("Mic mode picker not available on this platform");
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+#[tauri::command]
+pub fn is_voice_isolation_supported() -> Result<bool, String> {
+    Ok(false)
 }
