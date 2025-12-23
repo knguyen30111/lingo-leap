@@ -66,6 +66,38 @@ export interface UseSpeechToTextReturn {
   clearTranscript: () => void
 }
 
+// Check if running in Tauri dev mode (no Info.plist = will crash on speech recognition)
+function isDevMode(): boolean {
+  // In dev mode, the app runs from localhost
+  // In production, it runs from tauri://localhost or file://
+  return window.location.protocol === 'http:' || window.location.hostname === 'localhost'
+}
+
+// Check if microphone permission is granted (non-crashing check)
+async function checkMicrophonePermission(): Promise<boolean> {
+  // In dev mode, speech recognition will crash due to missing Info.plist
+  // Only the built app has the plist merged
+  if (isDevMode()) {
+    console.warn('[Speech] Speech recognition disabled in dev mode - build the app to test')
+    return false
+  }
+
+  try {
+    // First check if we can query permissions
+    if (navigator.permissions) {
+      const result = await navigator.permissions.query({ name: 'microphone' as PermissionName })
+      if (result.state === 'denied') return false
+    }
+    // Try to get microphone access - this won't crash WKWebView
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    // Stop all tracks immediately
+    stream.getTracks().forEach(track => track.stop())
+    return true
+  } catch {
+    return false
+  }
+}
+
 export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeechToTextReturn {
   const {
     lang = 'en',
@@ -79,6 +111,7 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeech
   const [interimTranscript, setInterimTranscript] = useState('')
   const [silenceDetected, setSilenceDetected] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [micPermissionGranted, setMicPermissionGranted] = useState<boolean | null>(null)
 
   const recognitionRef = useRef<SpeechRecognition | null>(null)
   const isStoppingRef = useRef(false)
@@ -86,9 +119,17 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeech
   const lastSpeechTimeRef = useRef<number>(0)
   const accumulatedTextRef = useRef('')
 
-  // Check browser support
-  const isSupported = typeof window !== 'undefined' &&
+  // Check browser support - API must exist AND microphone permission must be granted
+  const hasAPI = typeof window !== 'undefined' &&
     ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)
+  const isSupported = hasAPI && micPermissionGranted === true
+
+  // Check microphone permission on mount
+  useEffect(() => {
+    if (hasAPI && micPermissionGranted === null) {
+      checkMicrophonePermission().then(setMicPermissionGranted)
+    }
+  }, [hasAPI, micPermissionGranted])
 
   // Get speech API language code
   const getSpeechLang = useCallback((appLang: string): string => {
@@ -210,8 +251,8 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeech
   }, [isSupported, lang, getSpeechLang, onTextReady, onEnd, onError, startSilenceTimer, clearSilenceTimer, interimTranscript])
 
   // Start listening
-  const startListening = useCallback(() => {
-    if (!isSupported || isListening) return
+  const startListening = useCallback(async () => {
+    if (!hasAPI || isListening) return
 
     // Reset state
     accumulatedTextRef.current = ''
@@ -220,16 +261,30 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeech
     setSilenceDetected(false)
     setError(null)
 
+    // Request microphone permission first (prevents WKWebView crash)
+    if (!micPermissionGranted) {
+      const granted = await checkMicrophonePermission()
+      setMicPermissionGranted(granted)
+      if (!granted) {
+        const errorMsg = 'Microphone access denied'
+        setError(errorMsg)
+        onError?.(errorMsg)
+        return
+      }
+    }
+
     const recognition = createRecognition()
     if (recognition) {
       recognitionRef.current = recognition
       try {
         recognition.start()
-      } catch {
-        setError('Failed to start speech recognition')
+      } catch (e) {
+        const errorMsg = e instanceof Error ? e.message : 'Failed to start speech recognition'
+        setError(errorMsg)
+        onError?.(errorMsg)
       }
     }
-  }, [isSupported, isListening, createRecognition])
+  }, [hasAPI, isListening, micPermissionGranted, createRecognition, onError])
 
   // Stop listening
   const stopListening = useCallback(() => {
@@ -241,11 +296,11 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeech
   }, [isListening, clearSilenceTimer])
 
   // Toggle listening
-  const toggleListening = useCallback(() => {
+  const toggleListening = useCallback(async () => {
     if (isListening) {
       stopListening()
     } else {
-      startListening()
+      await startListening()
     }
   }, [isListening, startListening, stopListening])
 
