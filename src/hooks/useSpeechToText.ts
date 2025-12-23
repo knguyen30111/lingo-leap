@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
+import { invoke } from '@tauri-apps/api/core'
 
 // Web Speech API types (not in standard lib)
 interface SpeechRecognitionEvent extends Event {
@@ -242,6 +243,9 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeech
         onTextReady?.(interimTranscript.trim())
       }
 
+      // Deactivate audio session when recognition ends (e.g., silence timeout)
+      invoke('deactivate_voice_session').catch(() => {})
+
       if (!isStoppingRef.current) {
         onEnd?.()
       }
@@ -273,12 +277,23 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeech
       }
     }
 
+    // Activate native audio session for voice recording
+    // This properly configures macOS audio routing
+    try {
+      await invoke('activate_voice_session')
+    } catch (e) {
+      console.warn('Failed to activate voice session:', e)
+      // Continue anyway - speech recognition may still work
+    }
+
     const recognition = createRecognition()
     if (recognition) {
       recognitionRef.current = recognition
       try {
         recognition.start()
       } catch (e) {
+        // Deactivate session if recognition fails to start
+        invoke('deactivate_voice_session').catch(() => {})
         const errorMsg = e instanceof Error ? e.message : 'Failed to start speech recognition'
         setError(errorMsg)
         onError?.(errorMsg)
@@ -293,6 +308,11 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeech
       isStoppingRef.current = true
       recognitionRef.current.stop()
     }
+    // Deactivate native audio session to restore system audio quality
+    // The notifyOthersOnDeactivation flag tells macOS to restore previous audio routes
+    invoke('deactivate_voice_session').catch((e) => {
+      console.warn('Failed to deactivate voice session:', e)
+    })
   }, [isListening, clearSilenceTimer])
 
   // Toggle listening
@@ -318,6 +338,8 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeech
       if (recognitionRef.current) {
         recognitionRef.current.abort()
       }
+      // Ensure audio session is deactivated on cleanup
+      invoke('deactivate_voice_session').catch(() => {})
     }
   }, [clearSilenceTimer])
 
