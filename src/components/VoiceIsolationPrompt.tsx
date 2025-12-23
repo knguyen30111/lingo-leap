@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { useSettingsStore } from '../stores/settingsStore'
 
@@ -7,10 +7,15 @@ interface VoiceIsolationPromptProps {
   onDismiss: () => void
 }
 
+// Delay before showing prompt (let user focus on speech first)
+const PROMPT_DELAY_MS = 2000
+
 export function VoiceIsolationPrompt({ isVisible, onDismiss }: VoiceIsolationPromptProps) {
   const [micMode, setMicMode] = useState<string>('unknown')
   const [isSupported, setIsSupported] = useState(false)
+  const [showDelayed, setShowDelayed] = useState(false)
   const { voiceIsolationPromptDismissed, setVoiceIsolationPromptDismissed } = useSettingsStore()
+  const promptRef = useRef<HTMLDivElement>(null)
 
   // Check Voice Isolation support and current mode
   useEffect(() => {
@@ -33,8 +38,37 @@ export function VoiceIsolationPrompt({ isVisible, onDismiss }: VoiceIsolationPro
     }
   }, [isVisible])
 
+  // Delay showing prompt to avoid conflict with SpeechPreview
+  useEffect(() => {
+    if (isVisible && !voiceIsolationPromptDismissed) {
+      const timer = setTimeout(() => {
+        setShowDelayed(true)
+      }, PROMPT_DELAY_MS)
+      return () => clearTimeout(timer)
+    } else {
+      setShowDelayed(false)
+    }
+  }, [isVisible, voiceIsolationPromptDismissed])
+
+  // Handle Escape key to dismiss
+  const handleKeyDown = useCallback((e: KeyboardEvent) => {
+    if (e.key === 'Escape' && showDelayed) {
+      setVoiceIsolationPromptDismissed(true)
+      onDismiss()
+    }
+  }, [showDelayed, setVoiceIsolationPromptDismissed, onDismiss])
+
+  useEffect(() => {
+    if (showDelayed) {
+      document.addEventListener('keydown', handleKeyDown)
+      // Focus the prompt for accessibility
+      promptRef.current?.focus()
+      return () => document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [showDelayed, handleKeyDown])
+
   // Don't show if already dismissed, not supported, or already enabled
-  if (!isVisible || voiceIsolationPromptDismissed || !isSupported || micMode === 'voiceIsolation') {
+  if (!showDelayed || !isSupported || micMode === 'voiceIsolation') {
     return null
   }
 
@@ -54,7 +88,14 @@ export function VoiceIsolationPrompt({ isVisible, onDismiss }: VoiceIsolationPro
   }
 
   return (
-    <div className="voice-isolation-prompt">
+    <div
+      ref={promptRef}
+      className="voice-isolation-prompt"
+      role="alertdialog"
+      aria-labelledby="voice-isolation-title"
+      aria-describedby="voice-isolation-desc"
+      tabIndex={-1}
+    >
       <div className="voice-isolation-prompt-content">
         <div className="voice-isolation-prompt-icon">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -65,13 +106,13 @@ export function VoiceIsolationPrompt({ isVisible, onDismiss }: VoiceIsolationPro
           </svg>
         </div>
         <div className="voice-isolation-prompt-text">
-          <strong>Noisy environment?</strong>
-          <span>Enable Voice Isolation for clearer speech recognition</span>
+          <strong id="voice-isolation-title">In a noisy place?</strong>
+          <span id="voice-isolation-desc">Enable Voice Isolation to filter background noise</span>
         </div>
       </div>
       <div className="voice-isolation-prompt-actions">
         <button onClick={handleDismiss} className="voice-isolation-btn-dismiss">
-          Dismiss
+          Not now
         </button>
         <button onClick={handleEnable} className="voice-isolation-btn-enable">
           Enable

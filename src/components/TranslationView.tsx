@@ -12,6 +12,7 @@ import { SpeechPreview } from './SpeechPreview'
 import { ClearInputButton } from './ClearInputButton'
 import { SpeedSelector } from './SpeedSelector'
 import { VoiceIsolationPrompt } from './VoiceIsolationPrompt'
+import { MicModeIndicator } from './MicModeIndicator'
 
 const SPEECH_LANGS = [
   { code: 'en', label: 'EN' },
@@ -136,8 +137,8 @@ export function TranslationView() {
             "
           />
           <div className="px-3 py-1.5 border-t border-[var(--border-color)] flex items-center justify-between">
-            {/* Left: Mic button with language selector */}
-            <div className="flex items-center">
+            {/* Left: Mic button with language selector and mode indicator */}
+            <div className="flex items-center gap-2">
               <div className="relative">
                 <div className="button-group">
                   <MicButton
@@ -170,6 +171,7 @@ export function TranslationView() {
                   onDismiss={() => setShowVoiceIsolationPrompt(false)}
                 />
               </div>
+              <MicModeIndicator isListening={isListening} />
             </div>
             {/* Right: Char count */}
             <span className="text-[10px] text-[var(--text-tertiary)]">

@@ -1492,3 +1492,46 @@ html.no-transition * {
 .voice-isolation-btn-enable:active {
   transform: translateY(0);
 }
+
+/* ============================================
+   Mic Mode Indicator
+   ============================================ */
+.mic-mode-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px 4px 8px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--mode-color, var(--text-tertiary));
+  transition: all var(--transition-fast);
+}
+
+.mic-mode-indicator:hover {
+  border-color: var(--text-tertiary);
+}
+
+.mic-mode-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--mode-color, var(--text-tertiary));
+  transition: all var(--transition-fast);
+}
+
+.mic-mode-dot.active {
+  box-shadow: 0 0 6px var(--success);
+}
+
+.mic-mode-label {
+  letter-spacing: 0.01em;
+}
+
+.mic-mode-check {
+  width: 12px;
+  height: 12px;
+  color: var(--success);
+}
