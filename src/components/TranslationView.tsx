@@ -91,6 +91,14 @@ export function TranslationView() {
     setError(null)
   }
 
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // Cmd+Enter (Mac) or Ctrl+Enter (Windows/Linux) to translate
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+      e.preventDefault()
+      handleRegenerate()
+    }
+  }
+
   return (
     <div className="flex flex-col h-full">
       {/* Main Layout - Input | Swap | Output */}
@@ -118,6 +126,7 @@ export function TranslationView() {
           <textarea
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
+            onKeyDown={handleKeyDown}
             placeholder="Enter text to translate..."
             className="
               flex-1 p-4 pr-10 bg-transparent resize-none
@@ -297,6 +306,7 @@ export function TranslationView() {
                   onClick={handleRegenerate}
                   disabled={!inputText.trim()}
                   className="flex items-center gap-1.5 px-3 py-1 text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--glass-bg)] border border-[var(--border-color)] rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  title="Translate (⌘+Enter)"
                 >
                   Translate
                 </button>

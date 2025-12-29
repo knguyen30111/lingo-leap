@@ -87,6 +87,14 @@ export function CorrectionView() {
     setChanges([])
   }
 
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // Cmd+Enter (Mac) or Ctrl+Enter (Windows/Linux) to generate
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+      e.preventDefault()
+      handleRegenerate()
+    }
+  }
+
   const hasChanges = changes.length > 0
 
   return (
@@ -108,6 +116,7 @@ export function CorrectionView() {
           <textarea
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
+            onKeyDown={handleKeyDown}
             placeholder="Enter text to correct..."
             className="
               flex-1 p-4 pr-10 bg-transparent resize-none
@@ -269,6 +278,7 @@ export function CorrectionView() {
                     onClick={handleRegenerate}
                     disabled={!inputText.trim()}
                     className="flex items-center gap-1.5 px-3 py-1 text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--glass-bg)] border border-[var(--border-color)] rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    title="Generate (⌘+Enter)"
                   >
                     Generate
                   </button>
