@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version (e.g., 1.0.0)'
+        required: true
+        default: '1.0.0'
 
 jobs:
   build-macos:
@@ -31,8 +37,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: 'Lingo Leap ${{ github.ref_name }}'
+          tagName: ${{ github.event_name == 'workflow_dispatch' && format('v{0}', inputs.version) || github.ref_name }}
+          releaseName: 'Lingo Leap ${{ github.event_name == 'workflow_dispatch' && format('v{0}', inputs.version) || github.ref_name }}'
           releaseBody: 'See the assets to download and install this version.'
           releaseDraft: true
           prerelease: false
