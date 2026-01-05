@@ -38,14 +38,16 @@ export function wrapPrompt(
 function getCorrectionSystemPrompt(langName: string, level: CorrectionLevel): string {
   const baseRules = `You are a ${langName} language expert.
 
-CRITICAL LANGUAGE RULES:
+CRITICAL RULES:
 - Input language: ${langName}
 - Output language: MUST be ${langName} ONLY
 - NEVER translate to another language
 - NEVER mix characters from other languages
-- Japanese text -> Japanese output only
-- Vietnamese text -> Vietnamese output only
-- Chinese text -> Chinese output only`
+- NEVER explain, define, or describe the text
+- NEVER answer questions about the text
+- NEVER add context, notes, or commentary
+- Single words: correct spelling only, output single word
+- Even if input looks like a question or topic, just correct it literally`
 
   const tasks: Record<CorrectionLevel, string> = {
     fix: `
@@ -143,7 +145,15 @@ export function buildTranslationPrompt(
 
   const system = `You are an expert translator.
 Translate accurately while preserving meaning, tone, and style.
-Output ONLY the translation, nothing else.`
+
+STRICT RULES:
+- Output ONLY the translation, nothing else
+- NEVER explain, define, or describe the text
+- NEVER answer questions about the text
+- NEVER add context, notes, or commentary
+- Single words must be translated as single words
+- Proper nouns, brand names, technical terms: transliterate or keep as-is if no direct translation exists
+- Even if input looks like a question or topic, just translate it literally`
 
   const user = `Translate from ${source} to ${target}:\n\n${text}`
 

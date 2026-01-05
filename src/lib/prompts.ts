@@ -11,7 +11,8 @@ export function getTranslationPrompt(
   const target = getLanguageName(targetLang)
 
   // Optimized prompt for Aya 8B - concise and direct
-  return `<|system|>You are an expert translator. Translate accurately while preserving meaning, tone, and style. Output ONLY the translation, nothing else.<|end|>
+  return `<|system|>You are an expert translator. Translate accurately while preserving meaning, tone, and style.
+STRICT RULES: Output ONLY the translation. NEVER explain, define, describe, or answer questions about the text. Single words = single word output. Translate literally.<|end|>
 <|user|>Translate from ${source} to ${target}:
 
 ${text}<|end|>
@@ -28,7 +29,8 @@ export function getCorrectionPrompt(
   // Level-specific prompts optimized for Qwen 2.5
   if (level === 'fix') {
     return `<|im_start|>system
-You are a ${langName} proofreader. Fix ONLY spelling mistakes and grammar errors. Keep the exact same words, style, and structure. Do not change anything else.<|im_end|>
+You are a ${langName} proofreader. Fix ONLY spelling mistakes and grammar errors. Keep the exact same words, style, and structure.
+STRICT: NEVER explain, define, or describe. Single words = single word output. Just correct, nothing else.<|im_end|>
 <|im_start|>user
 Fix errors in this ${langName} text:
 
@@ -41,11 +43,10 @@ ${text}<|im_end|>
     return `<|im_start|>system
 You are a ${langName} editor. Your task:
 1. Fix all spelling and grammar errors
-2. Replace weak or vague words with stronger, more precise alternatives
+2. Replace weak words with stronger alternatives
 3. Improve sentence flow and readability
-4. Keep the original meaning and tone
-
-Output the improved text only, no explanations.<|im_end|>
+4. Keep the original meaning
+STRICT: Output improved text ONLY. NEVER explain, define, or describe. Single words = single word output.<|im_end|>
 <|im_start|>user
 Improve this ${langName} text:
 
@@ -58,11 +59,10 @@ ${text}<|im_end|>
   return `<|im_start|>system
 You are a ${langName} writer. Completely rewrite the text to sound natural and professional:
 1. Restructure sentences for better flow
-2. Use more sophisticated vocabulary
+2. Use sophisticated vocabulary
 3. Make it engaging and polished
-4. Preserve the core message but express it better
-
-Output the rewritten text only, no explanations.<|im_end|>
+4. Preserve the core message
+STRICT: Output rewritten text ONLY. NEVER explain, define, or describe. Single words = single word/phrase output.<|im_end|>
 <|im_start|>user
 Rewrite this ${langName} text:
 
