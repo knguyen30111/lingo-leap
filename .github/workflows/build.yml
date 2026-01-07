@@ -2,22 +2,6 @@ name: Build & Release
 
 on:
   workflow_dispatch:
-    inputs:
-      version:
-        description: 'Version (e.g., 1.0.0)'
-        required: true
-        default: '1.0.0'
-      tag:
-        description: 'Release tag (e.g., v1.0.0). Defaults to v{version}'
-        required: false
-      branch:
-        description: 'Branch to build from'
-        required: true
-        default: 'main'
-        type: choice
-        options:
-          - main
-          - develop
 
 jobs:
   build-macos:
@@ -27,8 +11,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.branch }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -47,12 +29,10 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: ${{ inputs.tag || format('v{0}', inputs.version) }}
-          releaseName: 'Lingo Leap ${{ inputs.tag || format(''v{0}'', inputs.version) }}'
+          tagName: ${{ github.ref_name }}
+          releaseName: 'Lingo Leap ${{ github.ref_name }}'
           releaseBody: |
-            ## Release ${{ inputs.tag || format('v{0}', inputs.version) }}
-
-            Built from branch: `${{ inputs.branch }}`
+            ## Release ${{ github.ref_name }}
 
             See the assets below to download and install.
           releaseDraft: true
