@@ -12,7 +12,7 @@ export interface UseAudioDevicesReturn {
   isLoading: boolean
   error: string | null
   selectDevice: (deviceId: string) => Promise<void>
-  refreshDevices: () => Promise<void>
+  refreshDevices: (requestPermission?: boolean) => Promise<void>
 }
 
 export function useAudioDevices(): UseAudioDevicesReturn {
@@ -21,8 +21,8 @@ export function useAudioDevices(): UseAudioDevicesReturn {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // Fetch available audio input devices
-  const refreshDevices = useCallback(async () => {
+  // Fetch available audio input devices (lazy - doesn't request permission)
+  const refreshDevices = useCallback(async (requestPermission = false) => {
     if (!navigator.mediaDevices?.enumerateDevices) {
       setError('Device enumeration not supported')
       return
@@ -32,10 +32,13 @@ export function useAudioDevices(): UseAudioDevicesReturn {
     setError(null)
 
     try {
-      // Request permission first to get device labels
-      await navigator.mediaDevices.getUserMedia({ audio: true })
-        .then(stream => stream.getTracks().forEach(track => track.stop()))
-        .catch(() => {/* Ignore if already granted */})
+      // Only request permission if explicitly asked (e.g., user clicked dropdown)
+      // This prevents interrupting TTS when Settings panel opens
+      if (requestPermission) {
+        await navigator.mediaDevices.getUserMedia({ audio: true })
+          .then(stream => stream.getTracks().forEach(track => track.stop()))
+          .catch(() => {/* Ignore if already granted */})
+      }
 
       const allDevices = await navigator.mediaDevices.enumerateDevices()
       const audioInputs = allDevices
