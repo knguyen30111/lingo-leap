@@ -76,12 +76,28 @@ function isDevMode(): boolean {
   return window.location.protocol === 'http:'
 }
 
+// Cached AudioContext for resetting WebKit's audio session
+// Reused to avoid creating new contexts on every call
+let cachedAudioContext: AudioContext | null = null
+
+// Get or create a reusable AudioContext
+function getAudioContext(): AudioContext {
+  if (!cachedAudioContext || cachedAudioContext.state === 'closed') {
+    cachedAudioContext = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)()
+  }
+  return cachedAudioContext
+}
+
 // Play silent audio to reset WebKit's audio session and restore system audio
 // This is a workaround for macOS where AVAudioSession doesn't exist
 function resetAudioSession(): void {
   try {
-    // Create a short silent audio context
-    const audioContext = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)()
+    const audioContext = getAudioContext()
+
+    // Resume context if suspended (browsers may suspend inactive contexts)
+    if (audioContext.state === 'suspended') {
+      audioContext.resume().catch(() => {})
+    }
 
     // Create a silent buffer (100ms)
     const buffer = audioContext.createBuffer(1, audioContext.sampleRate * 0.1, audioContext.sampleRate)
@@ -89,18 +105,7 @@ function resetAudioSession(): void {
     source.buffer = buffer
     source.connect(audioContext.destination)
     source.start()
-
-    // Close the context after playing
-    source.onended = () => {
-      audioContext.close().catch(() => {})
-    }
-
-    // Fallback close after 200ms
-    setTimeout(() => {
-      if (audioContext.state !== 'closed') {
-        audioContext.close().catch(() => {})
-      }
-    }, 200)
+    // No need to close - context is reused
   } catch {
     // Ignore errors - this is just a workaround
   }
