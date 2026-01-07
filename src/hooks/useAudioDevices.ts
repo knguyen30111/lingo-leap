@@ -33,7 +33,7 @@ export function useAudioDevices(): UseAudioDevicesReturn {
 
     try {
       // Only request permission if explicitly asked (e.g., user clicked dropdown)
-      // This prevents interrupting TTS when Settings panel opens
+      // This prevents audio ducking when Settings panel opens
       if (requestPermission) {
         await navigator.mediaDevices.getUserMedia({ audio: true })
           .then(stream => stream.getTracks().forEach(track => track.stop()))
