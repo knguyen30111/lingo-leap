@@ -1,16 +1,14 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback } from 'react'
 import { writeText } from '@tauri-apps/plugin-clipboard-manager'
 import { useAppStore } from '../stores/appStore'
 import { useSettingsStore } from '../stores/settingsStore'
 import { useTranslation } from '../hooks/useTranslation'
 import { useSpeechToText } from '../hooks/useSpeechToText'
-import { useTextToSpeech } from '../hooks/useTextToSpeech'
 import { SUPPORTED_LANGUAGES } from '../lib/language'
 import { LanguageSelector } from './LanguageSelector'
 import { MicButton } from './MicButton'
 import { SpeechPreview } from './SpeechPreview'
 import { ClearInputButton } from './ClearInputButton'
-import { SpeedSelector } from './SpeedSelector'
 
 const SPEECH_LANGS = [
   { code: 'en', label: 'EN' },
@@ -28,26 +26,9 @@ export function TranslationView() {
     sourceLang, setSourceLang,
     targetLang, setTargetLang
   } = useAppStore()
-  const { speechLang, setSpeechLang, ttsRate, setTtsRate } = useSettingsStore()
+  const { speechLang, setSpeechLang } = useSettingsStore()
   const { translate } = useTranslation()
   const [copied, setCopied] = useState(false)
-
-  // Text-to-speech for output
-  const { isSpeaking, isSupported: isTTSSupported, speak, stop } = useTextToSpeech({ rate: ttsRate })
-
-  const handleSpeak = () => {
-    if (!outputText) return
-    if (isSpeaking) {
-      stop()
-    } else {
-      speak(outputText, targetLang)
-    }
-  }
-
-  // Stop TTS when output changes (swap, regenerate, new translation) or language changes
-  useEffect(() => {
-    stop()
-  }, [outputText, targetLang, stop])
 
   // Callback to append speech text to input
   const handleTextReady = useCallback((text: string) => {
@@ -237,31 +218,6 @@ export function TranslationView() {
                   <span className="text-xs">Done</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  {isTTSSupported && (
-                    <div className="button-group">
-                      <button
-                        onClick={handleSpeak}
-                        className={`tts-button ${isSpeaking ? 'speaking' : ''}`}
-                        title={isSpeaking ? 'Stop speaking' : 'Speak text'}
-                      >
-                        {isSpeaking ? (
-                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <rect x="6" y="6" width="12" height="12" rx="1" />
-                          </svg>
-                        ) : (
-                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M11 5L6 9H2v6h4l5 4V5z" />
-                            <path d="M15.54 8.46a5 5 0 010 7.07" />
-                            <path d="M19.07 4.93a10 10 0 010 14.14" />
-                          </svg>
-                        )}
-                      </button>
-                      <SpeedSelector
-                        value={ttsRate}
-                        onChange={setTtsRate}
-                      />
-                    </div>
-                  )}
                   <button
                     onClick={handleRegenerate}
                     className="flex items-center gap-1.5 px-3 py-1 text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--glass-bg)] border border-[var(--border-color)] rounded-md transition-colors"
