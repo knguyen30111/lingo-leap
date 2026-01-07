@@ -34,8 +34,7 @@ pub fn run() {
             let menu = Menu::with_items(app, &[&show_item, &quit_item])?;
 
             // Build tray icon using app icon
-            let tray_icon = Image::from_bytes(include_bytes!("../icons/tray-icon@2x.png"))
-                .expect("failed to load tray icon");
+            let tray_icon = Image::from_bytes(include_bytes!("../icons/tray-icon@2x.png"))?;
             let _tray = TrayIconBuilder::new()
                 .icon(tray_icon)
                 .icon_as_template(true)
