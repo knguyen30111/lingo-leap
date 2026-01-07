@@ -4,7 +4,6 @@ import { invoke } from '@tauri-apps/api/core'
 
 export interface UseWindowVisibilityReturn {
   isVisible: boolean
-  isActive: boolean
 }
 
 /**
@@ -14,7 +13,6 @@ export interface UseWindowVisibilityReturn {
  */
 export function useWindowVisibility(): UseWindowVisibilityReturn {
   const [isVisible, setIsVisible] = useState(true)
-  const [isActive, setIsActive] = useState(true)
 
   // Deactivate audio session when going to lazy mode
   const enterLazyMode = useCallback(() => {
@@ -30,20 +28,9 @@ export function useWindowVisibility(): UseWindowVisibilityReturn {
       // Listen for window close (minimize to menu bar)
       const unlistenClose = await appWindow.onCloseRequested(() => {
         setIsVisible(false)
-        setIsActive(false)
         enterLazyMode()
       })
       unlisteners.push(unlistenClose)
-
-      // Listen for focus events
-      const unlistenFocus = await appWindow.onFocusChanged(({ payload: focused }) => {
-        setIsActive(focused)
-        if (!focused) {
-          // Window lost focus - could be going to lazy mode
-          // Don't immediately deactivate, wait for visibility change
-        }
-      })
-      unlisteners.push(unlistenFocus)
 
       // Listen for window show/hide via Tauri events
       const { listen } = await import('@tauri-apps/api/event')
@@ -51,7 +38,6 @@ export function useWindowVisibility(): UseWindowVisibilityReturn {
       // Window becomes visible (user clicks menu bar icon)
       const unlistenShow = await listen('tauri://window-created', () => {
         setIsVisible(true)
-        setIsActive(true)
       })
       unlisteners.push(unlistenShow)
 
@@ -66,18 +52,12 @@ export function useWindowVisibility(): UseWindowVisibilityReturn {
       document.addEventListener('visibilitychange', handleVisibilityChange)
       unlisteners.push(() => document.removeEventListener('visibilitychange', handleVisibilityChange))
 
-      // Window blur/focus at document level
-      const handleWindowBlur = () => {
-        setIsActive(false)
-      }
+      // Window focus at document level
       const handleWindowFocus = () => {
-        setIsActive(true)
         setIsVisible(true)
       }
-      window.addEventListener('blur', handleWindowBlur)
       window.addEventListener('focus', handleWindowFocus)
       unlisteners.push(() => {
-        window.removeEventListener('blur', handleWindowBlur)
         window.removeEventListener('focus', handleWindowFocus)
       })
     }
@@ -91,6 +71,5 @@ export function useWindowVisibility(): UseWindowVisibilityReturn {
 
   return {
     isVisible,
-    isActive,
   }
 }

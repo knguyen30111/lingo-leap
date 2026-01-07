@@ -54,19 +54,23 @@ export function useAudioOutputDevices(): UseAudioOutputDevicesReturn {
 
       setDevices(audioOutputs)
 
-      // Auto-select saved or default device
-      const savedDeviceId = localStorage.getItem('preferredSpeakerDeviceId')
-      if (savedDeviceId && audioOutputs.some(d => d.deviceId === savedDeviceId)) {
-        setSelectedDeviceId(savedDeviceId)
-      } else if (!selectedDeviceId && audioOutputs.length > 0) {
-        setSelectedDeviceId(audioOutputs[0].deviceId)
-      }
+      // Auto-select saved or default device (only if not already selected)
+      setSelectedDeviceId(prev => {
+        if (prev && audioOutputs.some(d => d.deviceId === prev)) {
+          return prev // Keep current selection if valid
+        }
+        const savedDeviceId = localStorage.getItem('preferredSpeakerDeviceId')
+        if (savedDeviceId && audioOutputs.some(d => d.deviceId === savedDeviceId)) {
+          return savedDeviceId
+        }
+        return audioOutputs.length > 0 ? audioOutputs[0].deviceId : null
+      })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to list devices')
     } finally {
       setIsLoading(false)
     }
-  }, [selectedDeviceId])
+  }, [])
 
   // Select a specific device
   const selectDevice = useCallback((deviceId: string) => {
