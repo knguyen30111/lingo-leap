@@ -453,9 +453,8 @@ html.no-transition * {
   box-shadow: 0 0 0 2px rgba(49, 57, 251, 0.1);
 }
 
-/* When mic/tts is in active state, style the container */
-.button-group:has(.listening),
-.button-group:has(.speaking) {
+/* When mic is in active state, style the container */
+.button-group:has(.listening) {
   border-color: var(--accent-blue);
   box-shadow: 0 0 0 2px rgba(49, 57, 251, 0.15);
 }
@@ -543,46 +542,6 @@ html.no-transition * {
 @keyframes mic-icon-pulse {
   0%, 100% { transform: scale(1); }
   50% { transform: scale(1.1); }
-}
-
-/* TTS Button - matches mic-button */
-.tts-button {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  padding: 0;
-  background: transparent;
-  border: none;
-  border-right: 1px solid var(--border-color);
-  color: var(--text-tertiary);
-  cursor: pointer;
-  transition: all var(--transition-fast);
-}
-
-.tts-button svg {
-  width: 14px;
-  height: 14px;
-}
-
-.tts-button:hover {
-  background: var(--hover-overlay);
-  color: var(--text-secondary);
-}
-
-.tts-button:active {
-  transform: scale(0.95);
-}
-
-.tts-button.speaking {
-  background: var(--accent-blue);
-  border-color: transparent;
-  color: white;
-}
-
-.tts-button.speaking:hover {
-  background: var(--accent-purple);
 }
 
 /* Speech Language Quick Selector */

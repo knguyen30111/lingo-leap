@@ -21,7 +21,6 @@ Offline translation and grammar correction app powered by local AI models. Avail
 - **Menu Bar Integration** - Quick access from system tray
 - **Streaming Responses** - See results as they generate
 - **Smart Caching** - Instant results for repeated queries
-- **Text-to-Speech** - Listen to translations with adjustable speed (0.5x-2.0x)
 - **Keyboard Shortcuts** - Cmd+Enter (Mac) / Ctrl+Enter to translate/generate
 - **Change Explanations** - See exactly what was corrected and why
 
@@ -99,7 +98,6 @@ Access settings via the gear icon:
 | Explanation Language | Language for correction explanations    |
 | Speech Recognition   | Language for voice input                |
 | Microphone           | Select audio input device               |
-| Text-to-Speech Speed | Playback rate (0.5x - 2.0x)             |
 
 ## License
 
