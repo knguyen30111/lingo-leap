@@ -1,0 +1,31 @@
+{
+  "welcome": "Welcome to Lingo Leap",
+  "subtitle": "Offline translation powered by local AI",
+  "ollama": {
+    "checking": "Checking Ollama...",
+    "connected": "Ollama Connected",
+    "notFound": "Ollama Not Found",
+    "pleaseWait": "Please wait...",
+    "installToContinue": "Install Ollama to continue"
+  },
+  "models": {
+    "title": "Required Models",
+    "missing": "Missing models - see instructions below",
+    "allInstalled": "All models installed",
+    "installed": "Installed",
+    "notFound": "Not found",
+    "checking": "Checking..."
+  },
+  "buttons": {
+    "downloadOllama": "Download Ollama",
+    "getStarted": "Get Started",
+    "installModelsFirst": "Install Models First",
+    "skipSetup": "Skip setup"
+  },
+  "instructions": {
+    "title": "Setup Instructions",
+    "step1": "Download and install Ollama from ollama.com",
+    "downloadTranslation": "Download translation model:",
+    "downloadGrammar": "Download grammar model:"
+  }
+}

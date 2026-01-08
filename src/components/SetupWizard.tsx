@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { useSettingsStore } from "../stores/settingsStore";
 import { useOllama } from "../hooks/useOllama";
 import { CopyButton } from "./CopyButton";
@@ -28,6 +29,8 @@ function ModelStatus({
   isInstalled: boolean;
   isChecking: boolean;
 }) {
+  const { t } = useTranslation("setup");
+
   return (
     <div className="flex items-center gap-2 py-1">
       <div
@@ -41,7 +44,11 @@ function ModelStatus({
       />
       <span className="text-sm text-[var(--text-primary)]">{name}</span>
       <span className="text-xs text-[var(--text-tertiary)] ml-auto">
-        {isChecking ? "Checking..." : isInstalled ? "Installed" : "Not found"}
+        {isChecking
+          ? t("models.checking")
+          : isInstalled
+          ? t("models.installed")
+          : t("models.notFound")}
       </span>
     </div>
   );
@@ -52,6 +59,7 @@ function ModelStatus({
  * Guides user through installing Ollama and required models.
  */
 export function SetupWizard() {
+  const { t } = useTranslation("setup");
   const { isConnected, isChecking, checkConnection, models, hasModel } =
     useOllama();
   const { setSetupComplete, translationModel, correctionModel } =
@@ -78,11 +86,9 @@ export function SetupWizard() {
     <div className="flex flex-col items-center justify-center h-screen bg-[var(--bg-primary)] p-8">
       <div className="glass-modal max-w-md w-full p-6">
         <h1 className="text-2xl font-bold text-[var(--text-primary)] mb-2">
-          Welcome to Lingo Leap
+          {t("welcome")}
         </h1>
-        <p className="text-[var(--text-secondary)] mb-6">
-          Offline translation powered by local AI
-        </p>
+        <p className="text-[var(--text-secondary)] mb-6">{t("subtitle")}</p>
 
         <div className="space-y-4">
           {/* Ollama Status */}
@@ -99,17 +105,17 @@ export function SetupWizard() {
             <div className="flex-1">
               <div className="font-medium text-[var(--text-primary)]">
                 {isChecking
-                  ? "Checking Ollama..."
+                  ? t("ollama.checking")
                   : isConnected
-                  ? "Ollama Connected"
-                  : "Ollama Not Found"}
+                  ? t("ollama.connected")
+                  : t("ollama.notFound")}
               </div>
               <div className="text-sm text-[var(--text-secondary)]">
                 {isChecking
-                  ? "Please wait..."
+                  ? t("ollama.pleaseWait")
                   : isConnected
                   ? `${models.length} model${models.length !== 1 ? "s" : ""} available`
-                  : "Install Ollama to continue"}
+                  : t("ollama.installToContinue")}
               </div>
             </div>
           </div>
@@ -118,7 +124,7 @@ export function SetupWizard() {
           {isConnected && (
             <div className="glass-card p-4">
               <h3 className="text-sm font-medium text-[var(--text-primary)] mb-3">
-                Required Models
+                {t("models.title")}
               </h3>
               <div className="space-y-1">
                 <ModelStatus
@@ -134,7 +140,7 @@ export function SetupWizard() {
               </div>
               {!allModelsInstalled && (
                 <p className="text-xs text-[var(--warning)] mt-3">
-                  Missing models - see instructions below to install
+                  {t("models.missing")}
                 </p>
               )}
             </div>
@@ -150,13 +156,13 @@ export function SetupWizard() {
                   rel="noopener noreferrer"
                   className="btn-primary flex-1 text-center"
                 >
-                  Download Ollama
+                  {t("buttons.downloadOllama")}
                 </a>
                 <button
                   onClick={handleRetry}
                   className="glass-button px-4 py-2 text-sm font-medium"
                 >
-                  Retry
+                  {t("common:retry")}
                 </button>
               </>
             )}
@@ -167,7 +173,9 @@ export function SetupWizard() {
                 className="btn-primary flex-1"
                 disabled={!allModelsInstalled}
               >
-                {allModelsInstalled ? "Get Started" : "Install Models First"}
+                {allModelsInstalled
+                  ? t("buttons.getStarted")
+                  : t("buttons.installModelsFirst")}
               </button>
             )}
 
@@ -176,7 +184,7 @@ export function SetupWizard() {
                 onClick={handleRetry}
                 className="glass-button px-4 py-2 text-sm font-medium"
               >
-                Refresh
+                {t("common:refresh")}
               </button>
             )}
           </div>
@@ -186,14 +194,14 @@ export function SetupWizard() {
             onClick={handleSkip}
             className="w-full text-center text-sm text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] transition-colors"
           >
-            Skip setup
+            {t("buttons.skipSetup")}
           </button>
         </div>
 
         {/* Instructions */}
         <div className="mt-6 pt-6 border-t border-[var(--border-color)]">
           <h3 className="text-sm font-medium text-[var(--text-primary)] mb-3">
-            Setup Instructions
+            {t("instructions.title")}
           </h3>
           <ol className="text-sm text-[var(--text-secondary)] space-y-3">
             <li className="flex items-start gap-2">
@@ -202,7 +210,7 @@ export function SetupWizard() {
               </span>
               <div className="flex-1">
                 <span>
-                  Download and install Ollama from{" "}
+                  {t("instructions.step1")}{" "}
                   <a
                     href="https://ollama.com/download"
                     target="_blank"
@@ -219,7 +227,7 @@ export function SetupWizard() {
                 2
               </span>
               <div className="flex-1">
-                <span>Download translation model:</span>
+                <span>{t("instructions.downloadTranslation")}</span>
                 <CommandLine command={`ollama pull ${translationModel}`} />
               </div>
             </li>
@@ -228,7 +236,7 @@ export function SetupWizard() {
                 3
               </span>
               <div className="flex-1">
-                <span>Download grammar model:</span>
+                <span>{t("instructions.downloadGrammar")}</span>
                 <CommandLine command={`ollama pull ${correctionModel}`} />
               </div>
             </li>

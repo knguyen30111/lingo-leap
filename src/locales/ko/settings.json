@@ -1,0 +1,43 @@
+{
+  "title": "설정",
+  "sections": {
+    "appearance": "모양",
+    "aiEngine": "AI 엔진",
+    "languages": "언어",
+    "audio": "오디오",
+    "interface": "인터페이스"
+  },
+  "theme": {
+    "light": "라이트",
+    "dark": "다크",
+    "auto": "자동"
+  },
+  "ollama": {
+    "host": "Ollama 호스트",
+    "translationModel": "번역 모델",
+    "translationModelDesc": "권장: aya:8b",
+    "correctionModel": "교정 모델",
+    "correctionModelDesc": "권장: qwen2.5:7b"
+  },
+  "streaming": {
+    "label": "스트리밍 출력",
+    "description": "번역이 생성되는 대로 표시"
+  },
+  "language": {
+    "defaultTarget": "기본 번역 대상",
+    "explanation": "설명 언어",
+    "explanationDesc": "문법 교정 설명용",
+    "speech": "음성 인식",
+    "speechDesc": "음성 입력 언어",
+    "interface": "인터페이스 언어",
+    "interfaceDesc": "앱 표시 언어",
+    "matchInput": "입력에 맞춤"
+  },
+  "audio": {
+    "microphone": "마이크",
+    "microphoneDesc": "음성 입력 장치",
+    "noMicrophones": "마이크를 찾을 수 없음",
+    "default": "(기본값)"
+  },
+  "version": "Lingo Leap v0.1.0"
+}

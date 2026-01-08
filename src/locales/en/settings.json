@@ -1,0 +1,43 @@
+{
+  "title": "Settings",
+  "sections": {
+    "appearance": "Appearance",
+    "aiEngine": "AI Engine",
+    "languages": "Languages",
+    "audio": "Audio",
+    "interface": "Interface"
+  },
+  "theme": {
+    "light": "Light",
+    "dark": "Dark",
+    "auto": "Auto"
+  },
+  "ollama": {
+    "host": "Ollama Host",
+    "translationModel": "Translation Model",
+    "translationModelDesc": "Recommended: aya:8b",
+    "correctionModel": "Correction Model",
+    "correctionModelDesc": "Recommended: qwen2.5:7b"
+  },
+  "streaming": {
+    "label": "Streaming Output",
+    "description": "Show translation as it generates"
+  },
+  "language": {
+    "defaultTarget": "Default Target",
+    "explanation": "Explanation Language",
+    "explanationDesc": "For grammar corrections",
+    "speech": "Speech Recognition",
+    "speechDesc": "Voice input language",
+    "interface": "Interface Language",
+    "interfaceDesc": "Display language for the app",
+    "matchInput": "Match input"
+  },
+  "audio": {
+    "microphone": "Microphone",
+    "microphoneDesc": "Voice input device",
+    "noMicrophones": "No microphones found",
+    "default": "(Default)"
+  },
+  "version": "Lingo Leap v0.1.0"
+}

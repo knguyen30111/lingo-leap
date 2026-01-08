@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useAppStore } from "../stores/appStore";
 import { useOllama } from "../hooks/useOllama";
 import { ModeSelector } from "./ModeSelector";
@@ -7,6 +8,7 @@ import { CorrectionView } from "./CorrectionView";
 import { SettingsPanel } from "./SettingsPanel";
 
 export function MainWindow() {
+  const { t } = useTranslation(["messages", "common"]);
   const { mode, isEnabled } = useAppStore();
   const { isConnected, isChecking, checkConnection } = useOllama();
   const [showSettings, setShowSettings] = useState(false);
@@ -33,15 +35,15 @@ export function MainWindow() {
             title={
               isEnabled
                 ? isConnected
-                  ? "Connected to Ollama"
+                  ? t("status.connected")
                   : isChecking
-                  ? "Checking connection..."
-                  : "Not connected"
-                : "Disabled"
+                  ? t("status.checking")
+                  : t("status.notConnected")
+                : t("status.disabled")
             }
           />
           <h1 className="text-sm font-semibold text-[var(--text-primary)]">
-            Lingo Leap
+            {t("common:appName")}
           </h1>
         </div>
 
@@ -52,7 +54,7 @@ export function MainWindow() {
           <button
             onClick={() => setShowSettings(true)}
             className="glass-button p-1.5"
-            title="Settings"
+            title={t("settings:title")}
           >
             <svg
               className="w-5 h-5 text-[var(--text-secondary)]"
@@ -82,14 +84,13 @@ export function MainWindow() {
         {!isConnected && !isChecking && (
           <div className="p-3 bg-[var(--warning)]/10 border-b border-[var(--warning)]/20 flex items-center justify-between gap-3">
             <p className="text-sm text-[var(--warning)]">
-              Cannot connect to Ollama. Make sure it is running on
-              localhost:11434
+              {t("errors.ollamaConnection")}
             </p>
             <button
               onClick={checkConnection}
               className="shrink-0 px-3 py-1.5 text-xs font-medium rounded-[var(--radius-sm)] bg-[var(--warning)]/20 text-[var(--warning)] hover:bg-[var(--warning)]/30 transition-colors"
             >
-              Retry
+              {t("common:retry")}
             </button>
           </div>
         )}
@@ -97,7 +98,7 @@ export function MainWindow() {
           <div className="p-3 bg-[var(--accent)]/10 border-b border-[var(--accent)]/20 flex items-center gap-2">
             <div className="w-3 h-3 border-2 border-[var(--accent)] border-t-transparent rounded-full animate-spin" />
             <p className="text-sm text-[var(--accent)]">
-              Checking Ollama connection...
+              {t("status.checking")}
             </p>
           </div>
         )}

@@ -1,7 +1,9 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useSettingsStore, ThemeMode } from "../stores/settingsStore";
 import { useOllama } from "../hooks/useOllama";
 import { useAudioDevices } from "../hooks/useAudioDevices";
+import { UI_LANGUAGES, type UILanguageCode } from "../i18n";
 
 interface SettingsPanelProps {
   onClose: () => void;
@@ -54,6 +56,7 @@ function SettingRow({
 }
 
 export function SettingsPanel({ onClose }: SettingsPanelProps) {
+  const { t } = useTranslation(["settings", "common"]);
   const {
     theme,
     setTheme,
@@ -71,6 +74,8 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
     setSpeechLang,
     useStreaming,
     setUseStreaming,
+    uiLanguage,
+    setUILanguage,
   } = useSettingsStore();
 
   const { models } = useOllama();
@@ -89,12 +94,12 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
 
   const themeOptions: {
     value: ThemeMode;
-    label: string;
+    labelKey: string;
     icon: React.ReactNode;
   }[] = [
     {
       value: "light",
-      label: "Light",
+      labelKey: "theme.light",
       icon: (
         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
@@ -103,7 +108,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
     },
     {
       value: "dark",
-      label: "Dark",
+      labelKey: "theme.dark",
       icon: (
         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
@@ -112,7 +117,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
     },
     {
       value: "system",
-      label: "Auto",
+      labelKey: "theme.auto",
       icon: (
         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
@@ -121,12 +126,13 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
     },
   ];
 
+  // Languages for translation targets
   const languages = [
-    { code: "en", label: "English" },
-    { code: "ja", label: "Japanese" },
-    { code: "vi", label: "Vietnamese" },
-    { code: "zh", label: "Chinese" },
-    { code: "ko", label: "Korean" },
+    { code: "en", labelKey: "common:languages.en" },
+    { code: "ja", labelKey: "common:languages.ja" },
+    { code: "vi", labelKey: "common:languages.vi" },
+    { code: "zh", labelKey: "common:languages.zh" },
+    { code: "ko", labelKey: "common:languages.ko" },
   ];
 
   return (
@@ -137,7 +143,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
       >
         {/* Header */}
         <div className="settings-header">
-          <h2 className="settings-title">Settings</h2>
+          <h2 className="settings-title">{t("title")}</h2>
           <button onClick={onClose} className="settings-close-btn">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -147,6 +153,33 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
 
         {/* Content */}
         <div className="settings-content">
+          {/* Interface Language Section - First for visibility */}
+          <SettingsSection
+            icon={
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" />
+              </svg>
+            }
+            title={t("sections.interface")}
+          >
+            <SettingRow
+              label={t("language.interface")}
+              description={t("language.interfaceDesc")}
+            >
+              <select
+                value={uiLanguage}
+                onChange={(e) => setUILanguage(e.target.value as UILanguageCode)}
+                className="select-glass w-full text-sm"
+              >
+                {UI_LANGUAGES.map(({ code, nativeName }) => (
+                  <option key={code} value={code}>
+                    {nativeName}
+                  </option>
+                ))}
+              </select>
+            </SettingRow>
+          </SettingsSection>
+
           {/* Appearance Section */}
           <SettingsSection
             icon={
@@ -154,17 +187,17 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01" />
               </svg>
             }
-            title="Appearance"
+            title={t("sections.appearance")}
           >
             <div className="theme-selector">
-              {themeOptions.map(({ value, label, icon }) => (
+              {themeOptions.map(({ value, labelKey, icon }) => (
                 <button
                   key={value}
                   onClick={() => setTheme(value)}
                   className={`theme-option ${theme === value ? "active" : ""}`}
                 >
                   <span className="theme-option-icon">{icon}</span>
-                  <span className="theme-option-label">{label}</span>
+                  <span className="theme-option-label">{t(labelKey)}</span>
                 </button>
               ))}
             </div>
@@ -177,9 +210,9 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
               </svg>
             }
-            title="AI Engine"
+            title={t("sections.aiEngine")}
           >
-            <SettingRow label="Ollama Host">
+            <SettingRow label={t("ollama.host")}>
               <div className="flex gap-2 w-full">
                 <input
                   type="text"
@@ -192,14 +225,14 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                   onClick={handleSaveHost}
                   className="btn-primary text-xs px-3"
                 >
-                  Save
+                  {t("common:save")}
                 </button>
               </div>
             </SettingRow>
 
             <SettingRow
-              label="Translation Model"
-              description="Recommended: aya:8b"
+              label={t("ollama.translationModel")}
+              description={t("ollama.translationModelDesc")}
             >
               <select
                 value={translationModel}
@@ -218,8 +251,8 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
             </SettingRow>
 
             <SettingRow
-              label="Correction Model"
-              description="Recommended: qwen2.5:7b"
+              label={t("ollama.correctionModel")}
+              description={t("ollama.correctionModelDesc")}
             >
               <select
                 value={correctionModel}
@@ -238,8 +271,8 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
             </SettingRow>
 
             <SettingRow
-              label="Streaming Output"
-              description="Show translation as it generates"
+              label={t("streaming.label")}
+              description={t("streaming.description")}
               inline
             >
               <button
@@ -258,52 +291,52 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129" />
               </svg>
             }
-            title="Languages"
+            title={t("sections.languages")}
           >
-            <SettingRow label="Default Target">
+            <SettingRow label={t("language.defaultTarget")}>
               <select
                 value={defaultTargetLang}
                 onChange={(e) => setDefaultTargetLang(e.target.value)}
                 className="select-glass w-full text-sm"
               >
-                {languages.map(({ code, label }) => (
+                {languages.map(({ code, labelKey }) => (
                   <option key={code} value={code}>
-                    {label}
+                    {t(labelKey)}
                   </option>
                 ))}
               </select>
             </SettingRow>
 
             <SettingRow
-              label="Explanation Language"
-              description="For grammar corrections"
+              label={t("language.explanation")}
+              description={t("language.explanationDesc")}
             >
               <select
                 value={explanationLang}
                 onChange={(e) => setExplanationLang(e.target.value)}
                 className="select-glass w-full text-sm"
               >
-                <option value="auto">Match input</option>
-                {languages.map(({ code, label }) => (
+                <option value="auto">{t("language.matchInput")}</option>
+                {languages.map(({ code, labelKey }) => (
                   <option key={code} value={code}>
-                    {label}
+                    {t(labelKey)}
                   </option>
                 ))}
               </select>
             </SettingRow>
 
             <SettingRow
-              label="Speech Recognition"
-              description="Voice input language"
+              label={t("language.speech")}
+              description={t("language.speechDesc")}
             >
               <select
                 value={speechLang}
                 onChange={(e) => setSpeechLang(e.target.value)}
                 className="select-glass w-full text-sm"
               >
-                {languages.map(({ code, label }) => (
+                {languages.map(({ code, labelKey }) => (
                   <option key={code} value={code}>
-                    {label}
+                    {t(labelKey)}
                   </option>
                 ))}
               </select>
@@ -318,9 +351,9 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
               </svg>
             }
-            title="Audio"
+            title={t("sections.audio")}
           >
-            <SettingRow label="Microphone" description="Voice input device">
+            <SettingRow label={t("audio.microphone")} description={t("audio.microphoneDesc")}>
               <select
                 value={selectedDeviceId || ""}
                 onChange={(e) => selectDevice(e.target.value)}
@@ -329,12 +362,12 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                 className="select-glass w-full text-sm"
               >
                 {devices.length === 0 ? (
-                  <option value="">No microphones found</option>
+                  <option value="">{t("audio.noMicrophones")}</option>
                 ) : (
                   devices.map((device) => (
                     <option key={device.deviceId} value={device.deviceId}>
                       {device.label}
-                      {device.isDefault ? " (Default)" : ""}
+                      {device.isDefault ? ` ${t("audio.default")}` : ""}
                     </option>
                   ))
                 )}
@@ -349,7 +382,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
             <svg className="w-4 h-4 text-[var(--text-tertiary)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
             </svg>
-            <span>Lingo Leap v0.1.0</span>
+            <span>{t("version")}</span>
           </div>
         </div>
       </div>

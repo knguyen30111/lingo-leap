@@ -1,0 +1,25 @@
+{
+  "status": {
+    "connected": "Connected to Ollama",
+    "checking": "Checking connection...",
+    "notConnected": "Not connected",
+    "disabled": "Disabled"
+  },
+  "errors": {
+    "ollamaConnection": "Cannot connect to Ollama. Make sure it is running on localhost:11434"
+  },
+  "placeholders": {
+    "enterTextTranslate": "Enter text to translate...",
+    "translationAppears": "Translation appears here",
+    "enterTextCorrect": "Enter text to correct...",
+    "correctedAppears": "Corrected text appears here"
+  },
+  "correction": {
+    "fix": "Fix",
+    "fixDesc": "Minor fixes only",
+    "improve": "Improve",
+    "improveDesc": "Grammar and style",
+    "rewrite": "Rewrite",
+    "rewriteDesc": "Full clarity rewrite"
+  }
+}

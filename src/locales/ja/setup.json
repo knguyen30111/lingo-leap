@@ -1,0 +1,31 @@
+{
+  "welcome": "Lingo Leapへようこそ",
+  "subtitle": "ローカルAIによるオフライン翻訳",
+  "ollama": {
+    "checking": "Ollamaを確認中...",
+    "connected": "Ollama接続済み",
+    "notFound": "Ollamaが見つかりません",
+    "pleaseWait": "お待ちください...",
+    "installToContinue": "続行するにはOllamaをインストールしてください"
+  },
+  "models": {
+    "title": "必要なモデル",
+    "missing": "モデルが不足 - 下記の手順を参照",
+    "allInstalled": "すべてのモデルがインストール済み",
+    "installed": "インストール済み",
+    "notFound": "見つかりません",
+    "checking": "確認中..."
+  },
+  "buttons": {
+    "downloadOllama": "Ollamaをダウンロード",
+    "getStarted": "始める",
+    "installModelsFirst": "先にモデルをインストール",
+    "skipSetup": "セットアップをスキップ"
+  },
+  "instructions": {
+    "title": "セットアップ手順",
+    "step1": "ollama.comからOllamaをダウンロードしてインストール",
+    "downloadTranslation": "翻訳モデルをダウンロード:",
+    "downloadGrammar": "文法モデルをダウンロード:"
+  }
+}

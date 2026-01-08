@@ -1,9 +1,11 @@
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useAppStore } from '../stores/appStore'
 import { useSettingsStore } from '../stores/settingsStore'
 import { SUPPORTED_LANGUAGES } from '../lib/language'
 
 export function LanguageSelector() {
+  const { t } = useTranslation('common')
   const {
     sourceLang, setSourceLang,
     targetLang, setTargetLang,
@@ -39,13 +41,13 @@ export function LanguageSelector() {
   if (mode === 'correct') {
     return (
       <div className="flex items-center gap-2">
-        <span className="text-xs text-[var(--text-secondary)]">Explain in:</span>
+        <span className="text-xs text-[var(--text-secondary)]">{t('explainIn')}</span>
         <select
           value={explanationLang}
           onChange={(e) => setExplanationLang(e.target.value)}
           className="select-glass"
         >
-          <option value="auto">Same as input</option>
+          <option value="auto">{t('sameAsInput')}</option>
           {SUPPORTED_LANGUAGES.filter(l => l.code !== 'auto').map((lang) => (
             <option key={lang.code} value={lang.code}>
               {lang.nativeName}
@@ -64,7 +66,7 @@ export function LanguageSelector() {
         lang-swap-button
         ${isRotated ? 'rotate-180' : 'rotate-0'}
       `}
-      title="Swap languages"
+      title={t('swapLanguages')}
     >
       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />

@@ -1,0 +1,31 @@
+{
+  "welcome": "Chào mừng đến với Lingo Leap",
+  "subtitle": "Dịch thuật ngoại tuyến với AI cục bộ",
+  "ollama": {
+    "checking": "Đang kiểm tra Ollama...",
+    "connected": "Đã kết nối Ollama",
+    "notFound": "Không tìm thấy Ollama",
+    "pleaseWait": "Vui lòng chờ...",
+    "installToContinue": "Cài đặt Ollama để tiếp tục"
+  },
+  "models": {
+    "title": "Mô hình cần thiết",
+    "missing": "Thiếu mô hình - xem hướng dẫn bên dưới",
+    "allInstalled": "Đã cài đặt tất cả mô hình",
+    "installed": "Đã cài đặt",
+    "notFound": "Không tìm thấy",
+    "checking": "Đang kiểm tra..."
+  },
+  "buttons": {
+    "downloadOllama": "Tải Ollama",
+    "getStarted": "Bắt đầu",
+    "installModelsFirst": "Cài đặt mô hình trước",
+    "skipSetup": "Bỏ qua thiết lập"
+  },
+  "instructions": {
+    "title": "Hướng dẫn thiết lập",
+    "step1": "Tải và cài đặt Ollama từ ollama.com",
+    "downloadTranslation": "Tải mô hình dịch:",
+    "downloadGrammar": "Tải mô hình ngữ pháp:"
+  }
+}

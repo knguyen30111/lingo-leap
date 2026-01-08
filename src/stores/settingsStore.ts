@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import { changeLanguage, type UILanguageCode } from "../i18n";
 
 export type ThemeMode = "light" | "dark" | "system";
 
@@ -23,6 +24,8 @@ interface SettingsState {
   setAutoHideAfterCopy: (value: boolean) => void;
   useStreaming: boolean;
   setUseStreaming: (value: boolean) => void;
+  uiLanguage: UILanguageCode;
+  setUILanguage: (lang: UILanguageCode) => void;
 
   // Language preferences
   defaultTargetLang: string;
@@ -63,6 +66,11 @@ export const useSettingsStore = create<SettingsState>()(
       setAutoHideAfterCopy: (value) => set({ autoHideAfterCopy: value }),
       useStreaming: true,
       setUseStreaming: (value) => set({ useStreaming: value }),
+      uiLanguage: "en",
+      setUILanguage: (lang) => {
+        changeLanguage(lang);
+        set({ uiLanguage: lang });
+      },
 
       // Language
       defaultTargetLang: "ja",
