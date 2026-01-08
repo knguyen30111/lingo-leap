@@ -5,5 +5,14 @@
   <!-- Allow microphone access for speech-to-text -->
   <key>com.apple.security.device.audio-input</key>
   <true/>
+  <!-- Allow outgoing network connections -->
+  <key>com.apple.security.network.client</key>
+  <true/>
+  <!-- Allow JIT for WebView -->
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+  <!-- Allow unsigned executable memory (needed for some Rust code) -->
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <true/>
 </dict>
 </plist>

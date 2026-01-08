@@ -1,0 +1,21 @@
+services:
+  linux-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.linux
+    volumes:
+      - .:/app
+      - cargo-cache:/root/.cargo/registry
+      - cargo-git:/root/.cargo/git
+      - node-modules:/app/node_modules
+      - target-cache:/app/src-tauri/target
+    working_dir: /app
+    stdin_open: true
+    tty: true
+    command: bash
+
+volumes:
+  cargo-cache:
+  cargo-git:
+  node-modules:
+  target-cache:
