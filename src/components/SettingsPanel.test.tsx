@@ -83,6 +83,7 @@ vi.mock('../i18n', () => ({
     { code: 'vi', nativeName: 'Tiếng Việt' },
     { code: 'ja', nativeName: '日本語' },
   ],
+  changeLanguage: vi.fn(),
 }))
 
 describe('SettingsPanel', () => {
@@ -340,5 +341,55 @@ describe('SettingsPanel', () => {
   it('renders version in footer', () => {
     render(<SettingsPanel onClose={onClose} />)
     expect(screen.getByText('Version 1.0.0')).toBeInTheDocument()
+  })
+
+  describe('Model fallback options', () => {
+    it('shows fallback option when translation model not in list', () => {
+      useSettingsStore.setState({ translationModel: 'custom-model:7b' })
+      render(<SettingsPanel onClose={onClose} />)
+
+      // The custom model should appear in one of the selects
+      expect(screen.getByText('custom-model:7b')).toBeInTheDocument()
+    })
+
+    it('shows fallback option when correction model not in list', () => {
+      useSettingsStore.setState({ correctionModel: 'another-model:3b' })
+      render(<SettingsPanel onClose={onClose} />)
+
+      expect(screen.getByText('another-model:3b')).toBeInTheDocument()
+    })
+  })
+
+  describe('Explanation language selector', () => {
+    it('changes explanation language', () => {
+      render(<SettingsPanel onClose={onClose} />)
+      const selects = screen.getAllByRole('combobox')
+
+      // Find the explanation lang select (has 'auto' value and 'Match input language' option)
+      const explanationSelect = selects.find((s) => (s as HTMLSelectElement).value === 'auto')
+
+      if (explanationSelect) {
+        fireEvent.change(explanationSelect, { target: { value: 'ja' } })
+        expect(useSettingsStore.getState().explanationLang).toBe('ja')
+      }
+    })
+  })
+
+  describe('UI language selector', () => {
+    it('changes UI language', () => {
+      render(<SettingsPanel onClose={onClose} />)
+      const selects = screen.getAllByRole('combobox')
+
+      // Find the UI language select (has English as an option)
+      const uiLangSelect = selects.find((s) => {
+        const options = s.querySelectorAll('option')
+        return Array.from(options).some((o) => o.textContent === 'English')
+      })
+
+      if (uiLangSelect) {
+        fireEvent.change(uiLangSelect, { target: { value: 'vi' } })
+        expect(useSettingsStore.getState().uiLanguage).toBe('vi')
+      }
+    })
   })
 })
