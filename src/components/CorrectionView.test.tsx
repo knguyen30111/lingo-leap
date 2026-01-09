@@ -41,16 +41,20 @@ vi.mock('../hooks/useCorrection', () => ({
   }),
 }))
 
-// Mock useSpeechToText hook
+// Mock useSpeechToText hook - capture onTextReady for testing
+let capturedOnTextReady: ((text: string) => void) | undefined
 vi.mock('../hooks/useSpeechToText', () => ({
-  useSpeechToText: () => ({
-    isListening: false,
-    isSupported: true,
-    transcript: '',
-    interimTranscript: '',
-    silenceDetected: false,
-    toggleListening: vi.fn(),
-  }),
+  useSpeechToText: (options?: { onTextReady?: (text: string) => void }) => {
+    capturedOnTextReady = options?.onTextReady
+    return {
+      isListening: false,
+      isSupported: true,
+      transcript: '',
+      interimTranscript: '',
+      silenceDetected: false,
+      toggleListening: vi.fn(),
+    }
+  },
 }))
 
 // Mock child components
@@ -343,5 +347,67 @@ describe('CorrectionView', () => {
     useAppStore.setState({ isLoading: true })
     render(<CorrectionView />)
     expect(screen.getByTestId('mic-button')).toBeDisabled()
+  })
+
+  describe('Speech language selector', () => {
+    it('renders speech language selector when supported', () => {
+      render(<CorrectionView />)
+      const speechSelect = screen.getByTitle('Speech language')
+      expect(speechSelect).toBeInTheDocument()
+    })
+
+    it('changes speech language when selected', () => {
+      render(<CorrectionView />)
+      const speechSelect = screen.getByTitle('Speech language')
+
+      fireEvent.change(speechSelect, { target: { value: 'ja' } })
+
+      expect(useSettingsStore.getState().speechLang).toBe('ja')
+    })
+  })
+
+  describe('Copy error handling', () => {
+    it('handles copy error gracefully', async () => {
+      const { writeText } = await import('@tauri-apps/plugin-clipboard-manager')
+      vi.mocked(writeText).mockRejectedValueOnce(new Error('Copy failed'))
+
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+      useAppStore.setState({ outputText: 'Text to copy' })
+      render(<CorrectionView />)
+
+      fireEvent.click(screen.getByText('Copy'))
+
+      await waitFor(() => {
+        expect(consoleSpy).toHaveBeenCalledWith('Failed to copy:', expect.any(Error))
+      })
+
+      consoleSpy.mockRestore()
+    })
+  })
+
+  describe('handleTextReady callback', () => {
+    it('appends speech text to empty input', () => {
+      useAppStore.setState({ inputText: '' })
+      render(<CorrectionView />)
+
+      // Call the captured onTextReady callback
+      if (capturedOnTextReady) {
+        capturedOnTextReady('Hello')
+      }
+
+      expect(useAppStore.getState().inputText).toBe('Hello')
+    })
+
+    it('appends speech text to existing input with space', () => {
+      useAppStore.setState({ inputText: 'Hello' })
+      render(<CorrectionView />)
+
+      // Call the captured onTextReady callback
+      if (capturedOnTextReady) {
+        capturedOnTextReady('world')
+      }
+
+      expect(useAppStore.getState().inputText).toBe('Hello world')
+    })
   })
 })

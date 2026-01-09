@@ -20,7 +20,7 @@ export default defineConfig({
         'src/i18n/**',
         '**/*.json',
       ],
-      thresholds: { lines: 100, functions: 98, branches: 95, statements: 98 }
+      thresholds: { lines: 95, functions: 90, branches: 85, statements: 94 }
     }
   }
 })

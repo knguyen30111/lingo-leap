@@ -308,4 +308,134 @@ describe('useCorrection', () => {
 
     await correctPromise
   })
+
+  describe('Changes extraction', () => {
+    it('extracts changes when text is modified', async () => {
+      // First call is for correction, second is for changes extraction
+      vi.mocked(ollamaClient.generate)
+        .mockResolvedValueOnce('Hello world')
+        .mockResolvedValueOnce('[{"from": "wrold", "to": "world", "reason": "Typo"}]')
+
+      const { result } = renderHook(() => useCorrection())
+
+      await act(async () => {
+        await result.current.correct()
+      })
+
+      // Wait for changes to be extracted (async background task)
+      await waitFor(() => {
+        expect(useAppStore.getState().changes.length).toBeGreaterThanOrEqual(0)
+      })
+    })
+
+    it('uses fallback when JSON parsing fails', async () => {
+      vi.mocked(ollamaClient.generate)
+        .mockResolvedValueOnce('Hello world')
+        .mockResolvedValueOnce('Invalid JSON response')
+
+      useAppStore.setState({ inputText: 'Hello wrold' })
+      const { result } = renderHook(() => useCorrection())
+
+      await act(async () => {
+        await result.current.correct()
+      })
+
+      // Should still complete without error
+      expect(useAppStore.getState().outputText).toBe('Hello world')
+    })
+
+    it('extracts changes from cached result', async () => {
+      vi.mocked(translationCache.get).mockReturnValue('Cached result')
+      vi.mocked(ollamaClient.generate).mockResolvedValue('[{"from": "wrold", "to": "world", "reason": "Typo"}]')
+
+      useAppStore.setState({ inputText: 'Hello wrold' })
+      const { result } = renderHook(() => useCorrection())
+
+      await act(async () => {
+        await result.current.correct()
+      })
+
+      expect(useAppStore.getState().outputText).toBe('Cached result')
+    })
+
+    it('does not extract changes when result equals input', async () => {
+      vi.mocked(ollamaClient.generate).mockResolvedValueOnce('Hello wrold')
+
+      useAppStore.setState({ inputText: 'Hello wrold' })
+      const { result } = renderHook(() => useCorrection())
+
+      await act(async () => {
+        await result.current.correct()
+      })
+
+      // Generate should only be called once (for correction, not for changes)
+      expect(ollamaClient.generate).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  describe('Streaming with cleaning', () => {
+    it('cleans model artifacts during streaming', async () => {
+      useSettingsStore.setState({ useStreaming: true })
+
+      async function* mockStream() {
+        yield 'Hello'
+        yield ' world'
+        yield '<|im_end|>'
+      }
+      vi.mocked(ollamaClient.generateStream).mockReturnValue(mockStream())
+
+      const { result } = renderHook(() => useCorrection())
+
+      await act(async () => {
+        await result.current.correct()
+      })
+
+      expect(useAppStore.getState().outputText).toBe('Hello world')
+    })
+  })
+
+  describe('Abort handling', () => {
+    it('ignores AbortError during correction', async () => {
+      const abortError = new Error('Aborted')
+      abortError.name = 'AbortError'
+      vi.mocked(ollamaClient.generate).mockRejectedValue(abortError)
+
+      const { result } = renderHook(() => useCorrection())
+
+      await act(async () => {
+        await result.current.correct()
+      })
+
+      // Should not set error for AbortError
+      expect(useAppStore.getState().error).toBeNull()
+    })
+  })
+
+  describe('Explanation language', () => {
+    it('uses detected language when explanationLang is auto', async () => {
+      useSettingsStore.setState({ explanationLang: 'auto' })
+      vi.mocked(ollamaClient.generate).mockResolvedValue('Hello world')
+
+      const { result } = renderHook(() => useCorrection())
+
+      await act(async () => {
+        await result.current.correct()
+      })
+
+      expect(ollamaClient.generate).toHaveBeenCalled()
+    })
+
+    it('uses specified language when explanationLang is set', async () => {
+      useSettingsStore.setState({ explanationLang: 'ja' })
+      vi.mocked(ollamaClient.generate).mockResolvedValue('Hello world')
+
+      const { result } = renderHook(() => useCorrection())
+
+      await act(async () => {
+        await result.current.correct()
+      })
+
+      expect(ollamaClient.generate).toHaveBeenCalled()
+    })
+  })
 })

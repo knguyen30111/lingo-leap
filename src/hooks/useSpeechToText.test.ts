@@ -390,4 +390,185 @@ describe('useSpeechToText', () => {
 
     expect(result.current.error).toBe('Microphone access denied')
   })
+
+  it('handles other speech errors', async () => {
+    const onError = vi.fn()
+    const { result } = renderHook(() => useSpeechToText({ onError }))
+
+    await act(async () => {
+      await result.current.startListening()
+    })
+
+    act(() => {
+      getMockRecognition().onerror?.({ error: 'network', message: 'Network error' })
+    })
+
+    expect(result.current.error).toBe('Speech error: network')
+    expect(onError).toHaveBeenCalled()
+  })
+
+  it('handles permissions query failure', async () => {
+    Object.defineProperty(navigator, 'permissions', {
+      configurable: true,
+      value: {
+        query: vi.fn().mockRejectedValue(new Error('Not supported')),
+      },
+    })
+
+    const { result } = renderHook(() => useSpeechToText())
+
+    await act(async () => {
+      await result.current.startListening()
+    })
+
+    // Should still try to start (fallback behavior)
+    expect(getMockRecognition().start).toHaveBeenCalled()
+  })
+
+  it('handles missing permissions API', async () => {
+    Object.defineProperty(navigator, 'permissions', {
+      configurable: true,
+      value: undefined,
+    })
+
+    const { result } = renderHook(() => useSpeechToText())
+
+    await act(async () => {
+      await result.current.startListening()
+    })
+
+    // Should still try to start
+    expect(getMockRecognition().start).toHaveBeenCalled()
+  })
+
+  it('handles prompt permission state', async () => {
+    Object.defineProperty(navigator, 'permissions', {
+      configurable: true,
+      value: {
+        query: vi.fn().mockResolvedValue({ state: 'prompt' }),
+      },
+    })
+
+    const { result } = renderHook(() => useSpeechToText())
+
+    await act(async () => {
+      await result.current.startListening()
+    })
+
+    expect(getMockRecognition().start).toHaveBeenCalled()
+  })
+
+  it('sends interim text on end if available', async () => {
+    const onTextReady = vi.fn()
+    const { result } = renderHook(() => useSpeechToText({ onTextReady }))
+
+    await act(async () => {
+      await result.current.startListening()
+    })
+
+    // First send interim transcript
+    act(() => {
+      getMockRecognition().onresult?.({
+        resultIndex: 0,
+        results: {
+          length: 1,
+          0: {
+            isFinal: false,
+            length: 1,
+            0: { transcript: 'Pending text' },
+          },
+        },
+      })
+    })
+
+    // Then end recognition
+    act(() => {
+      getMockRecognition().onend?.()
+    })
+
+    // interimTranscript should have been cleared or sent
+    expect(result.current.isListening).toBe(false)
+  })
+
+  it('uses fallback language code for unknown language', async () => {
+    const { result } = renderHook(() => useSpeechToText({ lang: 'unknown' }))
+
+    await act(async () => {
+      await result.current.startListening()
+    })
+
+    expect(getMockRecognition().lang).toBe('en-US')
+  })
+
+  describe('Audio context handling', () => {
+    it('handles suspended audio context', async () => {
+      Object.defineProperty(window, 'AudioContext', {
+        configurable: true,
+        value: vi.fn(() => ({
+          state: 'suspended',
+          resume: vi.fn().mockResolvedValue(undefined),
+          sampleRate: 44100,
+          createBuffer: vi.fn(() => ({})),
+          createBufferSource: vi.fn(() => ({
+            buffer: null,
+            connect: vi.fn(),
+            start: vi.fn(),
+          })),
+          destination: {},
+        })),
+      })
+
+      const { result } = renderHook(() => useSpeechToText())
+
+      await act(async () => {
+        await result.current.startListening()
+      })
+
+      act(() => {
+        result.current.stopListening()
+      })
+
+      // Should not throw
+      expect(result.current.isListening).toBe(false)
+    })
+  })
+
+  describe('WebKit audio context fallback', () => {
+    it('uses webkitAudioContext when AudioContext not available', async () => {
+      const webkitMock = vi.fn(() => ({
+        state: 'running',
+        resume: vi.fn().mockResolvedValue(undefined),
+        sampleRate: 44100,
+        createBuffer: vi.fn(() => ({})),
+        createBufferSource: vi.fn(() => ({
+          buffer: null,
+          connect: vi.fn(),
+          start: vi.fn(),
+        })),
+        destination: {},
+      }))
+
+      Object.defineProperty(window, 'AudioContext', {
+        configurable: true,
+        value: undefined,
+      })
+
+      Object.defineProperty(window, 'webkitAudioContext', {
+        configurable: true,
+        value: webkitMock,
+      })
+
+      const { result } = renderHook(() => useSpeechToText())
+
+      await act(async () => {
+        await result.current.startListening()
+      })
+
+      act(() => {
+        result.current.stopListening()
+      })
+
+      expect(result.current.isListening).toBe(false)
+    })
+  })
 })
