@@ -37,10 +37,10 @@ export function useOllama() {
         })
         setOllamaInstalled(true)
 
-        // Check if required models are installed
-        const modelNames = models.map(m => m.name.split(':')[0])
-        const hasTranslation = modelNames.some(n => translationModel.startsWith(n))
-        const hasCorrection = modelNames.some(n => correctionModel.startsWith(n))
+        // Check if required models are installed using exact name matching
+        const modelNames = models.map(m => m.name)
+        const hasTranslation = modelNames.includes(translationModel)
+        const hasCorrection = modelNames.includes(correctionModel)
         setModelsInstalled(hasTranslation && hasCorrection)
       } else {
         setState({
@@ -67,7 +67,7 @@ export function useOllama() {
   }, [checkConnection])
 
   const hasModel = useCallback((modelName: string): boolean => {
-    return state.models.some(m => m.name.startsWith(modelName.split(':')[0]))
+    return state.models.some(m => m.name === modelName)
   }, [state.models])
 
   return {
