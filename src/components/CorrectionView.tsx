@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { writeText } from '@tauri-apps/plugin-clipboard-manager';
 import { useAppStore } from '../stores/appStore';
 import { useSettingsStore } from '../stores/settingsStore';
@@ -19,6 +20,7 @@ const SPEECH_LANGS = [
 ];
 
 export function CorrectionView() {
+  const { t } = useTranslation(['common', 'messages']);
   const {
     inputText,
     setInputText,
@@ -112,7 +114,7 @@ export function CorrectionView() {
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Enter text to correct..."
+              placeholder={t('messages:placeholders.enterTextCorrect')}
               className="
               flex-1 p-4 pr-10 bg-transparent resize-none
               text-[var(--text-primary)] text-base leading-relaxed
@@ -156,7 +158,7 @@ export function CorrectionView() {
               </div>
               {/* Right: Char count */}
               <span className="text-[10px] text-[var(--text-tertiary)]">
-                {inputText.length} chars
+                {inputText.length} {t('chars')}
               </span>
             </div>
           </div>
@@ -180,7 +182,7 @@ export function CorrectionView() {
                   </div>
                 ) : (
                   <div className="text-[var(--text-tertiary)] text-sm">
-                    Corrected text appears here
+                    {t('messages:placeholders.correctedAppears')}
                   </div>
                 )}
               </div>
@@ -194,7 +196,7 @@ export function CorrectionView() {
                         <span className="relative inline-flex rounded-full h-2 w-2 bg-[var(--accent-blue)]"></span>
                       </span>
                       <span className="text-xs text-[var(--accent-blue)]">
-                        Processing
+                        {t('processing')}
                       </span>
                     </div>
                     <div />
@@ -215,13 +217,13 @@ export function CorrectionView() {
                           d="M5 13l4 4L19 7"
                         />
                       </svg>
-                      <span className="text-xs">Done</span>
+                      <span className="text-xs">{t('done')}</span>
                     </div>
                     <div className="flex items-center gap-2">
                       <button
                         onClick={handleRegenerate}
                         className="flex items-center gap-1.5 px-3 py-1 text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--glass-bg)] border border-[var(--border-color)] rounded-md transition-colors"
-                        title="Regenerate"
+                        title={t('regenerate')}
                       >
                         <svg
                           className="w-3.5 h-3.5"
@@ -236,7 +238,7 @@ export function CorrectionView() {
                             d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
                           />
                         </svg>
-                        <span>Regenerate</span>
+                        <span>{t('regenerate')}</span>
                       </button>
                       <button
                         onClick={handleCopy}
@@ -245,7 +247,7 @@ export function CorrectionView() {
                             ? 'text-[var(--success)] border-[var(--success)] bg-[var(--success)]/10'
                             : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--glass-bg)] border-[var(--border-color)]'
                         }`}
-                        title="Copy to clipboard"
+                        title={t('copy')}
                       >
                         {copied ? (
                           <>
@@ -262,7 +264,7 @@ export function CorrectionView() {
                                 d="M5 13l4 4L19 7"
                               />
                             </svg>
-                            <span>Copied!</span>
+                            <span>{t('copied')}</span>
                           </>
                         ) : (
                           <>
@@ -279,7 +281,7 @@ export function CorrectionView() {
                                 d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
                               />
                             </svg>
-                            <span>Copy</span>
+                            <span>{t('copy')}</span>
                           </>
                         )}
                       </button>
@@ -294,7 +296,7 @@ export function CorrectionView() {
                       className="flex items-center gap-1.5 px-3 py-1 text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--glass-bg)] border border-[var(--border-color)] rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                       title="Generate (⌘+Enter)"
                     >
-                      Generate
+                      {t('generate')}
                     </button>
                   </>
                 )}
@@ -356,7 +358,7 @@ export function CorrectionView() {
                       outputText ? 'items-start' : 'items-center'
                     } justify-center h-full text-[var(--text-tertiary)] text-sm`}
                   >
-                    {outputText ? 'No changes detected' : 'Changes appear here'}
+                    {outputText ? t('noChanges') : t('changesAppear')}
                   </div>
                 )}
               </div>
@@ -370,7 +372,7 @@ export function CorrectionView() {
                         <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-[var(--accent-blue)]"></span>
                       </span>
                       <span className="text-[10px] text-[var(--accent-blue)]">
-                        Analyzing
+                        {t('analyzing')}
                       </span>
                     </div>
                   ) : (

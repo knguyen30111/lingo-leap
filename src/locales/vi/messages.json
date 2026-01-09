@@ -1,0 +1,25 @@
+{
+  "status": {
+    "connected": "Đã kết nối Ollama",
+    "checking": "Đang kiểm tra kết nối...",
+    "notConnected": "Chưa kết nối",
+    "disabled": "Đã tắt"
+  },
+  "errors": {
+    "ollamaConnection": "Không thể kết nối Ollama. Đảm bảo Ollama đang chạy tại localhost:11434"
+  },
+  "placeholders": {
+    "enterTextTranslate": "Nhập văn bản cần dịch...",
+    "translationAppears": "Bản dịch hiển thị ở đây",
+    "enterTextCorrect": "Nhập văn bản cần sửa...",
+    "correctedAppears": "Văn bản đã sửa hiển thị ở đây"
+  },
+  "correction": {
+    "fix": "Sửa",
+    "fixDesc": "Chỉ sửa lỗi nhỏ",
+    "improve": "Cải thiện",
+    "improveDesc": "Ngữ pháp và văn phong",
+    "rewrite": "Viết lại",
+    "rewriteDesc": "Viết lại hoàn toàn"
+  }
+}

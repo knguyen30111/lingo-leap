@@ -1,0 +1,43 @@
+{
+  "title": "Cài đặt",
+  "sections": {
+    "appearance": "Giao diện",
+    "aiEngine": "Công cụ AI",
+    "languages": "Ngôn ngữ",
+    "audio": "Âm thanh",
+    "interface": "Giao diện"
+  },
+  "theme": {
+    "light": "Sáng",
+    "dark": "Tối",
+    "auto": "Tự động"
+  },
+  "ollama": {
+    "host": "Máy chủ Ollama",
+    "translationModel": "Mô hình dịch",
+    "translationModelDesc": "Khuyến nghị: aya:8b",
+    "correctionModel": "Mô hình sửa lỗi",
+    "correctionModelDesc": "Khuyến nghị: qwen2.5:7b"
+  },
+  "streaming": {
+    "label": "Hiển thị trực tiếp",
+    "description": "Hiển thị bản dịch khi đang tạo"
+  },
+  "language": {
+    "defaultTarget": "Ngôn ngữ đích mặc định",
+    "explanation": "Ngôn ngữ giải thích",
+    "explanationDesc": "Cho phần sửa ngữ pháp",
+    "speech": "Nhận dạng giọng nói",
+    "speechDesc": "Ngôn ngữ nhập bằng giọng nói",
+    "interface": "Ngôn ngữ giao diện",
+    "interfaceDesc": "Ngôn ngữ hiển thị ứng dụng",
+    "matchInput": "Theo văn bản gốc"
+  },
+  "audio": {
+    "microphone": "Micrô",
+    "microphoneDesc": "Thiết bị nhập giọng nói",
+    "noMicrophones": "Không tìm thấy micrô",
+    "default": "(Mặc định)"
+  },
+  "version": "Lingo Leap v0.1.0"
+}

@@ -1,8 +1,9 @@
 import { useState, useCallback } from 'react'
+import { useTranslation } from 'react-i18next'
 import { writeText } from '@tauri-apps/plugin-clipboard-manager'
 import { useAppStore } from '../stores/appStore'
 import { useSettingsStore } from '../stores/settingsStore'
-import { useTranslation } from '../hooks/useTranslation'
+import { useTranslation as useTranslationHook } from '../hooks/useTranslation'
 import { useSpeechToText } from '../hooks/useSpeechToText'
 import { SUPPORTED_LANGUAGES } from '../lib/language'
 import { LanguageSelector } from './LanguageSelector'
@@ -19,6 +20,7 @@ const SPEECH_LANGS = [
 ]
 
 export function TranslationView() {
+  const { t } = useTranslation(['common', 'messages'])
   const {
     inputText, setInputText,
     outputText, setOutputText,
@@ -27,7 +29,7 @@ export function TranslationView() {
     targetLang, setTargetLang
   } = useAppStore()
   const { speechLang, setSpeechLang } = useSettingsStore()
-  const { translate } = useTranslation()
+  const { translate } = useTranslationHook()
   const [copied, setCopied] = useState(false)
 
   // Callback to append speech text to input
@@ -95,7 +97,7 @@ export function TranslationView() {
             >
               {SUPPORTED_LANGUAGES.map((lang) => (
                 <option key={lang.code} value={lang.code}>
-                  {lang.code === 'auto' ? 'Auto Detect' : lang.nativeName}
+                  {lang.code === 'auto' ? t('autoDetect') : lang.nativeName}
                 </option>
               ))}
             </select>
@@ -108,7 +110,7 @@ export function TranslationView() {
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Enter text to translate..."
+            placeholder={t('messages:placeholders.enterTextTranslate')}
             className="
               flex-1 p-4 pr-10 bg-transparent resize-none
               text-[var(--text-primary)] text-base leading-relaxed
@@ -150,7 +152,7 @@ export function TranslationView() {
             </div>
             {/* Right: Char count */}
             <span className="text-[10px] text-[var(--text-tertiary)]">
-              {inputText.length} chars
+              {inputText.length} {t('chars')}
             </span>
           </div>
         </div>
@@ -192,7 +194,7 @@ export function TranslationView() {
               </div>
             ) : (
               <div className="text-[var(--text-tertiary)] text-sm">
-                Translation appears here
+                {t('messages:placeholders.translationAppears')}
               </div>
             )}
           </div>
@@ -205,7 +207,7 @@ export function TranslationView() {
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[var(--accent-blue)] opacity-75"></span>
                     <span className="relative inline-flex rounded-full h-2 w-2 bg-[var(--accent-blue)]"></span>
                   </span>
-                  <span className="text-xs text-[var(--accent-blue)]">Translating</span>
+                  <span className="text-xs text-[var(--accent-blue)]">{t('translating')}</span>
                 </div>
                 <div />
               </>
@@ -215,18 +217,18 @@ export function TranslationView() {
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                   </svg>
-                  <span className="text-xs">Done</span>
+                  <span className="text-xs">{t('done')}</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <button
                     onClick={handleRegenerate}
                     className="flex items-center gap-1.5 px-3 py-1 text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--glass-bg)] border border-[var(--border-color)] rounded-md transition-colors"
-                    title="Re-translate"
+                    title={t('reTranslate')}
                   >
                     <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                     </svg>
-                    <span>Re-translate</span>
+                    <span>{t('reTranslate')}</span>
                   </button>
                   <button
                     onClick={handleCopy}
@@ -235,21 +237,21 @@ export function TranslationView() {
                         ? 'text-[var(--success)] border-[var(--success)] bg-[var(--success)]/10'
                         : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--glass-bg)] border-[var(--border-color)]'
                     }`}
-                    title="Copy to clipboard"
+                    title={t('copy')}
                   >
                     {copied ? (
                       <>
                         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                         </svg>
-                        <span>Copied!</span>
+                        <span>{t('copied')}</span>
                       </>
                     ) : (
                       <>
                         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
                         </svg>
-                        <span>Copy</span>
+                        <span>{t('copy')}</span>
                       </>
                     )}
                   </button>
@@ -264,7 +266,7 @@ export function TranslationView() {
                   className="flex items-center gap-1.5 px-3 py-1 text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--glass-bg)] border border-[var(--border-color)] rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   title="Translate (⌘+Enter)"
                 >
-                  Translate
+                  {t('translate')}
                 </button>
               </>
             )}

@@ -1,0 +1,25 @@
+{
+  "status": {
+    "connected": "Ollamaに接続中",
+    "checking": "接続を確認中...",
+    "notConnected": "未接続",
+    "disabled": "無効"
+  },
+  "errors": {
+    "ollamaConnection": "Ollamaに接続できません。localhost:11434でOllamaが実行中か確認してください"
+  },
+  "placeholders": {
+    "enterTextTranslate": "翻訳するテキストを入力...",
+    "translationAppears": "翻訳がここに表示されます",
+    "enterTextCorrect": "校正するテキストを入力...",
+    "correctedAppears": "校正されたテキストがここに表示されます"
+  },
+  "correction": {
+    "fix": "修正",
+    "fixDesc": "軽微な修正のみ",
+    "improve": "改善",
+    "improveDesc": "文法とスタイル",
+    "rewrite": "書き直し",
+    "rewriteDesc": "完全に書き直し"
+  }
+}

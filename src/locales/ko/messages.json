@@ -1,0 +1,25 @@
+{
+  "status": {
+    "connected": "Ollama에 연결됨",
+    "checking": "연결 확인 중...",
+    "notConnected": "연결되지 않음",
+    "disabled": "비활성화됨"
+  },
+  "errors": {
+    "ollamaConnection": "Ollama에 연결할 수 없습니다. localhost:11434에서 Ollama가 실행 중인지 확인하세요"
+  },
+  "placeholders": {
+    "enterTextTranslate": "번역할 텍스트를 입력하세요...",
+    "translationAppears": "번역이 여기에 표시됩니다",
+    "enterTextCorrect": "교정할 텍스트를 입력하세요...",
+    "correctedAppears": "교정된 텍스트가 여기에 표시됩니다"
+  },
+  "correction": {
+    "fix": "수정",
+    "fixDesc": "가벼운 수정만",
+    "improve": "개선",
+    "improveDesc": "문법과 스타일",
+    "rewrite": "다시 쓰기",
+    "rewriteDesc": "완전히 다시 작성"
+  }
+}

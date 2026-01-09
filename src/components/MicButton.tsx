@@ -1,3 +1,5 @@
+import { useTranslation } from 'react-i18next'
+
 interface MicButtonProps {
   isListening: boolean
   isSupported: boolean
@@ -7,6 +9,8 @@ interface MicButtonProps {
 }
 
 export function MicButton({ isListening, isSupported, silenceDetected, onClick, disabled }: MicButtonProps) {
+  const { t } = useTranslation('common')
+
   if (!isSupported) return null
 
   const classes = [
@@ -20,9 +24,9 @@ export function MicButton({ isListening, isSupported, silenceDetected, onClick, 
       onClick={onClick}
       disabled={disabled}
       className={classes}
-      title={isListening ? 'Stop listening' : 'Voice input'}
+      title={isListening ? t('stopListening') : t('voiceInput')}
       aria-pressed={isListening}
-      aria-label={isListening ? 'Stop voice input' : 'Start voice input'}
+      aria-label={isListening ? t('stopListening') : t('voiceInput')}
     >
       <svg
         viewBox="0 0 24 24"

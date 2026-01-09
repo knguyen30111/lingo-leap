@@ -1,0 +1,43 @@
+{
+  "title": "設定",
+  "sections": {
+    "appearance": "外観",
+    "aiEngine": "AIエンジン",
+    "languages": "言語",
+    "audio": "オーディオ",
+    "interface": "インターフェース"
+  },
+  "theme": {
+    "light": "ライト",
+    "dark": "ダーク",
+    "auto": "自動"
+  },
+  "ollama": {
+    "host": "Ollamaホスト",
+    "translationModel": "翻訳モデル",
+    "translationModelDesc": "推奨: aya:8b",
+    "correctionModel": "校正モデル",
+    "correctionModelDesc": "推奨: qwen2.5:7b"
+  },
+  "streaming": {
+    "label": "ストリーミング出力",
+    "description": "翻訳を生成しながら表示"
+  },
+  "language": {
+    "defaultTarget": "デフォルト翻訳先",
+    "explanation": "説明言語",
+    "explanationDesc": "文法校正の説明用",
+    "speech": "音声認識",
+    "speechDesc": "音声入力の言語",
+    "interface": "インターフェース言語",
+    "interfaceDesc": "アプリの表示言語",
+    "matchInput": "入力に合わせる"
+  },
+  "audio": {
+    "microphone": "マイク",
+    "microphoneDesc": "音声入力デバイス",
+    "noMicrophones": "マイクが見つかりません",
+    "default": "（デフォルト）"
+  },
+  "version": "Lingo Leap v0.1.0"
+}
