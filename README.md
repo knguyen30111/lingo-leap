@@ -57,14 +57,48 @@ Offline translation and grammar correction app powered by local AI models. Avail
 ### Prerequisites
 
 - Node.js 18+
-- Rust (latest stable)
-- **macOS**: Xcode Command Line Tools
-- **Linux**: `build-essential`, `libwebkit2gtk-4.1-dev`, `libappindicator3-dev`, `librsvg2-dev`
+- Rust & Cargo (latest stable)
+
+### Install Rust & Cargo
+
+**macOS / Linux:**
+
+```bash
+# Install Rust via rustup
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+# Follow the prompts, then reload your shell
+source $HOME/.cargo/env
+
+# Verify installation
+rustc --version
+cargo --version
+```
+
+**macOS additional requirements:**
+
+```bash
+# Install Xcode Command Line Tools
+xcode-select --install
+```
+
+**Linux additional requirements (Ubuntu/Debian):**
+
+```bash
+sudo apt update
+sudo apt install -y build-essential libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev
+```
+
+**Linux additional requirements (Fedora):**
+
+```bash
+sudo dnf install -y webkit2gtk4.1-devel libappindicator-gtk3-devel librsvg2-devel
+```
 
 ### Setup
 
 ```bash
-# Install dependencies
+# Install Node.js dependencies
 npm install
 
 # Run in development mode
