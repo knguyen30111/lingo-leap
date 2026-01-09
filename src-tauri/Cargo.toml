@@ -35,5 +35,9 @@ tauri-plugin-global-shortcut = "2"
 tauri-plugin-positioner = { version = "2", features = ["tray-icon"] }
 tauri-plugin-clipboard-manager = "2"
 
+# Linux Whisper STT (WebKitGTK doesn't support Web Speech API)
+[target.'cfg(target_os = "linux")'.dependencies]
+base64 = "0.22"
+
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ["cfg(feature, values(\"cargo-clippy\"))"] }

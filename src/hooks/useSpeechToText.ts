@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { useWindowVisibility } from './useWindowVisibility'
+import { useWhisperSTT } from './useWhisperSTT'
 
 // Web Speech API types (not in standard lib)
 interface SpeechRecognitionEvent extends Event {
@@ -76,6 +77,11 @@ function isDevMode(): boolean {
   return window.location.protocol === 'http:'
 }
 
+// Check if running on Linux (WebKitGTK doesn't support Web Speech API)
+function isLinux(): boolean {
+  return navigator.platform.toLowerCase().includes('linux')
+}
+
 // Cached AudioContext for resetting WebKit's audio session
 // Reused to avoid creating new contexts on every call
 let cachedAudioContext: AudioContext | null = null
@@ -112,12 +118,18 @@ function resetAudioSession(): void {
 }
 
 // Check if microphone permission is granted (without triggering audio session)
-async function checkMicrophonePermission(): Promise<boolean> {
+async function checkMicrophonePermission(): Promise<{ granted: boolean; reason?: string }> {
   // In dev mode, speech recognition will crash due to missing Info.plist
   // Only the built app has the plist merged
   if (isDevMode()) {
     console.warn('[Speech] Speech recognition disabled in dev mode - build the app to test')
-    return false
+    return { granted: false, reason: 'Speech recognition disabled in dev mode' }
+  }
+
+  // On Linux, WebKitGTK doesn't support Web Speech API
+  if (isLinux()) {
+    console.warn('[Speech] Speech recognition not supported on Linux (WebKitGTK limitation)')
+    return { granted: false, reason: 'Speech recognition not supported on Linux' }
   }
 
   try {
@@ -125,13 +137,13 @@ async function checkMicrophonePermission(): Promise<boolean> {
     if (navigator.permissions) {
       const result = await navigator.permissions.query({ name: 'microphone' as PermissionName })
       // If granted or prompt, allow - SpeechRecognition will handle the actual request
-      return result.state !== 'denied'
+      return { granted: result.state !== 'denied' }
     }
     // If no permissions API, assume we can try
-    return true
+    return { granted: true }
   } catch {
     // If permissions query fails, let SpeechRecognition try anyway
-    return true
+    return { granted: true }
   }
 }
 
@@ -143,6 +155,14 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeech
     onError,
   } = options
 
+  // Use Whisper STT on Linux (Web Speech API not supported)
+  const whisperSTT = useWhisperSTT({
+    lang,
+    onTextReady,
+    onEnd,
+    onError,
+  })
+
   const [isListening, setIsListening] = useState(false)
   const [transcript, setTranscript] = useState('')
   const [interimTranscript, setInterimTranscript] = useState('')
@@ -152,6 +172,9 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeech
 
   // Track window visibility for lazy/active mode
   const { isVisible } = useWindowVisibility()
+
+  // Track if we're on Linux (use Whisper instead of Web Speech API)
+  const useWhisper = isLinux()
 
   const recognitionRef = useRef<SpeechRecognition | null>(null)
   const isStoppingRef = useRef(false)
@@ -312,10 +335,10 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeech
 
     // Request microphone permission first (prevents WKWebView crash)
     if (!micPermissionGranted) {
-      const granted = await checkMicrophonePermission()
-      setMicPermissionGranted(granted)
-      if (!granted) {
-        const errorMsg = 'Microphone access denied'
+      const result = await checkMicrophonePermission()
+      setMicPermissionGranted(result.granted)
+      if (!result.granted) {
+        const errorMsg = result.reason || 'Microphone access denied'
         setError(errorMsg)
         onError?.(errorMsg)
         return
@@ -405,6 +428,22 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeech
       resetAudioSession()
     }
   }, [clearSilenceTimer])
+
+  // On Linux, return Whisper-based implementation
+  if (useWhisper) {
+    return {
+      isListening: whisperSTT.isListening,
+      isSupported: whisperSTT.isSupported,
+      transcript: '', // Whisper returns full text via onTextReady
+      interimTranscript: whisperSTT.isProcessing ? 'Processing...' : '',
+      silenceDetected: false,
+      error: whisperSTT.error,
+      startListening: whisperSTT.startListening,
+      stopListening: whisperSTT.stopListening,
+      toggleListening: whisperSTT.toggleListening,
+      clearTranscript: () => {}, // No-op for Whisper
+    }
+  }
 
   return {
     isListening,
