@@ -134,7 +134,7 @@ describe('useOllama', () => {
     })
   })
 
-  it('hasModel returns true for existing model', async () => {
+  it('hasModel returns true for exact model name match', async () => {
     vi.mocked(ollamaClient.checkHealth).mockResolvedValue(true)
     vi.mocked(ollamaClient.listModels).mockResolvedValue(mockModels)
 
@@ -144,8 +144,45 @@ describe('useOllama', () => {
       expect(result.current.isConnected).toBe(true)
     })
 
-    expect(result.current.hasModel('gemma3')).toBe(true)
+    // Exact match required - full model name with tag
     expect(result.current.hasModel('gemma3:4b')).toBe(true)
+    expect(result.current.hasModel('llama3:8b')).toBe(true)
+  })
+
+  it('hasModel returns false for partial model name', async () => {
+    vi.mocked(ollamaClient.checkHealth).mockResolvedValue(true)
+    vi.mocked(ollamaClient.listModels).mockResolvedValue(mockModels)
+
+    const { result } = renderHook(() => useOllama())
+
+    await waitFor(() => {
+      expect(result.current.isConnected).toBe(true)
+    })
+
+    // Partial names should NOT match - prevents qwen2.5 matching qwen2.5-coder
+    expect(result.current.hasModel('gemma3')).toBe(false)
+    expect(result.current.hasModel('llama3')).toBe(false)
+  })
+
+  it('hasModel correctly distinguishes similar model names', async () => {
+    const similarModels = [
+      { name: 'qwen2.5:7b', size: 1000000 },
+      { name: 'qwen2.5-coder:1.5b', size: 500000 },
+    ]
+    vi.mocked(ollamaClient.checkHealth).mockResolvedValue(true)
+    vi.mocked(ollamaClient.listModels).mockResolvedValue(similarModels)
+
+    const { result } = renderHook(() => useOllama())
+
+    await waitFor(() => {
+      expect(result.current.isConnected).toBe(true)
+    })
+
+    // Each model should only match its exact name
+    expect(result.current.hasModel('qwen2.5:7b')).toBe(true)
+    expect(result.current.hasModel('qwen2.5-coder:1.5b')).toBe(true)
+    expect(result.current.hasModel('qwen2.5-coder:7b')).toBe(false)
+    expect(result.current.hasModel('qwen2.5:1.5b')).toBe(false)
   })
 
   it('hasModel returns false for non-existing model', async () => {
