@@ -1,12 +1,14 @@
 import { useAppStore, Mode } from '../stores/appStore'
 
 export function ModeSelector() {
-  const { mode, setMode, isEnabled } = useAppStore()
+  const { mode, setMode, isEnabled, isLoading, isChangesLoading } = useAppStore()
 
   const modes: { value: Mode; label: string }[] = [
     { value: 'translate', label: 'Translate' },
     { value: 'correct', label: 'Correct' },
   ]
+
+  const isDisabled = !isEnabled || isLoading || isChangesLoading
 
   return (
     <div className="segmented-control">
@@ -14,7 +16,7 @@ export function ModeSelector() {
         <button
           key={value}
           onClick={() => setMode(value)}
-          disabled={!isEnabled}
+          disabled={isDisabled}
           className={`segmented-control-item ${mode === value ? 'active' : ''}`}
         >
           {label}
