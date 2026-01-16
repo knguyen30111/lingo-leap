@@ -13,7 +13,7 @@ Offline translation and grammar correction app powered by local AI models. Avail
   - Light: Minor fixes only
   - Medium: Grammar and style improvements
   - Heavy: Full rewrite for clarity
-- **Speech-to-Text** - Voice input with continuous recording and silence detection
+- **Speech-to-Text** - Voice input (macOS: Web Speech API, Linux: Whisper.cpp)
 - **Language Swap** - One-click swap between source and target languages
 - **Offline First** - All processing happens locally via Ollama
 - **Liquid Glass UI** - Modern design with light/dark/system themes
@@ -116,6 +116,36 @@ npm run tauri build
 - **Styling**: Tailwind CSS 4
 - **State**: Zustand 5
 - **AI**: Ollama (local LLMs)
+
+## Linux Speech-to-Text Setup
+
+Linux uses [Whisper.cpp](https://github.com/ggerganov/whisper.cpp) for local speech-to-text (WebKitGTK doesn't support Web Speech API).
+
+### Install Whisper
+
+```bash
+# Option 1: faster-whisper (Python, easiest)
+pip install faster-whisper
+
+# Option 2: whisper.cpp (native, faster)
+git clone https://github.com/ggerganov/whisper.cpp
+cd whisper.cpp && make
+sudo cp main /usr/local/bin/whisper
+```
+
+### Download Model
+
+```bash
+mkdir -p ~/.cache/whisper
+curl -L -o ~/.cache/whisper/ggml-base.bin \
+  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin
+```
+
+### Test STT
+
+```bash
+./scripts/test-linux-stt.sh
+```
 
 ## Configuration
 

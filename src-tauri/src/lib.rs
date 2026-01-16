@@ -7,6 +7,9 @@ use tauri::{
 
 mod audio_session;
 
+#[cfg(target_os = "linux")]
+mod whisper_stt;
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -14,10 +17,25 @@ pub fn run() {
         .plugin(tauri_plugin_positioner::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_clipboard_manager::init())
-        .invoke_handler(tauri::generate_handler![
-            audio_session::activate_voice_session,
-            audio_session::deactivate_voice_session,
-        ])
+        .invoke_handler({
+            #[cfg(target_os = "linux")]
+            {
+                tauri::generate_handler![
+                    audio_session::activate_voice_session,
+                    audio_session::deactivate_voice_session,
+                    whisper_stt::check_whisper_available,
+                    whisper_stt::transcribe_audio,
+                    whisper_stt::ensure_whisper_model,
+                ]
+            }
+            #[cfg(not(target_os = "linux"))]
+            {
+                tauri::generate_handler![
+                    audio_session::activate_voice_session,
+                    audio_session::deactivate_voice_session,
+                ]
+            }
+        })
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
