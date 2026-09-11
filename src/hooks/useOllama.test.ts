@@ -1,27 +1,41 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { renderHook, act, waitFor } from '@testing-library/react'
-import { useOllama } from './useOllama'
+import { useOllama, useOllamaLifecycle } from './useOllama'
 import { useSettingsStore } from '../stores/settingsStore'
+import {
+  resetOllamaRuntime,
+  setOllamaLifecycleClientFactory,
+  type OllamaLifecycleClient,
+  type OllamaLifecycleClientFactory,
+} from '../stores/ollamaStore'
 
-// Mock the transport class: each hook instance owns a client for one host.
-const transport = vi.hoisted(() => ({
+// The lifecycle transport is shared by the whole application; every hook here
+// observes the same runtime through the same fake client.
+const transport = {
   constructedHosts: [] as string[],
   checkHealth: vi.fn(),
   listModels: vi.fn(),
-}))
+  pullModel: vi.fn(),
+}
 
-vi.mock('../lib/ollama-client', () => ({
-  OllamaClient: class MockOllamaClient {
-    checkHealth = transport.checkHealth
-    listModels = transport.listModels
-
-    constructor(baseUrl: string) {
-      transport.constructedHosts.push(baseUrl)
-    }
-  },
-}))
+const fakeFactory: OllamaLifecycleClientFactory = (host): OllamaLifecycleClient => {
+  transport.constructedHosts.push(host)
+  return {
+    checkHealth: transport.checkHealth,
+    listModels: transport.listModels,
+    pullModel: transport.pullModel,
+  }
+}
 
 const MODIFIED_AT = '2026-01-01T00:00:00Z'
+
+/** Mounts the application lifecycle coordinator next to a consumer adapter. */
+function renderApp() {
+  return renderHook(() => {
+    useOllamaLifecycle()
+    return useOllama()
+  })
+}
 
 describe('useOllama', () => {
   const mockModels = [
@@ -43,9 +57,15 @@ describe('useOllama', () => {
     transport.constructedHosts.length = 0
     transport.checkHealth.mockReset()
     transport.listModels.mockReset()
+    transport.pullModel.mockReset()
+
+    setOllamaLifecycleClientFactory(fakeFactory)
+    resetOllamaRuntime()
   })
 
   afterEach(() => {
+    resetOllamaRuntime()
+    setOllamaLifecycleClientFactory(null)
     vi.clearAllMocks()
   })
 
@@ -53,7 +73,7 @@ describe('useOllama', () => {
     transport.checkHealth.mockResolvedValue(true)
     transport.listModels.mockResolvedValue(mockModels)
 
-    const { result } = renderHook(() => useOllama())
+    const { result } = renderApp()
 
     expect(result.current.isChecking).toBe(true)
     expect(result.current.isConnected).toBe(false)
@@ -68,7 +88,7 @@ describe('useOllama', () => {
     transport.checkHealth.mockResolvedValue(true)
     transport.listModels.mockResolvedValue(mockModels)
 
-    const { result } = renderHook(() => useOllama())
+    const { result } = renderApp()
 
     await waitFor(() => {
       expect(result.current.isConnected).toBe(true)
@@ -83,7 +103,7 @@ describe('useOllama', () => {
     transport.checkHealth.mockResolvedValue(true)
     transport.listModels.mockResolvedValue(mockModels)
 
-    renderHook(() => useOllama())
+    renderApp()
 
     await waitFor(() => {
       expect(useSettingsStore.getState().ollamaInstalled).toBe(true)
@@ -94,7 +114,7 @@ describe('useOllama', () => {
     transport.checkHealth.mockResolvedValue(true)
     transport.listModels.mockResolvedValue(mockModels)
 
-    renderHook(() => useOllama())
+    renderApp()
 
     await waitFor(() => {
       expect(useSettingsStore.getState().modelsInstalled).toBe(true)
@@ -104,20 +124,20 @@ describe('useOllama', () => {
   it('handles connection failure when Ollama not running', async () => {
     transport.checkHealth.mockResolvedValue(false)
 
-    const { result } = renderHook(() => useOllama())
+    const { result } = renderApp()
 
     await waitFor(() => {
-      expect(result.current.isConnected).toBe(false)
+      expect(result.current.error).toBe('Cannot connect to Ollama. Make sure it is running.')
     })
 
-    expect(result.current.error).toBe('Cannot connect to Ollama. Make sure it is running.')
+    expect(result.current.isConnected).toBe(false)
     expect(useSettingsStore.getState().ollamaInstalled).toBe(false)
   })
 
   it('handles network error', async () => {
     transport.checkHealth.mockRejectedValue(new Error('Network error'))
 
-    const { result } = renderHook(() => useOllama())
+    const { result } = renderApp()
 
     await waitFor(() => {
       expect(result.current.error).toBe('Network error')
@@ -130,7 +150,7 @@ describe('useOllama', () => {
   it('handles non-Error thrown', async () => {
     transport.checkHealth.mockRejectedValue('string error')
 
-    const { result } = renderHook(() => useOllama())
+    const { result } = renderApp()
 
     await waitFor(() => {
       expect(result.current.error).toBe('Failed to connect to Ollama')
@@ -142,7 +162,7 @@ describe('useOllama', () => {
     transport.checkHealth.mockResolvedValue(true)
     transport.listModels.mockResolvedValue([])
 
-    renderHook(() => useOllama())
+    renderApp()
 
     await waitFor(() => {
       expect(transport.constructedHosts).toEqual(['http://custom:8080'])
@@ -153,7 +173,7 @@ describe('useOllama', () => {
     transport.checkHealth.mockResolvedValue(true)
     transport.listModels.mockResolvedValue(mockModels)
 
-    const { result } = renderHook(() => useOllama())
+    const { result } = renderApp()
 
     await waitFor(() => {
       expect(result.current.isConnected).toBe(true)
@@ -168,7 +188,7 @@ describe('useOllama', () => {
     transport.checkHealth.mockResolvedValue(true)
     transport.listModels.mockResolvedValue(mockModels)
 
-    const { result } = renderHook(() => useOllama())
+    const { result } = renderApp()
 
     await waitFor(() => {
       expect(result.current.isConnected).toBe(true)
@@ -187,7 +207,7 @@ describe('useOllama', () => {
     transport.checkHealth.mockResolvedValue(true)
     transport.listModels.mockResolvedValue(similarModels)
 
-    const { result } = renderHook(() => useOllama())
+    const { result } = renderApp()
 
     await waitFor(() => {
       expect(result.current.isConnected).toBe(true)
@@ -204,7 +224,7 @@ describe('useOllama', () => {
     transport.checkHealth.mockResolvedValue(true)
     transport.listModels.mockResolvedValue(mockModels)
 
-    const { result } = renderHook(() => useOllama())
+    const { result } = renderApp()
 
     await waitFor(() => {
       expect(result.current.isConnected).toBe(true)
@@ -217,7 +237,7 @@ describe('useOllama', () => {
     transport.checkHealth.mockResolvedValue(true)
     transport.listModels.mockResolvedValue(mockModels)
 
-    const { result } = renderHook(() => useOllama())
+    const { result } = renderApp()
 
     await waitFor(() => {
       expect(result.current.isConnected).toBe(true)
@@ -243,15 +263,37 @@ describe('useOllama', () => {
     transport.checkHealth.mockResolvedValue(true)
     transport.listModels.mockResolvedValue(mockModels)
 
-    renderHook(() => useOllama())
+    renderApp()
 
     await waitFor(() => {
       expect(useSettingsStore.getState().modelsInstalled).toBe(false)
     })
   })
+
+  it('exposes the pull action of the shared runtime', async () => {
+    transport.checkHealth.mockResolvedValue(true)
+    transport.listModels.mockResolvedValue([])
+    transport.pullModel.mockResolvedValue(undefined)
+
+    const { result } = renderApp()
+    await waitFor(() => expect(result.current.isConnected).toBe(true))
+
+    transport.listModels.mockResolvedValue(mockModels)
+    await act(async () => {
+      await result.current.pullModel('gemma3:4b')
+    })
+
+    expect(transport.pullModel).toHaveBeenCalledWith(
+      'gemma3:4b',
+      expect.any(Function),
+      expect.any(AbortSignal)
+    )
+    expect(result.current.models).toEqual(mockModels)
+    expect(result.current.pull).toBeNull()
+  })
 })
 
-describe('useOllama cancellation and races', () => {
+describe('useOllama application ownership', () => {
   const models = [{ name: 'gemma3:4b', size: 1, modified_at: MODIFIED_AT }]
 
   beforeEach(() => {
@@ -265,17 +307,88 @@ describe('useOllama cancellation and races', () => {
     transport.constructedHosts.length = 0
     transport.checkHealth.mockReset()
     transport.listModels.mockReset()
+    transport.pullModel.mockReset()
+
+    setOllamaLifecycleClientFactory(fakeFactory)
+    resetOllamaRuntime()
   })
 
   afterEach(() => {
+    resetOllamaRuntime()
+    setOllamaLifecycleClientFactory(null)
     vi.clearAllMocks()
+  })
+
+  it('does not start lifecycle work from a consumer adapter', async () => {
+    transport.checkHealth.mockResolvedValue(true)
+    transport.listModels.mockResolvedValue(models)
+
+    const { result } = renderHook(() => useOllama())
+
+    await waitFor(() => expect(result.current.isChecking).toBe(false))
+    expect(transport.constructedHosts).toEqual([])
+    expect(transport.checkHealth).not.toHaveBeenCalled()
+  })
+
+  it('serves a second consumer from the same in-flight request and one flag commit', async () => {
+    const setOllamaInstalled = vi.spyOn(useSettingsStore.getState(), 'setOllamaInstalled')
+    let resolveHealth!: (value: boolean) => void
+    transport.checkHealth.mockReturnValue(
+      new Promise<boolean>(resolve => {
+        resolveHealth = resolve
+      })
+    )
+    transport.listModels.mockResolvedValue(models)
+
+    const main = renderApp()
+    await waitFor(() => expect(transport.checkHealth).toHaveBeenCalledTimes(1))
+
+    // Opening settings mounts another consumer while the main window stays up.
+    const settings = renderHook(() => useOllama())
+    expect(settings.result.current.isChecking).toBe(true)
+
+    await act(async () => {
+      resolveHealth(true)
+    })
+
+    await waitFor(() => expect(main.result.current.isConnected).toBe(true))
+    expect(settings.result.current.isConnected).toBe(true)
+    expect(settings.result.current.models).toEqual(models)
+    expect(transport.constructedHosts).toEqual(['http://localhost:11434'])
+    expect(transport.checkHealth).toHaveBeenCalledTimes(1)
+    expect(transport.listModels).toHaveBeenCalledTimes(1)
+    expect(setOllamaInstalled).toHaveBeenCalledTimes(1)
+    expect(setOllamaInstalled).toHaveBeenCalledWith(true)
+  })
+
+  it('keeps the application lifecycle running when a consumer unmounts', async () => {
+    let resolveHealth!: (value: boolean) => void
+    transport.checkHealth.mockReturnValue(
+      new Promise<boolean>(resolve => {
+        resolveHealth = resolve
+      })
+    )
+    transport.listModels.mockResolvedValue(models)
+
+    const main = renderApp()
+    const settings = renderHook(() => useOllama())
+    await waitFor(() => expect(transport.checkHealth).toHaveBeenCalledTimes(1))
+
+    settings.unmount()
+
+    await act(async () => {
+      resolveHealth(true)
+    })
+
+    await waitFor(() => expect(main.result.current.isConnected).toBe(true))
+    expect(useSettingsStore.getState().ollamaInstalled).toBe(true)
   })
 
   it('forwards a request signal to the health and model calls', async () => {
     transport.checkHealth.mockResolvedValue(true)
     transport.listModels.mockResolvedValue(models)
 
-    const { result } = renderHook(() => useOllama())
+    const { result } = renderApp()
 
     await waitFor(() => expect(result.current.isConnected).toBe(true))
 
@@ -283,25 +396,38 @@ describe('useOllama cancellation and races', () => {
     expect(transport.listModels.mock.calls[0][0]).toBeInstanceOf(AbortSignal)
   })
 
-  it('lets only the newest check publish its status and store flags', async () => {
+  it('starts one check for a new host and retires the old one', async () => {
     const healthResolvers: ((value: boolean) => void)[] = []
+    const healthSignals: (AbortSignal | undefined)[] = []
     transport.checkHealth.mockImplementation(
-      () => new Promise(resolve => { healthResolvers.push(resolve) })
+      (signal?: AbortSignal) =>
+        new Promise<boolean>(resolve => {
+          healthSignals.push(signal)
+          healthResolvers.push(resolve)
+        })
     )
     transport.listModels.mockResolvedValue(models)
 
-    const { result } = renderHook(() => useOllama())
-    await waitFor(() => expect(healthResolvers.length).toBe(1))
+    const { result } = renderApp()
+    await waitFor(() => expect(healthResolvers).toHaveLength(1))
 
-    await act(async () => {
-      result.current.checkConnection()
+    act(() => {
+      useSettingsStore.setState({ ollamaHost: 'http://remote:11434' })
     })
-    await waitFor(() => expect(healthResolvers.length).toBe(2))
 
-    // The newest check succeeds, then the superseded one reports a failure.
+    await waitFor(() => expect(healthResolvers).toHaveLength(2))
+    expect(healthSignals[0]?.aborted).toBe(true)
+    expect(transport.constructedHosts).toEqual([
+      'http://localhost:11434',
+      'http://remote:11434',
+    ])
+
+    // The new host connects; the retired host answers afterwards.
     await act(async () => {
       healthResolvers[1](true)
     })
+    await waitFor(() => expect(result.current.isConnected).toBe(true))
+
     await act(async () => {
       healthResolvers[0](false)
     })
@@ -309,51 +435,22 @@ describe('useOllama cancellation and races', () => {
     expect(result.current.isConnected).toBe(true)
     expect(result.current.error).toBeNull()
     expect(useSettingsStore.getState().ollamaInstalled).toBe(true)
+    expect(transport.listModels).toHaveBeenCalledTimes(1)
   })
 
-  it('ignores a superseded model listing', async () => {
-    const listResolvers: ((value: typeof models) => void)[] = []
+  it('recomputes model status on a selection change without a new request', async () => {
     transport.checkHealth.mockResolvedValue(true)
-    transport.listModels.mockImplementation(
-      () => new Promise(resolve => { listResolvers.push(resolve) })
-    )
+    transport.listModels.mockResolvedValue(models)
 
-    const { result } = renderHook(() => useOllama())
-    await waitFor(() => expect(listResolvers.length).toBe(1))
+    renderApp()
+    await waitFor(() => expect(useSettingsStore.getState().modelsInstalled).toBe(true))
 
-    await act(async () => {
-      result.current.checkConnection()
-    })
-    await waitFor(() => expect(listResolvers.length).toBe(2))
-
-    await act(async () => {
-      listResolvers[1](models)
-    })
-    await act(async () => {
-      listResolvers[0]([])
+    act(() => {
+      useSettingsStore.setState({ correctionModel: 'mistral:7b' })
     })
 
-    expect(result.current.models).toEqual(models)
-    expect(useSettingsStore.getState().modelsInstalled).toBe(true)
-  })
-
-  it('does not publish an error for a check cancelled by unmount', async () => {
-    let rejectHealth: (reason: unknown) => void
-    transport.checkHealth.mockReturnValue(
-      new Promise((_resolve, reject) => { rejectHealth = reject })
-    )
-
-    const { result, unmount } = renderHook(() => useOllama())
-    await waitFor(() => expect(transport.checkHealth).toHaveBeenCalled())
-
-    const stateBefore = result.current
-    unmount()
-
-    await act(async () => {
-      rejectHealth!(new Error('Network error'))
-    })
-
-    expect(stateBefore.error).toBeNull()
-    expect(useSettingsStore.getState().ollamaInstalled).toBe(false)
+    expect(useSettingsStore.getState().modelsInstalled).toBe(false)
+    expect(transport.checkHealth).toHaveBeenCalledTimes(1)
+    expect(transport.listModels).toHaveBeenCalledTimes(1)
   })
 })

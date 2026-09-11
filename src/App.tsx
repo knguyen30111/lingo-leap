@@ -4,6 +4,7 @@ import { MainWindow } from "./components/MainWindow";
 import { SetupWizard } from "./components/SetupWizard";
 import { useSettingsStore } from "./stores/settingsStore";
 import { useTheme } from "./hooks/useTheme";
+import { useOllamaLifecycle } from "./hooks/useOllama";
 import { changeLanguage } from "./i18n";
 
 function App() {
@@ -13,6 +14,9 @@ function App() {
 
   // Initialize theme system
   useTheme();
+
+  // The application owns the single Ollama lifecycle runtime.
+  useOllamaLifecycle();
 
   // Sync UI language from store to i18n
   useEffect(() => {

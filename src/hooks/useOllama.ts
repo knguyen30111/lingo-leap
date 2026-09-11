@@ -1,101 +1,55 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { OllamaClient } from '../lib/ollama-client'
-import { OllamaModelInfo } from '../types'
+import { useEffect } from 'react'
+import { useOllamaStore } from '../stores/ollamaStore'
 import { useSettingsStore } from '../stores/settingsStore'
 
-interface OllamaState {
-  isConnected: boolean
-  isChecking: boolean
-  models: OllamaModelInfo[]
-  error: string | null
-}
-
+/**
+ * Read/action adapter over the application-wide Ollama lifecycle runtime.
+ * Consumers subscribe to the shared snapshot; they own no request, abort
+ * controller, or persisted status write of their own.
+ */
 export function useOllama() {
-  const { ollamaHost, setOllamaInstalled, setModelsInstalled, translationModel, correctionModel } = useSettingsStore()
-
-  const [state, setState] = useState<OllamaState>({
-    isConnected: false,
-    isChecking: true,
-    models: [],
-    error: null,
-  })
-
-  // One provider per configured host; it never changes endpoint mid-flight.
-  const provider = useMemo(() => new OllamaClient(ollamaHost), [ollamaHost])
-  const abortRef = useRef<AbortController | null>(null)
-  const requestIdRef = useRef(0)
-
-  const checkConnection = useCallback(async () => {
-    if (abortRef.current) {
-      abortRef.current.abort()
-    }
-    const controller = new AbortController()
-    abortRef.current = controller
-    const requestId = ++requestIdRef.current
-    const isCurrent = () => requestIdRef.current === requestId && !controller.signal.aborted
-
-    setState(prev => ({ ...prev, isChecking: true, error: null }))
-
-    try {
-      const isHealthy = await provider.checkHealth(controller.signal)
-      if (!isCurrent()) return
-
-      if (isHealthy) {
-        const models = await provider.listModels(controller.signal)
-        if (!isCurrent()) return
-
-        setState({
-          isConnected: true,
-          isChecking: false,
-          models,
-          error: null,
-        })
-        setOllamaInstalled(true)
-
-        // Check if required models are installed using exact name matching
-        const modelNames = models.map(m => m.name)
-        const hasTranslation = modelNames.includes(translationModel)
-        const hasCorrection = modelNames.includes(correctionModel)
-        setModelsInstalled(hasTranslation && hasCorrection)
-      } else {
-        setState({
-          isConnected: false,
-          isChecking: false,
-          models: [],
-          error: 'Cannot connect to Ollama. Make sure it is running.',
-        })
-        setOllamaInstalled(false)
-      }
-    } catch (err) {
-      if (!isCurrent()) return
-      setState({
-        isConnected: false,
-        isChecking: false,
-        models: [],
-        error: err instanceof Error ? err.message : 'Failed to connect to Ollama',
-      })
-      setOllamaInstalled(false)
-    }
-  }, [provider, setOllamaInstalled, setModelsInstalled, translationModel, correctionModel])
-
-  useEffect(() => {
-    checkConnection()
-
-    // A host change or an unmount retires the check that is still in flight.
-    return () => {
-      requestIdRef.current += 1
-      abortRef.current?.abort()
-      abortRef.current = null
-    }
-  }, [checkConnection])
-
-  const hasModel = useCallback((modelName: string): boolean => {
-    return state.models.some(m => m.name === modelName)
-  }, [state.models])
+  const isConnected = useOllamaStore(state => state.isConnected)
+  const isChecking = useOllamaStore(state => state.isChecking)
+  const models = useOllamaStore(state => state.models)
+  const error = useOllamaStore(state => state.error)
+  const pull = useOllamaStore(state => state.pull)
+  const checkConnection = useOllamaStore(state => state.checkConnection)
+  const pullModel = useOllamaStore(state => state.pullModel)
+  const hasModel = useOllamaStore(state => state.hasModel)
 
   return {
-    ...state,
+    isConnected,
+    isChecking,
+    models,
+    error,
+    pull,
     checkConnection,
+    pullModel,
     hasModel,
   }
+}
+
+/**
+ * Application-lifetime lifecycle coordinator. Mounted exactly once, it binds
+ * the runtime to the configured host and keeps derived model status in step
+ * with the selected models without spending an extra request.
+ */
+export function useOllamaLifecycle(): void {
+  const ollamaHost = useSettingsStore(state => state.ollamaHost)
+  const translationModel = useSettingsStore(state => state.translationModel)
+  const correctionModel = useSettingsStore(state => state.correctionModel)
+  const configureHost = useOllamaStore(state => state.configureHost)
+  const checkConnection = useOllamaStore(state => state.checkConnection)
+  const syncRequiredModels = useOllamaStore(state => state.syncRequiredModels)
+
+  useEffect(() => {
+    configureHost(ollamaHost)
+    void checkConnection()
+  }, [ollamaHost, configureHost, checkConnection])
+
+  // A model selection is answered from the cached list; only a host change
+  // needs the network.
+  useEffect(() => {
+    syncRequiredModels()
+  }, [translationModel, correctionModel, syncRequiredModels])
 }
