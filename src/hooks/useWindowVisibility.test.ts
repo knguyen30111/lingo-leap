@@ -77,7 +77,7 @@ describe('useWindowVisibility', () => {
     expect(result.current.isVisible).toBe(false)
   })
 
-  it('calls deactivate_voice_session on close request', async () => {
+  it('does not own the native voice session on close request', async () => {
     const { invoke } = await import('@tauri-apps/api/core')
     renderHook(() => useWindowVisibility())
 
@@ -89,7 +89,7 @@ describe('useWindowVisibility', () => {
       closeRequestedCallback?.()
     })
 
-    expect(invoke).toHaveBeenCalledWith('deactivate_voice_session')
+    expect(invoke).not.toHaveBeenCalled()
   })
 
   it('sets isVisible true on window created event', async () => {
@@ -134,9 +134,13 @@ describe('useWindowVisibility', () => {
     })
   })
 
-  it('calls deactivate_voice_session when document becomes hidden', async () => {
+  it('does not own the native voice session when the document becomes hidden', async () => {
     const { invoke } = await import('@tauri-apps/api/core')
-    renderHook(() => useWindowVisibility())
+    const { result } = renderHook(() => useWindowVisibility())
+
+    await waitFor(() => {
+      expect(closeRequestedCallback).not.toBeNull()
+    })
 
     act(() => {
       Object.defineProperty(document, 'visibilityState', {
@@ -147,8 +151,9 @@ describe('useWindowVisibility', () => {
     })
 
     await waitFor(() => {
-      expect(invoke).toHaveBeenCalledWith('deactivate_voice_session')
+      expect(result.current.isVisible).toBe(false)
     })
+    expect(invoke).not.toHaveBeenCalled()
   })
 
   it('sets isVisible true on window focus', async () => {
@@ -199,21 +204,70 @@ describe('useWindowVisibility', () => {
     expect(removeWindowListener).toHaveBeenCalledWith('focus', expect.any(Function))
   })
 
-  it('handles deactivate_voice_session failure gracefully', async () => {
-    const { invoke } = await import('@tauri-apps/api/core')
-    vi.mocked(invoke).mockRejectedValueOnce(new Error('Failed'))
+  it('runs every listener cleanup registered after an early unmount', async () => {
+    const { getCurrentWindow } = await import('@tauri-apps/api/window')
+    const { listen } = await import('@tauri-apps/api/event')
 
+    const unlistenClose = vi.fn()
+    const unlistenCreated = vi.fn()
+    let resolveClose: () => void = () => {}
+    let resolveCreated: () => void = () => {}
+
+    const closePending = new Promise<() => void>((resolve) => {
+      resolveClose = () => resolve(unlistenClose)
+    })
+    const createdPending = new Promise<() => void>((resolve) => {
+      resolveCreated = () => resolve(unlistenCreated)
+    })
+
+    vi.mocked(getCurrentWindow).mockReturnValue({
+      onCloseRequested: vi.fn(() => closePending),
+    } as unknown as ReturnType<typeof getCurrentWindow>)
+    vi.mocked(listen).mockReturnValue(
+      createdPending as unknown as ReturnType<typeof listen>
+    )
+
+    const removeDocumentListener = vi.spyOn(document, 'removeEventListener')
+    const removeWindowListener = vi.spyOn(window, 'removeEventListener')
+
+    const { unmount } = renderHook(() => useWindowVisibility())
+
+    // Unmount before any registration resolves: every late unlistener still
+    // has to run, or the native subscription leaks for the process lifetime.
+    unmount()
+
+    await act(async () => {
+      resolveClose()
+      resolveCreated()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+
+    expect(unlistenClose).toHaveBeenCalledTimes(1)
+    expect(unlistenCreated).toHaveBeenCalledTimes(1)
+    expect(removeDocumentListener).toHaveBeenCalledWith(
+      'visibilitychange',
+      expect.any(Function)
+    )
+    expect(removeWindowListener).toHaveBeenCalledWith('focus', expect.any(Function))
+
+    removeDocumentListener.mockRestore()
+    removeWindowListener.mockRestore()
+  })
+
+  it('reports hidden only once per close request', async () => {
+    const { invoke } = await import('@tauri-apps/api/core')
     const { result } = renderHook(() => useWindowVisibility())
 
     await waitFor(() => {
       expect(closeRequestedCallback).not.toBeNull()
     })
 
-    // Should not throw
     act(() => {
+      closeRequestedCallback?.()
       closeRequestedCallback?.()
     })
 
     expect(result.current.isVisible).toBe(false)
+    expect(invoke).not.toHaveBeenCalled()
   })
 })

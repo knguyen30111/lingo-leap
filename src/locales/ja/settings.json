@@ -28,16 +28,15 @@
     "explanation": "説明言語",
     "explanationDesc": "文法校正の説明用",
     "speech": "音声認識",
-    "speechDesc": "音声入力の言語",
+    "speechDesc": "音声入力の言語。認識はブラウザーとプラットフォームが提供し、ネットワークサービスを使う場合があります。",
     "interface": "インターフェース言語",
     "interfaceDesc": "アプリの表示言語",
     "matchInput": "入力に合わせる"
   },
   "audio": {
     "microphone": "マイク",
-    "microphoneDesc": "音声入力デバイス",
-    "noMicrophones": "マイクが見つかりません",
-    "default": "（デフォルト）"
+    "microphoneDesc": "音声認識はシステムの既定のマイクを使用します。変更はOSのサウンド設定から行ってください。",
+    "systemDefault": "システムの既定"
   },
   "version": "Lingo Leap v0.1.0"
 }

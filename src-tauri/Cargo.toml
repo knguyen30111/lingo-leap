@@ -1,7 +1,7 @@
 [package]
 name = "tran-app"
 version = "0.1.0"
-description = "Offline macOS translation app with AI-powered translation and grammar correction"
+description = "macOS translation app with local AI-powered translation and grammar correction"
 authors = ["TranApp"]
 license = "MIT"
 repository = ""

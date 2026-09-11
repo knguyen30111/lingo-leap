@@ -13,22 +13,6 @@ vi.mock('../hooks/useOllama', () => ({
   }),
 }))
 
-// Mock useAudioDevices hook
-const mockSelectDevice = vi.fn()
-const mockRefreshDevices = vi.fn()
-vi.mock('../hooks/useAudioDevices', () => ({
-  useAudioDevices: () => ({
-    devices: [
-      { deviceId: 'default', label: 'Default Microphone', isDefault: true },
-      { deviceId: 'mic-2', label: 'External Mic', isDefault: false },
-    ],
-    selectedDeviceId: 'default',
-    selectDevice: mockSelectDevice,
-    refreshDevices: mockRefreshDevices,
-    isLoading: false,
-  }),
-}))
-
 // Mock react-i18next
 vi.mock('react-i18next', () => ({
   initReactI18next: { type: '3rdParty', init: vi.fn() },
@@ -60,9 +44,9 @@ vi.mock('react-i18next', () => ({
         'streaming.label': 'Streaming',
         'streaming.description': 'Stream responses',
         'audio.microphone': 'Microphone',
-        'audio.microphoneDesc': 'Select input device',
-        'audio.noMicrophones': 'No microphones found',
-        'audio.default': '(Default)',
+        'audio.microphoneDesc':
+          'Speech recognition uses your system default microphone. Change it in your operating system sound settings.',
+        'audio.systemDefault': 'System default',
         version: 'Version 1.0.0',
         'common:save': 'Save',
         'common:languages.en': 'English',
@@ -86,6 +70,19 @@ vi.mock('../i18n', () => ({
   changeLanguage: vi.fn(),
 }))
 
+// Settings must never reach for microphone hardware just to be inspected
+const mockGetUserMedia = vi.fn()
+const mockEnumerateDevices = vi.fn().mockResolvedValue([])
+Object.defineProperty(navigator, 'mediaDevices', {
+  configurable: true,
+  value: {
+    getUserMedia: mockGetUserMedia,
+    enumerateDevices: mockEnumerateDevices,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+  },
+})
+
 describe('SettingsPanel', () => {
   const onClose = vi.fn()
 
@@ -102,8 +99,8 @@ describe('SettingsPanel', () => {
       uiLanguage: 'en',
     })
     onClose.mockClear()
-    mockSelectDevice.mockClear()
-    mockRefreshDevices.mockClear()
+    mockGetUserMedia.mockClear()
+    mockEnumerateDevices.mockClear()
   })
 
   afterEach(() => {
@@ -283,46 +280,39 @@ describe('SettingsPanel', () => {
   })
 
   describe('Audio settings', () => {
-    it('renders microphone selector', () => {
+    it('explains that speech uses the system default microphone', () => {
       render(<SettingsPanel onClose={onClose} />)
+
       expect(screen.getByText('Microphone')).toBeInTheDocument()
+      expect(screen.getByText('System default')).toBeInTheDocument()
+      expect(
+        screen.getByText(
+          'Speech recognition uses your system default microphone. Change it in your operating system sound settings.'
+        )
+      ).toBeInTheDocument()
     })
 
-    it('shows available devices', () => {
-      render(<SettingsPanel onClose={onClose} />)
-
-      expect(screen.getByText('Default Microphone (Default)')).toBeInTheDocument()
-      expect(screen.getByText('External Mic')).toBeInTheDocument()
-    })
-
-    it('calls selectDevice when device changed', () => {
-      render(<SettingsPanel onClose={onClose} />)
+    it('offers no microphone selector', () => {
+      const { container } = render(<SettingsPanel onClose={onClose} />)
 
       const selects = screen.getAllByRole('combobox')
-      const micSelect = selects.find((s) => {
-        const options = s.querySelectorAll('option')
-        return Array.from(options).some((o) => o.value === 'mic-2')
-      })
+      const deviceSelect = selects.find((select) =>
+        Array.from(select.querySelectorAll('option')).some((option) =>
+          /microphone|mic-/i.test(option.value + option.textContent)
+        )
+      )
 
-      if (micSelect) {
-        fireEvent.change(micSelect, { target: { value: 'mic-2' } })
-        expect(mockSelectDevice).toHaveBeenCalledWith('mic-2')
-      }
+      expect(deviceSelect).toBeUndefined()
+      expect(container.textContent).not.toMatch(/no microphones found/i)
     })
 
-    it('refreshes devices on focus', () => {
+    it('requests no microphone permission when settings are opened or focused', () => {
       render(<SettingsPanel onClose={onClose} />)
 
-      const selects = screen.getAllByRole('combobox')
-      const micSelect = selects.find((s) => {
-        const options = s.querySelectorAll('option')
-        return Array.from(options).some((o) => o.value === 'mic-2')
-      })
+      screen.getAllByRole('combobox').forEach((select) => fireEvent.focus(select))
 
-      if (micSelect) {
-        fireEvent.focus(micSelect)
-        expect(mockRefreshDevices).toHaveBeenCalledWith(true)
-      }
+      expect(mockGetUserMedia).not.toHaveBeenCalled()
+      expect(mockEnumerateDevices).not.toHaveBeenCalled()
     })
   })
 

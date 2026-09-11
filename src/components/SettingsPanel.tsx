@@ -2,7 +2,6 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSettingsStore, ThemeMode } from "../stores/settingsStore";
 import { useOllama } from "../hooks/useOllama";
-import { useAudioDevices } from "../hooks/useAudioDevices";
 import { UI_LANGUAGES, type UILanguageCode } from "../i18n";
 
 interface SettingsPanelProps {
@@ -80,13 +79,6 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
 
   const { models } = useOllama();
   const [localHost, setLocalHost] = useState(ollamaHost);
-  const {
-    devices,
-    selectedDeviceId,
-    selectDevice,
-    refreshDevices,
-    isLoading: isLoadingDevices,
-  } = useAudioDevices();
 
   const handleSaveHost = () => {
     setOllamaHost(localHost);
@@ -353,25 +345,16 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
             }
             title={t("sections.audio")}
           >
-            <SettingRow label={t("audio.microphone")} description={t("audio.microphoneDesc")}>
-              <select
-                value={selectedDeviceId || ""}
-                onChange={(e) => selectDevice(e.target.value)}
-                onFocus={() => refreshDevices(true)}
-                disabled={isLoadingDevices || devices.length === 0}
-                className="select-glass w-full text-sm"
-              >
-                {devices.length === 0 ? (
-                  <option value="">{t("audio.noMicrophones")}</option>
-                ) : (
-                  devices.map((device) => (
-                    <option key={device.deviceId} value={device.deviceId}>
-                      {device.label}
-                      {device.isDefault ? ` ${t("audio.default")}` : ""}
-                    </option>
-                  ))
-                )}
-              </select>
+            {/* Web Speech recognition picks its own input, so the app cannot
+                route a chosen device to it - state the real boundary instead. */}
+            <SettingRow
+              label={t("audio.microphone")}
+              description={t("audio.microphoneDesc")}
+              inline
+            >
+              <span className="text-xs text-[var(--text-secondary)]">
+                {t("audio.systemDefault")}
+              </span>
             </SettingRow>
           </SettingsSection>
         </div>

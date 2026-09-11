@@ -1,6 +1,6 @@
 {
   "welcome": "Lingo Leapへようこそ",
-  "subtitle": "ローカルAIによるオフライン翻訳",
+  "subtitle": "ローカルAIによる翻訳",
   "ollama": {
     "checking": "Ollamaを確認中...",
     "connected": "Ollama接続済み",

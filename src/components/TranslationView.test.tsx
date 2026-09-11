@@ -39,18 +39,28 @@ vi.mock('../hooks/useTranslation', () => ({
   }),
 }))
 
-// Mock useSpeechToText hook - capture onTextReady for testing
+// Mock useSpeechToText hook - each test drives its own speech state
 let capturedOnTextReady: ((text: string) => void) | undefined
+let capturedLang: string | undefined
+const speechState = {
+  isListening: false,
+  isSupported: true,
+  transcript: '',
+  interimTranscript: '',
+  silenceDetected: false,
+  error: null as string | null,
+}
+const mockToggleListening = vi.fn()
 vi.mock('../hooks/useSpeechToText', () => ({
-  useSpeechToText: (options?: { onTextReady?: (text: string) => void }) => {
+  useSpeechToText: (options?: { lang?: string; onTextReady?: (text: string) => void }) => {
     capturedOnTextReady = options?.onTextReady
+    capturedLang = options?.lang
     return {
-      isListening: false,
-      isSupported: true,
-      transcript: '',
-      interimTranscript: '',
-      silenceDetected: false,
-      toggleListening: vi.fn(),
+      ...speechState,
+      startListening: vi.fn(),
+      stopListening: vi.fn(),
+      toggleListening: mockToggleListening,
+      clearTranscript: vi.fn(),
     }
   },
 }))
@@ -71,9 +81,27 @@ vi.mock('./LanguageSelector', () => ({
 }))
 
 vi.mock('./MicButton', () => ({
-  MicButton: ({ onClick, disabled }: { onClick: () => void; disabled: boolean }) => (
-    <button data-testid="mic-button" onClick={onClick} disabled={disabled}>Mic</button>
-  ),
+  MicButton: ({
+    onClick,
+    disabled,
+    isSupported,
+    isListening,
+  }: {
+    onClick: () => void
+    disabled: boolean
+    isSupported: boolean
+    isListening: boolean
+  }) =>
+    isSupported ? (
+      <button
+        data-testid="mic-button"
+        onClick={onClick}
+        disabled={disabled}
+        aria-pressed={isListening}
+      >
+        Mic
+      </button>
+    ) : null,
 }))
 
 vi.mock('./SpeechPreview', () => ({
@@ -100,6 +128,16 @@ describe('TranslationView', () => {
       speechLang: 'en',
     })
     mockTranslate.mockClear()
+    mockToggleListening.mockClear()
+    capturedLang = undefined
+    Object.assign(speechState, {
+      isListening: false,
+      isSupported: true,
+      transcript: '',
+      interimTranscript: '',
+      silenceDetected: false,
+      error: null,
+    })
   })
 
   afterEach(() => {
@@ -388,6 +426,70 @@ describe('TranslationView', () => {
       }
 
       expect(useAppStore.getState().inputText).toBe('Hello world')
+    })
+  })
+
+  describe('Speech capability boundary', () => {
+    it('hides the mic control and any speech alert when recognition is unsupported', () => {
+      speechState.isSupported = false
+      render(<TranslationView />)
+
+      expect(screen.queryByTestId('mic-button')).not.toBeInTheDocument()
+      expect(screen.queryByTitle('Speech language')).not.toBeInTheDocument()
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+      // The unrelated translation language controls stay usable
+      expect(screen.getAllByRole('combobox').length).toBeGreaterThanOrEqual(2)
+    })
+
+    it('exposes a failed attempt as one accessible alert and keeps the mic retryable', () => {
+      speechState.error = 'Microphone access denied'
+      render(<TranslationView />)
+
+      const alerts = screen.getAllByRole('alert')
+      expect(alerts).toHaveLength(1)
+      expect(alerts[0]).toHaveTextContent('Microphone access denied')
+      expect(screen.getByTestId('mic-button')).toBeEnabled()
+    })
+
+    it('keeps the speech alert distinct from a translation failure', () => {
+      speechState.error = 'Speech recognition requires a network connection'
+      useAppStore.setState({ error: 'Ollama request failed' })
+      render(<TranslationView />)
+
+      const alerts = screen.getAllByRole('alert')
+      expect(alerts).toHaveLength(1)
+      expect(alerts[0]).toHaveTextContent('Speech recognition requires a network connection')
+      expect(screen.getByText('Ollama request failed')).toBeInTheDocument()
+    })
+
+    it('clears the speech alert when a retry starts listening', () => {
+      speechState.error = 'Microphone access denied'
+      const { rerender } = render(<TranslationView />)
+      expect(screen.getAllByRole('alert')).toHaveLength(1)
+
+      speechState.error = null
+      speechState.isListening = true
+      rerender(<TranslationView />)
+
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+      expect(screen.getByTestId('mic-button')).toHaveAttribute('aria-pressed', 'true')
+    })
+
+    it('labels the speech language control as a language control', () => {
+      render(<TranslationView />)
+
+      const speechSelect = screen.getByLabelText('Speech language')
+      expect(speechSelect).toBe(screen.getByTitle('Speech language'))
+
+      fireEvent.change(speechSelect, { target: { value: 'ko' } })
+      expect(useSettingsStore.getState().speechLang).toBe('ko')
+    })
+
+    it('passes the selected speech language to the hook', () => {
+      useSettingsStore.setState({ speechLang: 'ja' })
+      render(<TranslationView />)
+
+      expect(capturedLang).toBe('ja')
     })
   })
 })
