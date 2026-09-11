@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { act, render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { CorrectionView } from './CorrectionView'
 import { useAppStore } from '../stores/appStore'
 import { useSettingsStore } from '../stores/settingsStore'
@@ -428,10 +428,10 @@ describe('CorrectionView', () => {
       useAppStore.setState({ inputText: '' })
       render(<CorrectionView />)
 
-      // Call the captured onTextReady callback
-      if (capturedOnTextReady) {
-        capturedOnTextReady('Hello')
-      }
+      // Call the captured onTextReady callback; the test owns this store flush
+      act(() => {
+        capturedOnTextReady?.('Hello')
+      })
 
       expect(useAppStore.getState().inputText).toBe('Hello')
     })
@@ -440,10 +440,10 @@ describe('CorrectionView', () => {
       useAppStore.setState({ inputText: 'Hello' })
       render(<CorrectionView />)
 
-      // Call the captured onTextReady callback
-      if (capturedOnTextReady) {
-        capturedOnTextReady('world')
-      }
+      // Call the captured onTextReady callback; the test owns this store flush
+      act(() => {
+        capturedOnTextReady?.('world')
+      })
 
       expect(useAppStore.getState().inputText).toBe('Hello world')
     })

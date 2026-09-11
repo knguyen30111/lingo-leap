@@ -288,8 +288,9 @@ describe('useCorrection', () => {
 
     const { result } = renderHook(() => useCorrection())
 
-    const correctPromise = act(async () => {
-      result.current.correct()
+    let correctPromise!: Promise<string | undefined>
+    act(() => {
+      correctPromise = result.current.correct()
     })
 
     await waitFor(() => {
@@ -298,9 +299,8 @@ describe('useCorrection', () => {
 
     await act(async () => {
       resolveCorrect!('Done')
+      await correctPromise
     })
-
-    await correctPromise
   })
 })
 

@@ -40,6 +40,9 @@ jobs:
       - name: Dependency audit (moderate and above)
         run: npm audit --audit-level=moderate
 
+      - name: Lint
+        run: npm run lint
+
       - name: TypeScript and frontend build
         run: npm run build
 

@@ -36,7 +36,7 @@ export function supportsEmbeddedFormat(modelType: ModelType): boolean {
 
 // Clean model-specific artifacts from output
 export function cleanModelOutput(text: string, _modelType: ModelType): string {
-  let cleaned = text
+  const cleaned = text
     .replace(/<\|im_end\|>/g, '')
     .replace(/<\|im_start\|>assistant\n?/g, '')
     .replace(/<\|end\|>/g, '')
