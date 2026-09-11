@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { useOllamaStore } from '../stores/ollamaStore'
+import { retireOllamaLifecycleWork, useOllamaStore } from '../stores/ollamaStore'
 import { useSettingsStore } from '../stores/settingsStore'
 
 /**
@@ -52,4 +52,8 @@ export function useOllamaLifecycle(): void {
   useEffect(() => {
     syncRequiredModels()
   }, [translationModel, correctionModel, syncRequiredModels])
+
+  // Only the owner retires lifecycle work. A consumer adapter unmount leaves
+  // the shared runtime untouched, so the remaining consumers keep their state.
+  useEffect(() => retireOllamaLifecycleWork, [])
 }

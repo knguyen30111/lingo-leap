@@ -59,6 +59,9 @@ interface InFlight {
   host: string
   generation: number
   promise: Promise<void>
+  // A pull that lost the single progress slot to a newer pull. It stays
+  // in flight for its caller but may no longer publish anything.
+  superseded?: boolean
 }
 
 let activeCheck: InFlight | null = null
@@ -67,6 +70,12 @@ const activePulls = new Map<string, InFlight>()
 // The pull that currently owns the single progress slot. A superseding pull
 // takes ownership, so an older one can neither publish progress nor clear it.
 let pullOwner: InFlight | null = null
+
+/** Hands the single progress slot to `entry` and retires the previous owner. */
+function takeProgressSlot(entry: InFlight): void {
+  if (pullOwner && pullOwner !== entry) pullOwner.superseded = true
+  pullOwner = entry
+}
 
 // Model listings are issued by checks and by pull refreshes alike, so a
 // generation alone cannot order them. Each listing takes a monotonic ticket and
@@ -113,13 +122,15 @@ const initialState = {
 export const useOllamaStore = create<OllamaLifecycleState>((set, get) => {
   /**
    * Publishes a healthy result plus the status the settings snapshot derives.
-   * An out-of-order listing from an earlier request is dropped.
+   * An out-of-order listing from an earlier request is dropped. `isChecking`
+   * belongs to the connection check, so a pull refresh publishes an ordered
+   * listing here without settling a check that is still pending.
    */
   const commitModels = (models: OllamaModelInfo[], ticket: number): void => {
     if (ticket < committedListTicket) return
     committedListTicket = ticket
     listCommitted = true
-    set({ isConnected: true, isChecking: false, models, error: null })
+    set({ isConnected: true, models, error: null })
     const settings = useSettingsStore.getState()
     settings.setOllamaInstalled(true)
     settings.setModelsInstalled(requiredModelsPresent(models))
@@ -200,6 +211,9 @@ export const useOllamaStore = create<OllamaLifecycleState>((set, get) => {
           if (!isCurrent()) return
 
           commitModels(models, ticket)
+          // The check owns `isChecking`, including when a newer listing has
+          // already superseded the one it just fetched.
+          set({ isChecking: false })
         } catch (err) {
           if (!isCurrent()) return
           commitDisconnected(errorMessage(err, CONNECT_FAILED_ERROR))
@@ -223,12 +237,15 @@ export const useOllamaStore = create<OllamaLifecycleState>((set, get) => {
 
       const requestController = currentController()
       const requestGeneration = generation
+      const entry: InFlight = { host, generation: requestGeneration, promise: Promise.resolve() }
+
+      // A pull may publish only while it still owns its request: the runtime
+      // target is unchanged and no newer pull has taken the progress slot.
       const isCurrent = () =>
         generation === requestGeneration &&
         get().host === host &&
-        !requestController.signal.aborted
-
-      const entry: InFlight = { host, generation: requestGeneration, promise: Promise.resolve() }
+        !requestController.signal.aborted &&
+        !entry.superseded
 
       const ownsProgress = () => pullOwner === entry
       const releaseProgress = () => {
@@ -238,7 +255,7 @@ export const useOllamaStore = create<OllamaLifecycleState>((set, get) => {
       }
 
       const run = async (): Promise<void> => {
-        pullOwner = entry
+        takeProgressSlot(entry)
         set({ pull: { model: modelName, status: PULL_STARTING_STATUS } })
         try {
           await lifecycleClient.pullModel(
@@ -287,6 +304,15 @@ export function setOllamaLifecycleClientFactory(
   factory: OllamaLifecycleClientFactory | null
 ): void {
   createClient = factory ?? defaultClientFactory
+}
+
+/**
+ * Retires the lifecycle work started by the application-level owner. The bound
+ * host and its published snapshot survive; only in-flight requests are dropped
+ * so a late answer cannot publish runtime or persisted state.
+ */
+export function retireOllamaLifecycleWork(): void {
+  retireActiveWork()
 }
 
 /** Retires in-flight lifecycle work and returns the runtime to its initial state. */

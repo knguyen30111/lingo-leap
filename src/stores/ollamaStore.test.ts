@@ -687,6 +687,35 @@ describe('ollamaStore lifecycle runtime', () => {
       await first
     })
 
+    it('publishes a refresh failure without clearing a newer pull progress', async () => {
+      await connect(HOST_A, [])
+
+      const first = runtime().pullModel('gemma3:4b')
+      await drain()
+      transport.pulls[0].resolve()
+      await drain()
+
+      // The finished pull released the slot before its refresh answered, so a
+      // newer pull owns the progress the failure must leave alone.
+      const second = runtime().pullModel('llama3:8b')
+      await drain()
+      expect(runtime().pull).toEqual({ model: 'llama3:8b', status: 'starting' })
+
+      transport.list[transport.list.length - 1].reject(new Error('listing failed'))
+      await first
+
+      expect(runtime().error).toBe('listing failed')
+      expect(runtime().pull).toEqual({ model: 'llama3:8b', status: 'starting' })
+
+      transport.pulls[1].resolve()
+      await drain()
+      transport.list[transport.list.length - 1].resolve(modelsA)
+      await second
+
+      expect(runtime().pull).toBeNull()
+      expect(runtime().models).toEqual(modelsA)
+    })
+
     it('does not settle a pending connection check from a pull refresh', async () => {
       await connect(HOST_A, [])
 
