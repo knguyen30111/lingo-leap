@@ -1,3 +1,4 @@
+compile_error!("ci gate red proof");
 use tauri::{
     image::Image,
     menu::{Menu, MenuItem},
