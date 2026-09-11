@@ -877,6 +877,229 @@ describe('ollamaStore lifecycle runtime', () => {
       expect(runtime().error).toBeNull()
     })
 
+    it('does not let an older check publish an unhealthy result over a newer pull listing', async () => {
+      await connect(HOST_A, [])
+
+      // The check takes its place in the factual order before the pull runs.
+      const checking = runtime().checkConnection()
+      await drain()
+      const pulling = runtime().pullModel('gemma3:4b')
+      await drain()
+      transport.pulls[0].resolve()
+      await drain()
+      transport.list[transport.list.length - 1].resolve(modelsA)
+      await pulling
+      expect(runtime().models).toEqual(modelsA)
+
+      // The older check answers last; it owes its own spinner and nothing else.
+      transport.health[transport.health.length - 1].resolve(false)
+      await checking
+
+      expect(runtime().isChecking).toBe(false)
+      expect(runtime().isConnected).toBe(true)
+      expect(runtime().models).toEqual(modelsA)
+      expect(runtime().error).toBeNull()
+      expect(settings().ollamaInstalled).toBe(true)
+
+      // The newer listing is still the committed one a recomputation reads.
+      useSettingsStore.setState({ modelsInstalled: false })
+      runtime().syncRequiredModels()
+      expect(settings().modelsInstalled).toBe(true)
+    })
+
+    it('does not let an older check publish a health failure over a newer pull listing', async () => {
+      await connect(HOST_A, [])
+
+      const checking = runtime().checkConnection()
+      await drain()
+      const pulling = runtime().pullModel('gemma3:4b')
+      await drain()
+      transport.pulls[0].resolve()
+      await drain()
+      transport.list[transport.list.length - 1].resolve(modelsA)
+      await pulling
+
+      transport.health[transport.health.length - 1].reject(new Error('Network error'))
+      await checking
+
+      expect(runtime().isChecking).toBe(false)
+      expect(runtime().isConnected).toBe(true)
+      expect(runtime().models).toEqual(modelsA)
+      expect(runtime().error).toBeNull()
+      expect(settings().ollamaInstalled).toBe(true)
+
+      useSettingsStore.setState({ modelsInstalled: false })
+      runtime().syncRequiredModels()
+      expect(settings().modelsInstalled).toBe(true)
+    })
+
+    it('skips the list request of a check a newer pull listing already superseded', async () => {
+      await connect(HOST_A, [])
+
+      const checking = runtime().checkConnection()
+      await drain()
+      const pulling = runtime().pullModel('gemma3:4b')
+      await drain()
+      transport.pulls[0].resolve()
+      await drain()
+      transport.list[transport.list.length - 1].resolve(modelsA)
+      await pulling
+
+      // A healthy answer that arrives after a newer listing committed could
+      // only fetch older inventory, so the request is never issued.
+      const listCallsBefore = transport.list.length
+      transport.health[transport.health.length - 1].resolve(true)
+      await checking
+
+      expect(transport.list).toHaveLength(listCallsBefore)
+      expect(runtime().isChecking).toBe(false)
+      expect(runtime().isConnected).toBe(true)
+      expect(runtime().models).toEqual(modelsA)
+    })
+
+    it('does not let an older check publish a listing failure over a newer pull listing', async () => {
+      await connect(HOST_A, [])
+
+      const checking = runtime().checkConnection()
+      await drain()
+      transport.health[transport.health.length - 1].resolve(true)
+      await drain()
+      const checkList = transport.list[transport.list.length - 1]
+
+      const pulling = runtime().pullModel('gemma3:4b')
+      await drain()
+      transport.pulls[0].resolve()
+      await drain()
+      const refresh = transport.list[transport.list.length - 1]
+      expect(refresh).not.toBe(checkList)
+
+      refresh.resolve(modelsA)
+      await pulling
+
+      // The older check's own listing fails after the newer one committed.
+      checkList.reject(new Error('listing failed'))
+      await checking
+
+      expect(runtime().isChecking).toBe(false)
+      expect(runtime().isConnected).toBe(true)
+      expect(runtime().models).toEqual(modelsA)
+      expect(runtime().error).toBeNull()
+      expect(settings().ollamaInstalled).toBe(true)
+    })
+
+    it('lets a check publish its unhealthy result after a later pull failed', async () => {
+      await connect(HOST_A, modelsA)
+
+      const checking = runtime().checkConnection()
+      await drain()
+      const pulling = runtime().pullModel('mistral:7b')
+      await drain()
+
+      // A failed pull publishes no factual state, so it bars nothing.
+      transport.pulls[0].reject(new Error('Failed to pull model: Not Found'))
+      await pulling
+      expect(runtime().error).toBe('Failed to pull model: Not Found')
+
+      transport.health[transport.health.length - 1].resolve(false)
+      await checking
+
+      expect(runtime().isChecking).toBe(false)
+      expect(runtime().isConnected).toBe(false)
+      expect(runtime().models).toEqual([])
+      expect(settings().ollamaInstalled).toBe(false)
+      // The error channel still belongs to the pull that took it.
+      expect(runtime().error).toBe('Failed to pull model: Not Found')
+      expect(runtime().pull).toBeNull()
+    })
+
+    it('lets a check publish its listing after a pull refresh failed', async () => {
+      await connect(HOST_A, [])
+
+      const checking = runtime().checkConnection()
+      await drain()
+      const pulling = runtime().pullModel('gemma3:4b')
+      await drain()
+      transport.pulls[0].resolve()
+      await drain()
+
+      // The refresh took a newer place in the factual order and then failed.
+      // Publishing nothing, it leaves the older check free to publish.
+      transport.list[transport.list.length - 1].reject(new Error('listing failed'))
+      await pulling
+      expect(runtime().error).toBe('listing failed')
+
+      transport.health[transport.health.length - 1].resolve(true)
+      await drain()
+      transport.list[transport.list.length - 1].resolve(modelsA)
+      await checking
+
+      expect(runtime().isChecking).toBe(false)
+      expect(runtime().isConnected).toBe(true)
+      expect(runtime().models).toEqual(modelsA)
+      expect(settings().ollamaInstalled).toBe(true)
+      expect(runtime().error).toBe('listing failed')
+    })
+
+    it('settles the checking flag on every superseded check outcome', async () => {
+      /**
+       * Arranges a check that a newer pull listing supersedes. With
+       * `issueList` the check has already sent its own listing request before
+       * the newer listing commits.
+       */
+      const supersededCheck = async (
+        issueList: boolean
+      ): Promise<{
+        checking: Promise<void>
+        checkList: RecordedCall<OllamaModelInfo[]> | null
+      }> => {
+        transport.hosts.length = 0
+        transport.health.length = 0
+        transport.list.length = 0
+        transport.pulls.length = 0
+        resetOllamaRuntime()
+        await connect(HOST_A, [])
+
+        const checking = runtime().checkConnection()
+        await drain()
+
+        let checkList: RecordedCall<OllamaModelInfo[]> | null = null
+        if (issueList) {
+          transport.health[transport.health.length - 1].resolve(true)
+          await drain()
+          checkList = transport.list[transport.list.length - 1]
+        }
+
+        const pulling = runtime().pullModel('gemma3:4b')
+        await drain()
+        transport.pulls[0].resolve()
+        await drain()
+        transport.list[transport.list.length - 1].resolve(modelsA)
+        await pulling
+
+        return { checking, checkList }
+      }
+
+      const unhealthy = await supersededCheck(false)
+      transport.health[transport.health.length - 1].resolve(false)
+      await unhealthy.checking
+      expect(runtime().isChecking).toBe(false)
+
+      const healthFailure = await supersededCheck(false)
+      transport.health[transport.health.length - 1].reject(new Error('Network error'))
+      await healthFailure.checking
+      expect(runtime().isChecking).toBe(false)
+
+      const skippedListing = await supersededCheck(false)
+      transport.health[transport.health.length - 1].resolve(true)
+      await skippedListing.checking
+      expect(runtime().isChecking).toBe(false)
+
+      const listingFailure = await supersededCheck(true)
+      listingFailure.checkList?.reject(new Error('listing failed'))
+      await listingFailure.checking
+      expect(runtime().isChecking).toBe(false)
+    })
+
     it('does not publish the error of a retired pull', async () => {
       await connect(HOST_A, modelsA)
 
