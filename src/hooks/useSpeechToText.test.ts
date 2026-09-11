@@ -93,18 +93,19 @@ const interim = (text: string) => resultEvent([{ isFinal: false, transcript: tex
 const final = (text: string) => resultEvent([{ isFinal: true, transcript: text }])
 
 function audioContextMock(state = 'running') {
-  return vi.fn(() => ({
-    state,
-    resume: vi.fn().mockResolvedValue(undefined),
-    sampleRate: 44100,
-    createBuffer: vi.fn(() => ({})),
-    createBufferSource: vi.fn(() => ({
+  // Production calls `new AudioContext()`, so the double must be constructable.
+  return class MockAudioContext {
+    state = state
+    resume = vi.fn().mockResolvedValue(undefined)
+    sampleRate = 44100
+    createBuffer = vi.fn(() => ({}))
+    createBufferSource = vi.fn(() => ({
       buffer: null,
       connect: vi.fn(),
       start: vi.fn(),
-    })),
-    destination: {},
-  }))
+    }))
+    destination = {}
+  }
 }
 
 describe('useSpeechToText', () => {
@@ -1367,9 +1368,11 @@ describe('useSpeechToText', () => {
   it('survives an audio context constructor failure', async () => {
     Object.defineProperty(window, 'AudioContext', {
       configurable: true,
-      value: vi.fn(() => {
-        throw new Error('no audio')
-      }),
+      value: class FailingAudioContext {
+        constructor() {
+          throw new Error('no audio')
+        }
+      },
     })
     Object.defineProperty(window, 'webkitAudioContext', {
       configurable: true,

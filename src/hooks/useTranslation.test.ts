@@ -281,8 +281,9 @@ describe('useTranslation', () => {
 
     const { result } = renderHook(() => useTranslation())
 
-    const translatePromise = act(async () => {
-      result.current.translate()
+    let translatePromise!: Promise<string | undefined>
+    act(() => {
+      translatePromise = result.current.translate()
     })
 
     await waitFor(() => {
@@ -291,9 +292,8 @@ describe('useTranslation', () => {
 
     await act(async () => {
       resolveTranslate!({ translated: 'Done' })
+      await translatePromise
     })
-
-    await translatePromise
   })
 
   it('clears output before translating', async () => {
@@ -308,8 +308,9 @@ describe('useTranslation', () => {
 
     const { result } = renderHook(() => useTranslation())
 
-    const translatePromise = act(async () => {
-      result.current.translate()
+    let translatePromise!: Promise<string | undefined>
+    act(() => {
+      translatePromise = result.current.translate()
     })
 
     await waitFor(() => {
@@ -318,9 +319,8 @@ describe('useTranslation', () => {
 
     await act(async () => {
       resolveTranslate!({ translated: 'New output' })
+      await translatePromise
     })
-
-    await translatePromise
   })
 
   it('returns translated result', async () => {

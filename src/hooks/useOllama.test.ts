@@ -49,7 +49,7 @@ describe('useOllama', () => {
     vi.clearAllMocks()
   })
 
-  it('returns initial checking state', () => {
+  it('returns initial checking state', async () => {
     transport.checkHealth.mockResolvedValue(true)
     transport.listModels.mockResolvedValue(mockModels)
 
@@ -57,6 +57,11 @@ describe('useOllama', () => {
 
     expect(result.current.isChecking).toBe(true)
     expect(result.current.isConnected).toBe(false)
+
+    // Drain the initial connection effect so its state updates stay inside act
+    await waitFor(() => {
+      expect(result.current.isChecking).toBe(false)
+    })
   })
 
   it('connects successfully when Ollama is running', async () => {
@@ -222,7 +227,9 @@ describe('useOllama', () => {
     transport.checkHealth.mockClear()
     transport.listModels.mockClear()
 
-    await result.current.checkConnection()
+    await act(async () => {
+      await result.current.checkConnection()
+    })
 
     expect(transport.checkHealth).toHaveBeenCalled()
     expect(transport.listModels).toHaveBeenCalled()
