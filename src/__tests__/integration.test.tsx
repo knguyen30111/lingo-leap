@@ -142,7 +142,14 @@ describe('App Integration', () => {
       explanationLang: 'auto',
     })
 
-    // The lifecycle runtime is shared; these flows assume a connected host.
+    // The lifecycle runtime is shared; these flows assume a connected host and
+    // must never reach a real transport if one of them triggers a retry.
+    setOllamaLifecycleClientFactory(() => ({
+      checkHealth: async () => true,
+      listModels: async () => [],
+      pullModel: async () => {},
+    }))
+    resetOllamaRuntime()
     useOllamaStore.setState({
       host: 'http://localhost:11434',
       isConnected: true,
@@ -158,6 +165,8 @@ describe('App Integration', () => {
   })
 
   afterEach(() => {
+    resetOllamaRuntime()
+    setOllamaLifecycleClientFactory(null)
     vi.clearAllMocks()
   })
 

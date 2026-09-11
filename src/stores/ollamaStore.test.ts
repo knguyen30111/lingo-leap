@@ -561,6 +561,65 @@ describe('ollamaStore lifecycle runtime', () => {
       expect(runtime().error).toBe('Failed to pull model')
     })
 
+    it('keeps the newest listing when a check and a pull refresh race', async () => {
+      await connect(HOST_A, [])
+
+      const pulling = runtime().pullModel('gemma3:4b')
+      await drain()
+
+      // A check is in flight while the pull runs; its listing was issued first.
+      const checking = runtime().checkConnection()
+      await drain()
+      transport.health[transport.health.length - 1].resolve(true)
+      await drain()
+      const checkList = transport.list[transport.list.length - 1]
+
+      transport.pulls[0].resolve()
+      await drain()
+      const refreshList = transport.list[transport.list.length - 1]
+      expect(refreshList).not.toBe(checkList)
+
+      refreshList.resolve(modelsA)
+      await drain()
+      // The older listing answers last with the pre-pull inventory.
+      checkList.resolve([])
+      await Promise.all([pulling, checking])
+      await drain()
+
+      expect(runtime().models).toEqual(modelsA)
+      expect(settings().modelsInstalled).toBe(true)
+    })
+
+    it('lets only the superseding pull publish progress', async () => {
+      await connect(HOST_A, [])
+
+      const first = runtime().pullModel('gemma3:4b')
+      const second = runtime().pullModel('llama3:8b')
+      await drain()
+      expect(runtime().pull).toEqual({ model: 'llama3:8b', status: 'starting' })
+
+      // The superseded pull may not publish over the newer one.
+      transport.pulls[0].onProgress?.('pulling manifest')
+      expect(runtime().pull).toEqual({ model: 'llama3:8b', status: 'starting' })
+
+      transport.pulls[1].onProgress?.('verifying sha256')
+      expect(runtime().pull).toEqual({ model: 'llama3:8b', status: 'verifying sha256' })
+
+      // Nor may it clear the newer pull's progress when it finishes first.
+      transport.pulls[0].resolve()
+      await drain()
+      transport.list[transport.list.length - 1].resolve(modelsA)
+      await first
+      expect(runtime().pull).toEqual({ model: 'llama3:8b', status: 'verifying sha256' })
+
+      transport.pulls[1].resolve()
+      await drain()
+      transport.list[transport.list.length - 1].resolve(modelsA)
+      await second
+
+      expect(runtime().pull).toBeNull()
+    })
+
     it('does not let a retired pull refresh publish a model list', async () => {
       await connect(HOST_A, [])
 

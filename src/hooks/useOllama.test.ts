@@ -325,7 +325,13 @@ describe('useOllama application ownership', () => {
 
     const { result } = renderHook(() => useOllama())
 
-    await waitFor(() => expect(result.current.isChecking).toBe(false))
+    // Give any effect the adapter might own a chance to run.
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(result.current.isChecking).toBe(false)
+    expect(result.current.isConnected).toBe(false)
     expect(transport.constructedHosts).toEqual([])
     expect(transport.checkHealth).not.toHaveBeenCalled()
   })

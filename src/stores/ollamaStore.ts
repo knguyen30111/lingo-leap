@@ -64,12 +64,24 @@ interface InFlight {
 let activeCheck: InFlight | null = null
 const activePulls = new Map<string, InFlight>()
 
+// The pull that currently owns the single progress slot. A superseding pull
+// takes ownership, so an older one can neither publish progress nor clear it.
+let pullOwner: InFlight | null = null
+
+// Model listings are issued by checks and by pull refreshes alike, so a
+// generation alone cannot order them. Each listing takes a monotonic ticket and
+// only a newer ticket may commit.
+let listTicket = 0
+let committedListTicket = 0
+
 function retireActiveWork(): void {
   generation += 1
   controller?.abort()
   controller = null
   activeCheck = null
   activePulls.clear()
+  pullOwner = null
+  committedListTicket = 0
 }
 
 function currentController(): AbortController {
@@ -99,8 +111,13 @@ const initialState = {
 }
 
 export const useOllamaStore = create<OllamaLifecycleState>((set, get) => {
-  /** Publishes a healthy result plus the status the settings snapshot derives. */
-  const commitModels = (models: OllamaModelInfo[]): void => {
+  /**
+   * Publishes a healthy result plus the status the settings snapshot derives.
+   * An out-of-order listing from an earlier request is dropped.
+   */
+  const commitModels = (models: OllamaModelInfo[], ticket: number): void => {
+    if (ticket < committedListTicket) return
+    committedListTicket = ticket
     listCommitted = true
     set({ isConnected: true, isChecking: false, models, error: null })
     const settings = useSettingsStore.getState()
@@ -108,19 +125,39 @@ export const useOllamaStore = create<OllamaLifecycleState>((set, get) => {
     settings.setModelsInstalled(requiredModelsPresent(models))
   }
 
+  // `modelsInstalled` deliberately survives a failed check: it stays the last
+  // known answer for the host until a listing recomputes it, as it did before
+  // the lifecycle moved into this runtime.
   const commitDisconnected = (error: string): void => {
     listCommitted = false
     set({ isConnected: false, isChecking: false, models: [], error, pull: null })
     useSettingsStore.getState().setOllamaInstalled(false)
   }
 
-  /** Resolves the host to work against, configuring it on first use. */
-  const activeHost = (): string => {
+  /** Retires current work and binds the runtime to one immutable-host client. */
+  const bindHost = (host: string, previousHost: string | null): OllamaLifecycleClient => {
+    retireActiveWork()
+    const bound = createClient(host)
+    client = bound
+    listCommitted = false
+    set({ ...initialState, models: [], host })
+
+    // A host change retires the status derived from the previous host; the
+    // first binding keeps the persisted restart gate intact.
+    if (previousHost !== null && previousHost !== host) {
+      const settings = useSettingsStore.getState()
+      settings.setOllamaInstalled(false)
+      settings.setModelsInstalled(false)
+    }
+    return bound
+  }
+
+  /** Resolves the host and its client, binding them on first use. */
+  const activeTarget = (): { host: string; lifecycleClient: OllamaLifecycleClient } => {
     const host = get().host
-    if (host !== null && client) return host
-    const configured = host ?? useSettingsStore.getState().ollamaHost
-    get().configureHost(configured)
-    return configured
+    if (host !== null && client) return { host, lifecycleClient: client }
+    const nextHost = host ?? useSettingsStore.getState().ollamaHost
+    return { host: nextHost, lifecycleClient: bindHost(nextHost, host) }
   }
 
   return {
@@ -129,28 +166,15 @@ export const useOllamaStore = create<OllamaLifecycleState>((set, get) => {
     configureHost: host => {
       const previousHost = get().host
       if (previousHost === host && client) return
-
-      retireActiveWork()
-      client = createClient(host)
-      listCommitted = false
-      set({ ...initialState, host })
-
-      // A host change retires the status derived from the previous host; the
-      // first configuration keeps the persisted restart gate intact.
-      if (previousHost !== null) {
-        const settings = useSettingsStore.getState()
-        settings.setOllamaInstalled(false)
-        settings.setModelsInstalled(false)
-      }
+      bindHost(host, previousHost)
     },
 
     checkConnection: () => {
-      const host = activeHost()
+      const { host, lifecycleClient } = activeTarget()
       if (activeCheck && activeCheck.host === host && activeCheck.generation === generation) {
         return activeCheck.promise
       }
 
-      const lifecycleClient = client as OllamaLifecycleClient
       const requestController = currentController()
       const requestGeneration = generation
       const isCurrent = () =>
@@ -171,10 +195,11 @@ export const useOllamaStore = create<OllamaLifecycleState>((set, get) => {
             return
           }
 
+          const ticket = ++listTicket
           const models = await lifecycleClient.listModels(requestController.signal)
           if (!isCurrent()) return
 
-          commitModels(models)
+          commitModels(models, ticket)
         } catch (err) {
           if (!isCurrent()) return
           commitDisconnected(errorMessage(err, CONNECT_FAILED_ERROR))
@@ -189,14 +214,13 @@ export const useOllamaStore = create<OllamaLifecycleState>((set, get) => {
     },
 
     pullModel: modelName => {
-      const host = activeHost()
+      const { host, lifecycleClient } = activeTarget()
       const key = JSON.stringify([host, modelName])
       const activePull = activePulls.get(key)
       if (activePull && activePull.generation === generation) {
         return activePull.promise
       }
 
-      const lifecycleClient = client as OllamaLifecycleClient
       const requestController = currentController()
       const requestGeneration = generation
       const isCurrent = () =>
@@ -206,26 +230,36 @@ export const useOllamaStore = create<OllamaLifecycleState>((set, get) => {
 
       const entry: InFlight = { host, generation: requestGeneration, promise: Promise.resolve() }
 
+      const ownsProgress = () => pullOwner === entry
+      const releaseProgress = () => {
+        if (!ownsProgress()) return
+        pullOwner = null
+        set({ pull: null })
+      }
+
       const run = async (): Promise<void> => {
+        pullOwner = entry
         set({ pull: { model: modelName, status: PULL_STARTING_STATUS } })
         try {
           await lifecycleClient.pullModel(
             modelName,
             status => {
-              if (isCurrent()) set({ pull: { model: modelName, status } })
+              if (isCurrent() && ownsProgress()) set({ pull: { model: modelName, status } })
             },
             requestController.signal
           )
           if (!isCurrent()) return
 
-          set({ pull: null })
+          releaseProgress()
+          const ticket = ++listTicket
           const models = await lifecycleClient.listModels(requestController.signal)
           if (!isCurrent()) return
 
-          commitModels(models)
+          commitModels(models, ticket)
         } catch (err) {
           if (!isCurrent()) return
-          set({ pull: null, error: errorMessage(err, PULL_FAILED_ERROR) })
+          releaseProgress()
+          set({ error: errorMessage(err, PULL_FAILED_ERROR) })
         } finally {
           if (activePulls.get(key) === entry) activePulls.delete(key)
         }
@@ -260,5 +294,5 @@ export function resetOllamaRuntime(): void {
   retireActiveWork()
   client = null
   listCommitted = false
-  useOllamaStore.setState({ ...initialState })
+  useOllamaStore.setState({ ...initialState, models: [] })
 }
