@@ -70,8 +70,3 @@ export function isSameLanguage(source: string, target: string): boolean {
   if (source === 'auto') return false
   return source === target
 }
-
-export function shouldUseCorrection(sourceText: string, targetLang: string): boolean {
-  const detectedLang = detectLanguage(sourceText)
-  return detectedLang === targetLang
-}
