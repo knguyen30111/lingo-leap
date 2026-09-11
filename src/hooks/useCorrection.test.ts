@@ -5,7 +5,7 @@ import { useCorrection } from './useCorrection'
 import correctionHookSource from './useCorrection.ts?raw'
 import { useAppStore } from '../stores/appStore'
 import { useSettingsStore } from '../stores/settingsStore'
-import { translationCache } from '../lib/cache'
+import { correctionResultCache, createCorrectionCacheKey } from '../lib/cache'
 
 // Mock the grammar task service: the hook owns state, cache, and request
 // lifecycle only, so every prompt, transport, and parsing detail is the
@@ -31,12 +31,26 @@ vi.mock('../services/grammar-service', () => ({
   },
 }))
 
+// The real key builder is contract-tested in `src/lib/cache.test.ts`; the
+// readable stand-in key here only has to prove which request identity the hook
+// handed over.
+const cache = vi.hoisted(() => ({
+  get: vi.fn(),
+  set: vi.fn(),
+  createCorrectionCacheKey: vi.fn(
+    async (input: {
+      endpoint: string
+      model: string
+      language: string
+      level: string
+      input: string
+    }) => `${input.input}-${input.language}-${input.level}-${input.model}`
+  ),
+}))
+
 vi.mock('../lib/cache', () => ({
-  translationCache: {
-    get: vi.fn(),
-    set: vi.fn(),
-  },
-  createCorrectionKey: vi.fn((text, lang, level, model) => `${text}-${lang}-${level}-${model}`),
+  correctionResultCache: { get: cache.get, set: cache.set },
+  createCorrectionCacheKey: cache.createCorrectionCacheKey,
 }))
 
 function resetEnvironment() {
@@ -64,8 +78,9 @@ function resetEnvironment() {
   grammar.correctTextStream.mockReset()
   grammar.extractChanges.mockReset().mockResolvedValue([])
   grammar.detectSourceLanguage.mockReset().mockReturnValue('en')
-  vi.mocked(translationCache.get).mockReset()
-  vi.mocked(translationCache.set).mockReset()
+  vi.mocked(correctionResultCache.get).mockReset()
+  vi.mocked(correctionResultCache.set).mockReset()
+  vi.mocked(createCorrectionCacheKey).mockReset()
 }
 
 async function* streamOf(...chunks: string[]): AsyncGenerator<string> {
@@ -126,7 +141,7 @@ describe('useCorrection', () => {
   })
 
   it('uses cached result when available', async () => {
-    vi.mocked(translationCache.get).mockReturnValue('Cached result')
+    vi.mocked(correctionResultCache.get).mockReturnValue('Cached result')
 
     const { result } = renderHook(() => useCorrection())
 
@@ -141,7 +156,7 @@ describe('useCorrection', () => {
   })
 
   it('skips cache when skipCache option is true', async () => {
-    vi.mocked(translationCache.get).mockReturnValue('Cached result')
+    vi.mocked(correctionResultCache.get).mockReturnValue('Cached result')
     grammar.correctText.mockResolvedValue('Fresh result')
 
     const { result } = renderHook(() => useCorrection())
@@ -212,7 +227,7 @@ describe('useCorrection', () => {
       await result.current.correct()
     })
 
-    expect(translationCache.set).toHaveBeenCalledWith(
+    expect(correctionResultCache.set).toHaveBeenCalledWith(
       'Hello wrold-en-fix-gemma3:4b',
       'Hello world'
     )
@@ -451,7 +466,7 @@ describe('useCorrection changes extraction', () => {
   })
 
   it('extracts changes from a cached result', async () => {
-    vi.mocked(translationCache.get).mockReturnValue('Cached result')
+    vi.mocked(correctionResultCache.get).mockReturnValue('Cached result')
     grammar.extractChanges.mockResolvedValue([{ from: 'wrold', to: 'world', reason: 'Typo' }])
 
     const { result } = renderHook(() => useCorrection())
@@ -463,11 +478,11 @@ describe('useCorrection changes extraction', () => {
     expect(useAppStore.getState().outputText).toBe('Cached result')
     await waitFor(() => expect(grammar.extractChanges).toHaveBeenCalled())
     expect(grammar.extractChanges.mock.calls[0].slice(0, 2)).toEqual(['Hello wrold', 'Cached result'])
-    expect(translationCache.set).not.toHaveBeenCalled()
+    expect(correctionResultCache.set).not.toHaveBeenCalled()
   })
 
   it('does not extract changes when the cached result equals the input', async () => {
-    vi.mocked(translationCache.get).mockReturnValue('Hello wrold')
+    vi.mocked(correctionResultCache.get).mockReturnValue('Hello wrold')
 
     const { result } = renderHook(() => useCorrection())
 
@@ -595,7 +610,7 @@ describe('useCorrection cancellation and races', () => {
     })
 
     expect(useAppStore.getState().outputText).toBe('')
-    expect(translationCache.set).not.toHaveBeenCalled()
+    expect(correctionResultCache.set).not.toHaveBeenCalled()
     expect(grammar.extractChanges).not.toHaveBeenCalled()
     expect(useAppStore.getState().isLoading).toBe(false)
     expect(useAppStore.getState().isChangesLoading).toBe(false)
@@ -609,10 +624,10 @@ describe('useCorrection cancellation and races', () => {
 
     const { result } = renderHook(() => useCorrection())
 
-    act(() => {
+    await act(async () => {
       result.current.correct('first text')
     })
-    act(() => {
+    await act(async () => {
       result.current.correct('second text')
     })
 
@@ -624,8 +639,8 @@ describe('useCorrection cancellation and races', () => {
     })
 
     expect(useAppStore.getState().outputText).toBe('SECOND')
-    expect(translationCache.set).toHaveBeenCalledTimes(1)
-    expect(translationCache.set).toHaveBeenCalledWith(expect.stringContaining('second text'), 'SECOND')
+    expect(correctionResultCache.set).toHaveBeenCalledTimes(1)
+    expect(correctionResultCache.set).toHaveBeenCalledWith(expect.stringContaining('second text'), 'SECOND')
   })
 
   it('ignores stream chunks from a superseded correction', async () => {
@@ -661,8 +676,8 @@ describe('useCorrection cancellation and races', () => {
     })
 
     expect(useAppStore.getState().outputText).toBe('second')
-    expect(translationCache.set).toHaveBeenCalledTimes(1)
-    expect(translationCache.set).toHaveBeenCalledWith(expect.any(String), 'second')
+    expect(correctionResultCache.set).toHaveBeenCalledTimes(1)
+    expect(correctionResultCache.set).toHaveBeenCalledWith(expect.any(String), 'second')
   })
 
   it('ignores a superseded background change extraction', async () => {
@@ -833,7 +848,7 @@ describe('useCorrection settings invalidation', () => {
       })
 
       expect(useAppStore.getState().outputText).toBe('')
-      expect(translationCache.set).not.toHaveBeenCalled()
+      expect(correctionResultCache.set).not.toHaveBeenCalled()
       expect(useAppStore.getState().latestDetectedSourceLang).toBeNull()
       expect(useAppStore.getState().changes).toEqual([])
       expect(useAppStore.getState().isLoading).toBe(false)
@@ -936,7 +951,7 @@ describe('useCorrection detected language', () => {
 
   it('reports the detected language of a cached correction', async () => {
     grammar.detectSourceLanguage.mockReturnValue('fr')
-    vi.mocked(translationCache.get).mockReturnValue('Hello world')
+    vi.mocked(correctionResultCache.get).mockReturnValue('Hello world')
 
     const { result } = renderHook(() => useCorrection())
 
@@ -944,7 +959,7 @@ describe('useCorrection detected language', () => {
       await result.current.correct()
     })
 
-    expect(translationCache.get).toHaveBeenCalledWith('Hello wrold-fr-fix-gemma3:4b')
+    expect(correctionResultCache.get).toHaveBeenCalledWith('Hello wrold-fr-fix-gemma3:4b')
     expect(useAppStore.getState().outputText).toBe('Hello world')
     expect(useAppStore.getState().latestDetectedSourceLang).toBe('fr')
   })
@@ -998,10 +1013,10 @@ describe('useCorrection detected language', () => {
 
     let first!: Promise<string | undefined>
     let second!: Promise<string | undefined>
-    act(() => {
+    await act(async () => {
       first = result.current.correct('first text')
     })
-    act(() => {
+    await act(async () => {
       second = result.current.correct('second text')
     })
 
@@ -1087,6 +1102,131 @@ describe('useCorrection detected language', () => {
   })
 })
 
+describe('useCorrection cache identity', () => {
+  beforeEach(resetEnvironment)
+  afterEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('asks for a key built from the exact endpoint, model, language, and level', async () => {
+    useSettingsStore.setState({
+      correctionModel: ' Gemma3:4B ',
+      ollamaHost: 'HTTP://localhost:11434/?x=1',
+      explanationLang: 'ja',
+    })
+    grammar.detectSourceLanguage.mockReturnValue('fr')
+
+    const { result } = renderHook(() => useCorrection())
+
+    await act(async () => {
+      await result.current.correct(undefined, 'rewrite')
+    })
+
+    // Exact equality: the transport strings pass through untouched, the level
+    // is part of the request identity, and the explanation language is not —
+    // it only decides the language of the background explanation.
+    expect(createCorrectionCacheKey).toHaveBeenCalledWith({
+      endpoint: 'HTTP://localhost:11434/?x=1',
+      model: ' Gemma3:4B ',
+      language: 'fr',
+      level: 'rewrite',
+      input: 'Hello wrold',
+    })
+  })
+
+  it('addresses a streamed and a whole correction as one entry', async () => {
+    grammar.correctTextStream.mockImplementation(() => streamOf('Hello world'))
+
+    const { result, rerender } = renderHook(() => useCorrection())
+
+    await act(async () => {
+      await result.current.correct()
+    })
+    const wholeKeyInput = vi.mocked(createCorrectionCacheKey).mock.calls[0][0]
+
+    act(() => {
+      useSettingsStore.setState({ useStreaming: true })
+    })
+    rerender()
+
+    await act(async () => {
+      await result.current.correct()
+    })
+    const streamedKeyInput = vi.mocked(createCorrectionCacheKey).mock.calls[1][0]
+
+    expect(grammar.correctTextStream).toHaveBeenCalledTimes(1)
+    expect(streamedKeyInput).toEqual(wholeKeyInput)
+  })
+
+  it('does not touch the cache for a correction cancelled while its key is built', async () => {
+    grammar.detectSourceLanguage.mockReturnValue('fr')
+    let releaseKey!: (key: string) => void
+    vi.mocked(createCorrectionCacheKey).mockImplementationOnce(
+      () => new Promise<string>(resolve => { releaseKey = resolve })
+    )
+
+    const { result } = renderHook(() => useCorrection())
+
+    let pending!: Promise<string | undefined>
+    await act(async () => {
+      pending = result.current.correct()
+    })
+
+    act(() => {
+      result.current.cancel()
+    })
+
+    await act(async () => {
+      releaseKey('Hello wrold-fr-fix-gemma3:4b')
+      await pending
+    })
+
+    expect(correctionResultCache.get).not.toHaveBeenCalled()
+    expect(correctionResultCache.set).not.toHaveBeenCalled()
+    expect(grammar.correctText).not.toHaveBeenCalled()
+    expect(grammar.correctTextStream).not.toHaveBeenCalled()
+    expect(grammar.extractChanges).not.toHaveBeenCalled()
+    expect(useAppStore.getState().outputText).toBe('')
+    expect(useAppStore.getState().latestDetectedSourceLang).toBeNull()
+    expect(useAppStore.getState().error).toBeNull()
+    expect(useAppStore.getState().isLoading).toBe(false)
+    expect(useAppStore.getState().isChangesLoading).toBe(false)
+  })
+
+  it('does not start a superseded correction whose key arrives late', async () => {
+    let releaseFirstKey!: (key: string) => void
+    vi.mocked(createCorrectionCacheKey).mockImplementationOnce(
+      () => new Promise<string>(resolve => { releaseFirstKey = resolve })
+    )
+
+    const { result } = renderHook(() => useCorrection())
+
+    let older!: Promise<string | undefined>
+    await act(async () => {
+      older = result.current.correct('first text')
+    })
+
+    await act(async () => {
+      await result.current.correct('second text')
+    })
+
+    await act(async () => {
+      releaseFirstKey('first text-en-fix-gemma3:4b')
+      await older
+    })
+
+    expect(grammar.correctText).toHaveBeenCalledTimes(1)
+    expect(grammar.correctText.mock.calls[0][0]).toBe('second text')
+    expect(correctionResultCache.get).toHaveBeenCalledTimes(1)
+    expect(correctionResultCache.get).toHaveBeenCalledWith('second text-en-fix-gemma3:4b')
+    expect(correctionResultCache.set).toHaveBeenCalledTimes(1)
+    expect(correctionResultCache.set).toHaveBeenCalledWith(
+      'second text-en-fix-gemma3:4b',
+      'Hello world'
+    )
+  })
+})
+
 describe('useCorrection request retirement', () => {
   beforeEach(resetEnvironment)
   afterEach(() => {
@@ -1106,7 +1246,7 @@ describe('useCorrection request retirement', () => {
 
     expect(grammar.detectSourceLanguage).toHaveBeenCalledWith('Custom text')
     expect(grammar.correctText.mock.calls[0][0]).toBe('Custom text')
-    expect(translationCache.set).toHaveBeenCalledWith(
+    expect(correctionResultCache.set).toHaveBeenCalledWith(
       'Custom text-fr-fix-gemma3:4b',
       'Custom corrected'
     )
@@ -1126,7 +1266,7 @@ describe('useCorrection request retirement', () => {
     })
 
     expect(grammar.correctText.mock.calls[0][2]).toBe('rewrite')
-    expect(translationCache.get).toHaveBeenCalledWith('Hello wrold-fr-rewrite-gemma3:4b')
+    expect(correctionResultCache.get).toHaveBeenCalledWith('Hello wrold-fr-rewrite-gemma3:4b')
     expect(useAppStore.getState().outputText).toBe('Hello world')
     expect(useAppStore.getState().latestDetectedSourceLang).toBe('fr')
   })
@@ -1166,7 +1306,7 @@ describe('useCorrection request retirement', () => {
       })
 
       expect(useAppStore.getState().outputText).toBe('')
-      expect(translationCache.set).not.toHaveBeenCalled()
+      expect(correctionResultCache.set).not.toHaveBeenCalled()
       expect(grammar.extractChanges).not.toHaveBeenCalled()
       expect(useAppStore.getState().latestDetectedSourceLang).toBeNull()
       expect(useAppStore.getState().isLoading).toBe(false)
@@ -1234,7 +1374,7 @@ describe('useCorrection request retirement', () => {
     })
 
     expect(useAppStore.getState().outputText).toBe('first-a')
-    expect(translationCache.set).not.toHaveBeenCalled()
+    expect(correctionResultCache.set).not.toHaveBeenCalled()
     expect(useAppStore.getState().latestDetectedSourceLang).toBeNull()
     expect(useAppStore.getState().isLoading).toBe(false)
   })
@@ -1274,7 +1414,7 @@ describe('useCorrection request retirement', () => {
     })
 
     expect(useAppStore.getState().outputText).toBe('first-a')
-    expect(translationCache.set).not.toHaveBeenCalled()
+    expect(correctionResultCache.set).not.toHaveBeenCalled()
     expect(useAppStore.getState().latestDetectedSourceLang).toBeNull()
     expect(grammar.extractChanges).not.toHaveBeenCalled()
     expect(useAppStore.getState().isChangesLoading).toBe(false)

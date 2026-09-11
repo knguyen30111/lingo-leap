@@ -5,15 +5,28 @@ import { useTranslation } from './useTranslation'
 import translationHookSource from './useTranslation.ts?raw'
 import { useAppStore } from '../stores/appStore'
 import { useSettingsStore } from '../stores/settingsStore'
-import { translationCache } from '../lib/cache'
+import { translationResultCache, createTranslationCacheKey } from '../lib/cache'
 
-// Mock dependencies
+// Mock dependencies. The real key builder is contract-tested in
+// `src/lib/cache.test.ts`; here the readable stand-in key only has to prove
+// which request identity the hook handed over.
+const cache = vi.hoisted(() => ({
+  get: vi.fn(),
+  set: vi.fn(),
+  createTranslationCacheKey: vi.fn(
+    async (input: {
+      endpoint: string
+      model: string
+      sourceLang: string
+      targetLang: string
+      input: string
+    }) => `${input.input}-${input.sourceLang}-${input.targetLang}-${input.model}`
+  ),
+}))
+
 vi.mock('../lib/cache', () => ({
-  translationCache: {
-    get: vi.fn(),
-    set: vi.fn(),
-  },
-  createTranslationKey: vi.fn((text, src, tgt, model) => `${text}-${src}-${tgt}-${model}`),
+  translationResultCache: { get: cache.get, set: cache.set },
+  createTranslationCacheKey: cache.createTranslationCacheKey,
 }))
 
 // Create a mock class for TranslationService
@@ -62,8 +75,9 @@ describe('useTranslation', () => {
 
     // Reset cache mocks
     serviceConstructorOptions.length = 0
-    vi.mocked(translationCache.get).mockReset()
-    vi.mocked(translationCache.set).mockReset()
+    vi.mocked(translationResultCache.get).mockReset()
+    vi.mocked(translationResultCache.set).mockReset()
+    vi.mocked(createTranslationCacheKey).mockReset()
   })
 
   afterEach(() => {
@@ -109,7 +123,7 @@ describe('useTranslation', () => {
   })
 
   it('uses cached result when available', async () => {
-    vi.mocked(translationCache.get).mockReturnValue('Cached translation')
+    vi.mocked(translationResultCache.get).mockReturnValue('Cached translation')
 
     const { result } = renderHook(() => useTranslation())
 
@@ -123,7 +137,7 @@ describe('useTranslation', () => {
   })
 
   it('skips cache when skipCache option is true', async () => {
-    vi.mocked(translationCache.get).mockReturnValue('Cached translation')
+    vi.mocked(translationResultCache.get).mockReturnValue('Cached translation')
 
     const { result } = renderHook(() => useTranslation())
 
@@ -191,7 +205,7 @@ describe('useTranslation', () => {
       await result.current.translate()
     })
 
-    expect(translationCache.set).toHaveBeenCalled()
+    expect(translationResultCache.set).toHaveBeenCalled()
   })
 
   it('cancel stops ongoing translation', async () => {
@@ -357,8 +371,9 @@ describe('useTranslation cancellation and races', () => {
       ollamaHost: 'http://localhost:11434',
       useStreaming: false,
     })
-    vi.mocked(translationCache.get).mockReset()
-    vi.mocked(translationCache.set).mockReset()
+    vi.mocked(translationResultCache.get).mockReset()
+    vi.mocked(translationResultCache.set).mockReset()
+    vi.mocked(createTranslationCacheKey).mockReset()
   })
 
   afterEach(() => {
@@ -412,7 +427,7 @@ describe('useTranslation cancellation and races', () => {
     })
 
     expect(useAppStore.getState().outputText).toBe('')
-    expect(translationCache.set).not.toHaveBeenCalled()
+    expect(translationResultCache.set).not.toHaveBeenCalled()
     expect(useAppStore.getState().isLoading).toBe(false)
   })
 
@@ -424,10 +439,10 @@ describe('useTranslation cancellation and races', () => {
 
     const { result } = renderHook(() => useTranslation())
 
-    act(() => {
+    await act(async () => {
       result.current.translate('first')
     })
-    act(() => {
+    await act(async () => {
       result.current.translate('second')
     })
 
@@ -439,8 +454,8 @@ describe('useTranslation cancellation and races', () => {
     })
 
     expect(useAppStore.getState().outputText).toBe('SECOND')
-    expect(translationCache.set).toHaveBeenCalledTimes(1)
-    expect(translationCache.set).toHaveBeenCalledWith(expect.stringContaining('second'), 'SECOND')
+    expect(translationResultCache.set).toHaveBeenCalledTimes(1)
+    expect(translationResultCache.set).toHaveBeenCalledWith(expect.stringContaining('second'), 'SECOND')
   })
 
   it('keeps the newer request loading when an older one completes', async () => {
@@ -451,10 +466,10 @@ describe('useTranslation cancellation and races', () => {
 
     const { result } = renderHook(() => useTranslation())
 
-    act(() => {
+    await act(async () => {
       result.current.translate('first')
     })
-    act(() => {
+    await act(async () => {
       result.current.translate('second')
     })
 
@@ -499,8 +514,8 @@ describe('useTranslation cancellation and races', () => {
     })
 
     expect(useAppStore.getState().outputText).toBe('second')
-    expect(translationCache.set).toHaveBeenCalledTimes(1)
-    expect(translationCache.set).toHaveBeenCalledWith(expect.any(String), 'second')
+    expect(translationResultCache.set).toHaveBeenCalledTimes(1)
+    expect(translationResultCache.set).toHaveBeenCalledWith(expect.any(String), 'second')
   })
 
   it('does not report an error for a request cancelled by unmount', async () => {
@@ -546,8 +561,9 @@ describe('useTranslation service composition', () => {
     })
 
     serviceConstructorOptions.length = 0
-    vi.mocked(translationCache.get).mockReset()
-    vi.mocked(translationCache.set).mockReset()
+    vi.mocked(translationResultCache.get).mockReset()
+    vi.mocked(translationResultCache.set).mockReset()
+    vi.mocked(createTranslationCacheKey).mockReset()
   })
 
   afterEach(() => {
@@ -608,8 +624,15 @@ describe('useTranslation service composition', () => {
 
     expect(useAppStore.getState().sourceLang).toBe('auto')
     expect(useAppStore.getState().latestDetectedSourceLang).toBe('fr')
-    expect(translationCache.get).toHaveBeenCalledWith('Hello world-fr-vi-gemma3:4b')
-    expect(translationCache.set).toHaveBeenCalledWith(
+    expect(createTranslationCacheKey).toHaveBeenCalledWith({
+      endpoint: 'http://localhost:11434',
+      model: 'gemma3:4b',
+      sourceLang: 'fr',
+      targetLang: 'vi',
+      input: 'Hello world',
+    })
+    expect(translationResultCache.get).toHaveBeenCalledWith('Hello world-fr-vi-gemma3:4b')
+    expect(translationResultCache.set).toHaveBeenCalledWith(
       'Hello world-fr-vi-gemma3:4b',
       'Xin chào thế giới'
     )
@@ -654,8 +677,9 @@ function resetTranslationEnvironment() {
   })
 
   serviceConstructorOptions.length = 0
-  vi.mocked(translationCache.get).mockReset()
-  vi.mocked(translationCache.set).mockReset()
+  vi.mocked(translationResultCache.get).mockReset()
+  vi.mocked(translationResultCache.set).mockReset()
+  vi.mocked(createTranslationCacheKey).mockReset()
 }
 
 describe('useTranslation automatic source language', () => {
@@ -695,11 +719,11 @@ describe('useTranslation automatic source language', () => {
     ])
     expect(mockTranslate.mock.calls[0][1]).toBe('fr')
     expect(mockTranslate.mock.calls[1][1]).toBe('ja')
-    expect(translationCache.set).toHaveBeenCalledWith(
+    expect(translationResultCache.set).toHaveBeenCalledWith(
       'Bonjour-fr-vi-gemma3:4b',
       'Xin chào thế giới'
     )
-    expect(translationCache.set).toHaveBeenCalledWith(
+    expect(translationResultCache.set).toHaveBeenCalledWith(
       'こんにちは-ja-vi-gemma3:4b',
       'Xin chào thế giới'
     )
@@ -709,7 +733,7 @@ describe('useTranslation automatic source language', () => {
 
   it('reports the detected language of a cached automatic translation', async () => {
     mockDetectSourceLanguage.mockReturnValue('fr')
-    vi.mocked(translationCache.get).mockReturnValue('Cached translation')
+    vi.mocked(translationResultCache.get).mockReturnValue('Cached translation')
 
     const { result } = renderHook(() => useTranslation())
 
@@ -717,7 +741,7 @@ describe('useTranslation automatic source language', () => {
       await result.current.translate()
     })
 
-    expect(translationCache.get).toHaveBeenCalledWith('Hello world-fr-vi-gemma3:4b')
+    expect(translationResultCache.get).toHaveBeenCalledWith('Hello world-fr-vi-gemma3:4b')
     expect(useAppStore.getState().outputText).toBe('Cached translation')
     expect(useAppStore.getState().latestDetectedSourceLang).toBe('fr')
     expect(useAppStore.getState().sourceLang).toBe('auto')
@@ -756,7 +780,7 @@ describe('useTranslation automatic source language', () => {
 
     expect(mockDetectSourceLanguage).not.toHaveBeenCalled()
     expect(mockTranslate.mock.calls[0][1]).toBe('en')
-    expect(translationCache.get).toHaveBeenCalledWith('Hello world-en-vi-gemma3:4b')
+    expect(translationResultCache.get).toHaveBeenCalledWith('Hello world-en-vi-gemma3:4b')
     expect(useAppStore.getState().sourceLang).toBe('en')
     expect(useAppStore.getState().latestDetectedSourceLang).toBeNull()
   })
@@ -764,7 +788,7 @@ describe('useTranslation automatic source language', () => {
   it('keeps a manual cached translation from reviving a stale detected language', async () => {
     useAppStore.setState({ sourceLang: 'en', latestDetectedSourceLang: 'fr' })
     mockDetectSourceLanguage.mockReturnValue('de')
-    vi.mocked(translationCache.get).mockReturnValue('Cached translation')
+    vi.mocked(translationResultCache.get).mockReturnValue('Cached translation')
 
     const { result } = renderHook(() => useTranslation())
 
@@ -833,10 +857,10 @@ describe('useTranslation automatic source language', () => {
 
     let first!: Promise<string | undefined>
     let second!: Promise<string | undefined>
-    act(() => {
+    await act(async () => {
       first = result.current.translate('Bonjour')
     })
-    act(() => {
+    await act(async () => {
       second = result.current.translate('こんにちは')
     })
 
@@ -887,7 +911,130 @@ describe('useTranslation automatic source language', () => {
 
     expect(useAppStore.getState().outputText).toBe('second')
     expect(useAppStore.getState().latestDetectedSourceLang).toBe('ja')
-    expect(translationCache.set).toHaveBeenCalledTimes(1)
+    expect(translationResultCache.set).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('useTranslation cache identity', () => {
+  beforeEach(resetTranslationEnvironment)
+  afterEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('asks for a key built from the exact configured endpoint and model', async () => {
+    useSettingsStore.setState({
+      translationModel: ' Gemma3:4B ',
+      ollamaHost: 'HTTP://localhost:11434/?x=1',
+    })
+    mockDetectSourceLanguage.mockReturnValue('fr')
+
+    const { result } = renderHook(() => useTranslation())
+
+    await act(async () => {
+      await result.current.translate()
+    })
+
+    // Exact equality: the hook adds no field of its own, and it hands the
+    // transport strings over untouched.
+    expect(createTranslationCacheKey).toHaveBeenCalledWith({
+      endpoint: 'HTTP://localhost:11434/?x=1',
+      model: ' Gemma3:4B ',
+      sourceLang: 'fr',
+      targetLang: 'vi',
+      input: 'Hello world',
+    })
+  })
+
+  it('addresses a streamed and a whole translation as one entry', async () => {
+    mockTranslateStream.mockImplementation(async function* () {
+      yield 'Xin chào thế giới'
+    })
+
+    const { result, rerender } = renderHook(() => useTranslation())
+
+    await act(async () => {
+      await result.current.translate()
+    })
+    const wholeKeyInput = vi.mocked(createTranslationCacheKey).mock.calls[0][0]
+
+    act(() => {
+      useSettingsStore.setState({ useStreaming: true })
+    })
+    rerender()
+
+    await act(async () => {
+      await result.current.translate()
+    })
+    const streamedKeyInput = vi.mocked(createTranslationCacheKey).mock.calls[1][0]
+
+    expect(mockTranslateStream).toHaveBeenCalledTimes(1)
+    expect(streamedKeyInput).toEqual(wholeKeyInput)
+  })
+
+  it('does not touch the cache for a translation cancelled while its key is built', async () => {
+    mockDetectSourceLanguage.mockReturnValue('fr')
+    let releaseKey!: (key: string) => void
+    vi.mocked(createTranslationCacheKey).mockImplementationOnce(
+      () => new Promise<string>(resolve => { releaseKey = resolve })
+    )
+
+    const { result } = renderHook(() => useTranslation())
+
+    let pending!: Promise<string | undefined>
+    await act(async () => {
+      pending = result.current.translate()
+    })
+
+    act(() => {
+      result.current.cancel()
+    })
+
+    await act(async () => {
+      releaseKey('Hello world-fr-vi-gemma3:4b')
+      await pending
+    })
+
+    expect(translationResultCache.get).not.toHaveBeenCalled()
+    expect(translationResultCache.set).not.toHaveBeenCalled()
+    expect(mockTranslate).not.toHaveBeenCalled()
+    expect(mockTranslateStream).not.toHaveBeenCalled()
+    expect(useAppStore.getState().outputText).toBe('')
+    expect(useAppStore.getState().latestDetectedSourceLang).toBeNull()
+    expect(useAppStore.getState().error).toBeNull()
+    expect(useAppStore.getState().isLoading).toBe(false)
+  })
+
+  it('does not start a superseded translation whose key arrives late', async () => {
+    let releaseFirstKey!: (key: string) => void
+    vi.mocked(createTranslationCacheKey).mockImplementationOnce(
+      () => new Promise<string>(resolve => { releaseFirstKey = resolve })
+    )
+
+    const { result } = renderHook(() => useTranslation())
+
+    let older!: Promise<string | undefined>
+    await act(async () => {
+      older = result.current.translate('first text')
+    })
+
+    await act(async () => {
+      await result.current.translate('second text')
+    })
+
+    await act(async () => {
+      releaseFirstKey('first text-en-vi-gemma3:4b')
+      await older
+    })
+
+    expect(mockTranslate).toHaveBeenCalledTimes(1)
+    expect(mockTranslate.mock.calls[0][0]).toBe('second text')
+    expect(translationResultCache.get).toHaveBeenCalledTimes(1)
+    expect(translationResultCache.get).toHaveBeenCalledWith('second text-en-vi-gemma3:4b')
+    expect(translationResultCache.set).toHaveBeenCalledTimes(1)
+    expect(translationResultCache.set).toHaveBeenCalledWith(
+      'second text-en-vi-gemma3:4b',
+      'Xin chào thế giới'
+    )
   })
 })
 
@@ -909,8 +1056,8 @@ describe('useTranslation request retirement', () => {
 
     expect(mockDetectSourceLanguage).toHaveBeenCalledWith('Custom text')
     expect(mockTranslate.mock.calls[0][0]).toBe('Custom text')
-    expect(translationCache.get).toHaveBeenCalledWith('Custom text-fr-vi-gemma3:4b')
-    expect(translationCache.set).toHaveBeenCalledWith(
+    expect(translationResultCache.get).toHaveBeenCalledWith('Custom text-fr-vi-gemma3:4b')
+    expect(translationResultCache.set).toHaveBeenCalledWith(
       'Custom text-fr-vi-gemma3:4b',
       'Xin chào thế giới'
     )
@@ -958,8 +1105,8 @@ describe('useTranslation request retirement', () => {
     expect(useAppStore.getState().outputText).toBe('NEW')
     expect(useAppStore.getState().latestDetectedSourceLang).toBe('fr')
     expect(useAppStore.getState().isLoading).toBe(false)
-    expect(translationCache.set).toHaveBeenCalledTimes(1)
-    expect(translationCache.set).toHaveBeenCalledWith('Custom text-fr-vi-gemma3:4b', 'NEW')
+    expect(translationResultCache.set).toHaveBeenCalledTimes(1)
+    expect(translationResultCache.set).toHaveBeenCalledWith('Custom text-fr-vi-gemma3:4b', 'NEW')
   })
 
   it('retires a translateText request once the input changes again', async () => {
@@ -991,7 +1138,7 @@ describe('useTranslation request retirement', () => {
 
     expect(useAppStore.getState().outputText).toBe('')
     expect(useAppStore.getState().latestDetectedSourceLang).toBeNull()
-    expect(translationCache.set).not.toHaveBeenCalled()
+    expect(translationResultCache.set).not.toHaveBeenCalled()
     expect(useAppStore.getState().isLoading).toBe(false)
   })
 
@@ -1030,7 +1177,7 @@ describe('useTranslation request retirement', () => {
       })
 
       expect(useAppStore.getState().outputText).toBe('')
-      expect(translationCache.set).not.toHaveBeenCalled()
+      expect(translationResultCache.set).not.toHaveBeenCalled()
       expect(useAppStore.getState().latestDetectedSourceLang).toBeNull()
       expect(useAppStore.getState().isLoading).toBe(false)
     }
@@ -1126,7 +1273,7 @@ describe('useTranslation request retirement', () => {
       })
 
       expect(useAppStore.getState().outputText).toBe('')
-      expect(translationCache.set).not.toHaveBeenCalled()
+      expect(translationResultCache.set).not.toHaveBeenCalled()
       expect(useAppStore.getState().latestDetectedSourceLang).toBeNull()
       expect(useAppStore.getState().isLoading).toBe(false)
     }
@@ -1167,7 +1314,7 @@ describe('useTranslation request retirement', () => {
     })
 
     expect(useAppStore.getState().outputText).toBe('first-a')
-    expect(translationCache.set).not.toHaveBeenCalled()
+    expect(translationResultCache.set).not.toHaveBeenCalled()
     expect(useAppStore.getState().latestDetectedSourceLang).toBeNull()
     expect(useAppStore.getState().isLoading).toBe(false)
   })
