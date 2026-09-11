@@ -809,6 +809,74 @@ describe('ollamaStore lifecycle runtime', () => {
       expect(runtime().isChecking).toBe(false)
     })
 
+    it('leaves a newer pull owning progress and error when the check reports the host down', async () => {
+      await connect(HOST_A, modelsA)
+
+      const checking = runtime().checkConnection()
+      await drain()
+
+      // The pull starts after the check, so it owns the progress slot and the
+      // error channel the check must leave alone.
+      const pulling = runtime().pullModel('mistral:7b')
+      await drain()
+      expect(runtime().pull).toEqual({ model: 'mistral:7b', status: 'starting' })
+
+      transport.health[transport.health.length - 1].resolve(false)
+      await checking
+
+      // The check settles its own flags and the factual connection state.
+      expect(runtime().isChecking).toBe(false)
+      expect(runtime().isConnected).toBe(false)
+      expect(runtime().models).toEqual([])
+      expect(settings().ollamaInstalled).toBe(false)
+
+      // The newer pull keeps presenting, without a gap the stream refills.
+      expect(runtime().pull).toEqual({ model: 'mistral:7b', status: 'starting' })
+      expect(runtime().error).toBeNull()
+
+      transport.pulls[0].onProgress?.('downloading')
+      expect(runtime().pull).toEqual({ model: 'mistral:7b', status: 'downloading' })
+
+      transport.pulls[0].reject(new Error('Failed to pull model: Not Found'))
+      await pulling
+
+      expect(runtime().error).toBe('Failed to pull model: Not Found')
+      expect(runtime().pull).toBeNull()
+    })
+
+    it('leaves a newer pull owning progress and error when the check throws', async () => {
+      await connect(HOST_A, modelsA)
+
+      const checking = runtime().checkConnection()
+      await drain()
+
+      const pulling = runtime().pullModel('mistral:7b')
+      await drain()
+
+      transport.health[transport.health.length - 1].reject(new Error('Network error'))
+      await checking
+
+      expect(runtime().isChecking).toBe(false)
+      expect(runtime().isConnected).toBe(false)
+      expect(settings().ollamaInstalled).toBe(false)
+
+      expect(runtime().pull).toEqual({ model: 'mistral:7b', status: 'starting' })
+      expect(runtime().error).toBeNull()
+
+      transport.pulls[0].onProgress?.('pulling manifest')
+      expect(runtime().pull).toEqual({ model: 'mistral:7b', status: 'pulling manifest' })
+
+      transport.pulls[0].resolve()
+      await drain()
+      transport.list[transport.list.length - 1].resolve(modelsA)
+      await pulling
+
+      expect(runtime().pull).toBeNull()
+      expect(runtime().models).toEqual(modelsA)
+      expect(runtime().isConnected).toBe(true)
+      expect(runtime().error).toBeNull()
+    })
+
     it('does not publish the error of a retired pull', async () => {
       await connect(HOST_A, modelsA)
 
