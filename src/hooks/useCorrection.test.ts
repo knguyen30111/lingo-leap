@@ -41,9 +41,11 @@ vi.mock('../lib/cache', () => ({
 
 function resetEnvironment() {
   useAppStore.setState({
+    mode: 'correct',
     inputText: 'Hello wrold',
     outputText: '',
     correctionLevel: 'fix',
+    latestDetectedSourceLang: null,
     isLoading: false,
     error: null,
     changes: [],
@@ -894,4 +896,423 @@ describe('useCorrection settings invalidation', () => {
       expect(useAppStore.getState().isChangesLoading).toBe(false)
     }
   )
+})
+
+describe('useCorrection detected language', () => {
+  beforeEach(resetEnvironment)
+  afterEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('reports the detected language of a published correction', async () => {
+    grammar.detectSourceLanguage.mockReturnValue('fr')
+
+    const { result } = renderHook(() => useCorrection())
+
+    await act(async () => {
+      await result.current.correct()
+    })
+
+    expect(grammar.correctText.mock.calls[0][1]).toBe('fr')
+    expect(useAppStore.getState().latestDetectedSourceLang).toBe('fr')
+  })
+
+  it('reports the detected language of a streamed correction', async () => {
+    useSettingsStore.setState({ useStreaming: true })
+    grammar.detectSourceLanguage.mockReturnValue('fr')
+    grammar.correctTextStream.mockReturnValue(streamOf('Hello', 'Hello world'))
+
+    const { result } = renderHook(() => useCorrection())
+
+    await act(async () => {
+      await result.current.correct()
+    })
+
+    expect(grammar.correctTextStream.mock.calls[0][1]).toBe('fr')
+    expect(useAppStore.getState().latestDetectedSourceLang).toBe('fr')
+  })
+
+  it('reports the detected language of a cached correction', async () => {
+    grammar.detectSourceLanguage.mockReturnValue('fr')
+    vi.mocked(translationCache.get).mockReturnValue('Hello world')
+
+    const { result } = renderHook(() => useCorrection())
+
+    await act(async () => {
+      await result.current.correct()
+    })
+
+    expect(translationCache.get).toHaveBeenCalledWith('Hello wrold-fr-fix-gemma3:4b')
+    expect(useAppStore.getState().outputText).toBe('Hello world')
+    expect(useAppStore.getState().latestDetectedSourceLang).toBe('fr')
+  })
+
+  it('leaves the selected translation source language untouched', async () => {
+    useAppStore.setState({ sourceLang: 'auto' })
+    grammar.detectSourceLanguage.mockReturnValue('fr')
+
+    const { result } = renderHook(() => useCorrection())
+
+    await act(async () => {
+      await result.current.correct()
+    })
+
+    expect(useAppStore.getState().sourceLang).toBe('auto')
+  })
+
+  it('does not report a detected language for a cancelled correction', async () => {
+    grammar.detectSourceLanguage.mockReturnValue('fr')
+    let resolveCorrect: (value: string) => void
+    grammar.correctText.mockReturnValue(new Promise(resolve => { resolveCorrect = resolve }))
+
+    const { result } = renderHook(() => useCorrection())
+
+    let pending!: Promise<string | undefined>
+    act(() => {
+      pending = result.current.correct()
+    })
+    await waitFor(() => expect(useAppStore.getState().isLoading).toBe(true))
+
+    act(() => {
+      result.current.cancel()
+    })
+
+    await act(async () => {
+      resolveCorrect!('Late correction')
+      await pending
+    })
+
+    expect(useAppStore.getState().latestDetectedSourceLang).toBeNull()
+  })
+
+  it('lets only the newest correction report its detected language', async () => {
+    grammar.detectSourceLanguage.mockReturnValueOnce('fr').mockReturnValueOnce('ja')
+    const resolvers: ((value: string) => void)[] = []
+    grammar.correctText.mockImplementation(
+      () => new Promise(resolve => { resolvers.push(resolve) })
+    )
+
+    const { result } = renderHook(() => useCorrection())
+
+    let first!: Promise<string | undefined>
+    let second!: Promise<string | undefined>
+    act(() => {
+      first = result.current.correct('first text')
+    })
+    act(() => {
+      second = result.current.correct('second text')
+    })
+
+    await act(async () => {
+      resolvers[1]('SECOND')
+      await second
+    })
+    await act(async () => {
+      resolvers[0]('FIRST')
+      await first
+    })
+
+    expect(useAppStore.getState().outputText).toBe('SECOND')
+    expect(useAppStore.getState().latestDetectedSourceLang).toBe('ja')
+  })
+
+  it('ignores a resumed stream chunk from a superseded correction detection', async () => {
+    useSettingsStore.setState({ useStreaming: true })
+    grammar.detectSourceLanguage.mockReturnValueOnce('fr').mockReturnValueOnce('ja')
+
+    let releaseFirst: () => void
+    const gate = new Promise<void>(resolve => { releaseFirst = resolve })
+
+    async function* firstStream() {
+      yield 'first-a'
+      await gate
+      yield 'first-b'
+    }
+
+    grammar.correctTextStream
+      .mockReturnValueOnce(firstStream())
+      .mockReturnValueOnce(streamOf('second'))
+
+    const { result } = renderHook(() => useCorrection())
+
+    await act(async () => {
+      result.current.correct('first text')
+    })
+    await act(async () => {
+      await result.current.correct('second text')
+    })
+
+    expect(useAppStore.getState().latestDetectedSourceLang).toBe('ja')
+
+    await act(async () => {
+      releaseFirst!()
+    })
+
+    expect(useAppStore.getState().outputText).toBe('second')
+    expect(useAppStore.getState().latestDetectedSourceLang).toBe('ja')
+  })
+
+  it('never reports a detected language from a background extraction', async () => {
+    grammar.detectSourceLanguage.mockReturnValueOnce('fr').mockReturnValueOnce('ja')
+    grammar.correctText.mockResolvedValue('First corrected')
+    const extractionResolvers: ((changes: unknown[]) => void)[] = []
+    grammar.extractChanges.mockImplementation(
+      () => new Promise(resolve => { extractionResolvers.push(resolve) })
+    )
+
+    const { result } = renderHook(() => useCorrection())
+
+    await act(async () => {
+      await result.current.correct('first text')
+    })
+    await waitFor(() => expect(extractionResolvers.length).toBe(1))
+
+    let second!: Promise<string | undefined>
+    act(() => {
+      second = result.current.correct('second text')
+    })
+
+    await act(async () => {
+      extractionResolvers[0]([{ from: 'stale', to: 'stale', reason: 'stale' }])
+    })
+
+    expect(useAppStore.getState().latestDetectedSourceLang).toBe('fr')
+
+    await act(async () => {
+      await second
+    })
+
+    expect(useAppStore.getState().latestDetectedSourceLang).toBe('ja')
+    expect(grammar.extractChanges.mock.calls[0][2]).toBe('fr')
+  })
+})
+
+describe('useCorrection request retirement', () => {
+  beforeEach(resetEnvironment)
+  afterEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('publishes an explicit text that differs from the stored input', async () => {
+    useAppStore.setState({ inputText: 'Stored input' })
+    grammar.detectSourceLanguage.mockReturnValue('fr')
+    grammar.correctText.mockResolvedValue('Custom corrected')
+
+    const { result } = renderHook(() => useCorrection())
+
+    await act(async () => {
+      await result.current.correct('Custom text')
+    })
+
+    expect(grammar.detectSourceLanguage).toHaveBeenCalledWith('Custom text')
+    expect(grammar.correctText.mock.calls[0][0]).toBe('Custom text')
+    expect(translationCache.set).toHaveBeenCalledWith(
+      'Custom text-fr-fix-gemma3:4b',
+      'Custom corrected'
+    )
+    expect(grammar.extractChanges.mock.calls[0][0]).toBe('Custom text')
+    expect(useAppStore.getState().outputText).toBe('Custom corrected')
+    expect(useAppStore.getState().latestDetectedSourceLang).toBe('fr')
+  })
+
+  it('publishes an explicit level that differs from the stored level', async () => {
+    useAppStore.setState({ correctionLevel: 'fix' })
+    grammar.detectSourceLanguage.mockReturnValue('fr')
+
+    const { result } = renderHook(() => useCorrection())
+
+    await act(async () => {
+      await result.current.correct(undefined, 'rewrite')
+    })
+
+    expect(grammar.correctText.mock.calls[0][2]).toBe('rewrite')
+    expect(translationCache.get).toHaveBeenCalledWith('Hello wrold-fr-rewrite-gemma3:4b')
+    expect(useAppStore.getState().outputText).toBe('Hello world')
+    expect(useAppStore.getState().latestDetectedSourceLang).toBe('fr')
+  })
+
+  const storeChanges = [
+    ['the input text', () => useAppStore.getState().setInputText('Later text')],
+    ['the correction level', () => useAppStore.getState().setCorrectionLevel('rewrite')],
+    ['the mode', () => useAppStore.getState().setMode('translate')],
+  ] as const
+
+  it.each(storeChanges)(
+    'aborts and retires an in-flight correction when %s changes',
+    async (_label, mutate) => {
+      grammar.detectSourceLanguage.mockReturnValue('fr')
+      let resolveCorrect: (value: string) => void
+      grammar.correctText.mockReturnValue(new Promise(resolve => { resolveCorrect = resolve }))
+
+      const { result } = renderHook(() => useCorrection())
+
+      let pending!: Promise<string | undefined>
+      act(() => {
+        pending = result.current.correct()
+      })
+      await waitFor(() => expect(useAppStore.getState().isLoading).toBe(true))
+
+      act(() => {
+        mutate()
+      })
+
+      expect(grammar.correctText.mock.calls[0][3].aborted).toBe(true)
+      expect(useAppStore.getState().isLoading).toBe(false)
+      expect(useAppStore.getState().isChangesLoading).toBe(false)
+
+      await act(async () => {
+        resolveCorrect!('Stale correction')
+        await pending
+      })
+
+      expect(useAppStore.getState().outputText).toBe('')
+      expect(translationCache.set).not.toHaveBeenCalled()
+      expect(grammar.extractChanges).not.toHaveBeenCalled()
+      expect(useAppStore.getState().latestDetectedSourceLang).toBeNull()
+      expect(useAppStore.getState().isLoading).toBe(false)
+      expect(useAppStore.getState().isChangesLoading).toBe(false)
+    }
+  )
+
+  it.each(storeChanges)(
+    'does not report an error from a correction retired by %s',
+    async (_label, mutate) => {
+      let rejectCorrect: (reason: unknown) => void
+      grammar.correctText.mockReturnValue(new Promise((_resolve, reject) => { rejectCorrect = reject }))
+
+      const { result } = renderHook(() => useCorrection())
+
+      let pending!: Promise<string | undefined>
+      act(() => {
+        pending = result.current.correct()
+      })
+      await waitFor(() => expect(useAppStore.getState().isLoading).toBe(true))
+
+      act(() => {
+        mutate()
+      })
+
+      await act(async () => {
+        rejectCorrect!(new Error('Server error'))
+        await pending
+      })
+
+      expect(useAppStore.getState().error).toBeNull()
+      expect(useAppStore.getState().outputText).toBe('')
+    }
+  )
+
+  it('retires a resumed correction stream when the input changes', async () => {
+    useSettingsStore.setState({ useStreaming: true })
+    grammar.detectSourceLanguage.mockReturnValue('fr')
+
+    let releaseStream: () => void
+    const gate = new Promise<void>(resolve => { releaseStream = resolve })
+
+    async function* gatedStream() {
+      yield 'first-a'
+      await gate
+      yield 'first-b'
+    }
+    grammar.correctTextStream.mockReturnValue(gatedStream())
+
+    const { result } = renderHook(() => useCorrection())
+
+    let pending!: Promise<string | undefined>
+    await act(async () => {
+      pending = result.current.correct()
+    })
+    expect(useAppStore.getState().outputText).toBe('first-a')
+
+    act(() => {
+      useAppStore.getState().setInputText('Later text')
+    })
+
+    await act(async () => {
+      releaseStream!()
+      await pending
+    })
+
+    expect(useAppStore.getState().outputText).toBe('first-a')
+    expect(translationCache.set).not.toHaveBeenCalled()
+    expect(useAppStore.getState().latestDetectedSourceLang).toBeNull()
+    expect(useAppStore.getState().isLoading).toBe(false)
+  })
+
+  it('retires a background extraction when the input changes', async () => {
+    grammar.detectSourceLanguage.mockReturnValue('fr')
+    grammar.correctText.mockResolvedValue('First corrected')
+    const extractionResolvers: ((changes: unknown[]) => void)[] = []
+    grammar.extractChanges.mockImplementation(
+      () => new Promise(resolve => { extractionResolvers.push(resolve) })
+    )
+
+    const { result } = renderHook(() => useCorrection())
+
+    await act(async () => {
+      await result.current.correct('first text')
+    })
+    await waitFor(() => expect(extractionResolvers.length).toBe(1))
+    expect(useAppStore.getState().isChangesLoading).toBe(true)
+
+    act(() => {
+      useAppStore.getState().setInputText('Later text')
+    })
+
+    expect(grammar.extractChanges.mock.calls[0][4].aborted).toBe(true)
+
+    await act(async () => {
+      extractionResolvers[0]([{ from: 'stale', to: 'stale', reason: 'stale' }])
+    })
+
+    expect(useAppStore.getState().changes).toEqual([])
+    expect(useAppStore.getState().isChangesLoading).toBe(false)
+  })
+
+  it('leaves the correction alone when only the detected state changes', async () => {
+    grammar.detectSourceLanguage.mockReturnValue('fr')
+    let resolveCorrect: (value: string) => void
+    grammar.correctText.mockReturnValue(new Promise(resolve => { resolveCorrect = resolve }))
+
+    const { result } = renderHook(() => useCorrection())
+
+    let pending!: Promise<string | undefined>
+    act(() => {
+      pending = result.current.correct()
+    })
+    await waitFor(() => expect(useAppStore.getState().isLoading).toBe(true))
+
+    act(() => {
+      useAppStore.getState().setLatestDetectedSourceLang('ja')
+    })
+
+    expect(grammar.correctText.mock.calls[0][3].aborted).toBe(false)
+
+    await act(async () => {
+      resolveCorrect!('Hello world')
+      await pending
+    })
+
+    expect(useAppStore.getState().outputText).toBe('Hello world')
+    expect(useAppStore.getState().latestDetectedSourceLang).toBe('fr')
+  })
+
+  it('stops listening to the store after unmount', async () => {
+    grammar.detectSourceLanguage.mockReturnValue('fr')
+
+    const { result, unmount } = renderHook(() => useCorrection())
+
+    await act(async () => {
+      await result.current.correct()
+    })
+
+    unmount()
+
+    act(() => {
+      useAppStore.getState().setInputText('Later text')
+    })
+
+    expect(useAppStore.getState().inputText).toBe('Later text')
+    expect(useAppStore.getState().isLoading).toBe(false)
+  })
 })
