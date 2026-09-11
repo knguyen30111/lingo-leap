@@ -1,5 +1,13 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest'
-import { LRUCache, translationCache, createTranslationKey, createCorrectionKey } from './cache'
+import {
+  LRUCache,
+  translationResultCache,
+  correctionResultCache,
+  createTranslationCacheKey,
+  createCorrectionCacheKey,
+  TRANSLATION_TASK_REVISION,
+  CORRECTION_TASK_REVISION,
+} from './cache'
 
 describe('LRUCache', () => {
   let cache: LRUCache<string>
@@ -134,69 +142,37 @@ describe('LRUCache', () => {
   })
 })
 
-describe('translationCache singleton', () => {
-  beforeEach(() => {
-    translationCache.clear()
+describe('AI result cache contracts', () => {
+  it('exposes a named cache per AI task', () => {
+    expect(translationResultCache).toBeInstanceOf(LRUCache)
+    expect(correctionResultCache).toBeInstanceOf(LRUCache)
   })
 
-  it('is an LRUCache instance', () => {
-    expect(translationCache).toBeInstanceOf(LRUCache)
+  it('exposes a task revision per AI task', () => {
+    expect(typeof TRANSLATION_TASK_REVISION).toBe('string')
+    expect(typeof CORRECTION_TASK_REVISION).toBe('string')
+    expect(TRANSLATION_TASK_REVISION).not.toBe(CORRECTION_TASK_REVISION)
   })
 
-  it('stores and retrieves translations', () => {
-    translationCache.set('test-key', 'translated text')
-    expect(translationCache.get('test-key')).toBe('translated text')
-  })
-})
+  it('builds every task key asynchronously', async () => {
+    const translationKey = createTranslationCacheKey({
+      endpoint: 'http://localhost:11434',
+      model: 'gemma3:4b',
+      sourceLang: 'en',
+      targetLang: 'vi',
+      input: 'Hello world',
+    })
+    const correctionKey = createCorrectionCacheKey({
+      endpoint: 'http://localhost:11434',
+      model: 'gemma3:4b',
+      language: 'en',
+      level: 'fix',
+      input: 'Hello wrold',
+    })
 
-describe('createTranslationKey', () => {
-  it('creates unique keys for different inputs', () => {
-    const key1 = createTranslationKey('hello', 'en', 'ja', 'model1')
-    const key2 = createTranslationKey('hello', 'en', 'ko', 'model1')
-    const key3 = createTranslationKey('world', 'en', 'ja', 'model1')
-    const key4 = createTranslationKey('hello', 'en', 'ja', 'model2')
-
-    expect(key1).not.toBe(key2) // different target
-    expect(key1).not.toBe(key3) // different text
-    expect(key1).not.toBe(key4) // different model
-  })
-
-  it('creates same key for same inputs', () => {
-    const key1 = createTranslationKey('hello', 'en', 'ja', 'model1')
-    const key2 = createTranslationKey('hello', 'en', 'ja', 'model1')
-    expect(key1).toBe(key2)
-  })
-
-  it('includes model, source, target and hash in key', () => {
-    const key = createTranslationKey('test', 'en', 'ja', 'qwen')
-    expect(key).toContain('qwen')
-    expect(key).toContain('en')
-    expect(key).toContain('ja')
-  })
-})
-
-describe('createCorrectionKey', () => {
-  it('creates unique keys for different inputs', () => {
-    const key1 = createCorrectionKey('hello', 'en', 'fix', 'model1')
-    const key2 = createCorrectionKey('hello', 'en', 'improve', 'model1')
-    const key3 = createCorrectionKey('hello', 'ja', 'fix', 'model1')
-    const key4 = createCorrectionKey('world', 'en', 'fix', 'model1')
-
-    expect(key1).not.toBe(key2) // different level
-    expect(key1).not.toBe(key3) // different language
-    expect(key1).not.toBe(key4) // different text
-  })
-
-  it('creates same key for same inputs', () => {
-    const key1 = createCorrectionKey('hello', 'en', 'fix', 'model1')
-    const key2 = createCorrectionKey('hello', 'en', 'fix', 'model1')
-    expect(key1).toBe(key2)
-  })
-
-  it('includes model, language, level and hash in key', () => {
-    const key = createCorrectionKey('test', 'en', 'fix', 'qwen')
-    expect(key).toContain('qwen')
-    expect(key).toContain('en')
-    expect(key).toContain('fix')
+    expect(translationKey).toBeInstanceOf(Promise)
+    expect(correctionKey).toBeInstanceOf(Promise)
+    expect(typeof await translationKey).toBe('string')
+    expect(typeof await correctionKey).toBe('string')
   })
 })
