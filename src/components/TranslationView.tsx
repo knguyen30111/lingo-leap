@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
-import { writeText } from '@tauri-apps/plugin-clipboard-manager'
+import { copyOutput } from '../lib/copy-output'
 import { useAppStore } from '../stores/appStore'
 import { useSettingsStore } from '../stores/settingsStore'
 import { useTranslation as useTranslationHook } from '../hooks/useTranslation'
@@ -55,13 +55,13 @@ export function TranslationView() {
 
   const handleCopy = async () => {
     if (!outputText) return
-    try {
-      await writeText(outputText)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    } catch (err) {
-      console.error('Failed to copy:', err)
+    const result = await copyOutput(outputText)
+    if (!result.copied) {
+      console.error('Failed to copy:', result.copyError)
+      return
     }
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
   }
 
   const handleRegenerate = () => {

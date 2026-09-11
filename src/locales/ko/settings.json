@@ -12,6 +12,14 @@
     "dark": "다크",
     "auto": "자동"
   },
+  "desktop": {
+    "alwaysOnTop": "항상 위에 표시",
+    "alwaysOnTopDesc": "창을 다른 창보다 앞에 유지합니다",
+    "alwaysOnTopApplyError": "창을 항상 위에 유지할 수 없습니다. 창 관리자가 요청을 거부했습니다.",
+    "autoHideAfterCopy": "복사 후 자동 숨김",
+    "autoHideAfterCopyDesc": "출력을 복사하면 창을 숨깁니다",
+    "autoHideAfterCopyError": "출력은 복사되었지만 창을 숨기지 못했습니다."
+  },
   "ollama": {
     "host": "Ollama 호스트",
     "translationModel": "번역 모델",

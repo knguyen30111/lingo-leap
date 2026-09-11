@@ -12,6 +12,14 @@
     "dark": "Dark",
     "auto": "Auto"
   },
+  "desktop": {
+    "alwaysOnTop": "Always On Top",
+    "alwaysOnTopDesc": "Keep the window above other windows",
+    "alwaysOnTopApplyError": "Could not keep the window on top. Your window manager refused the request.",
+    "autoHideAfterCopy": "Auto Hide After Copy",
+    "autoHideAfterCopyDesc": "Hide the window once the output is copied",
+    "autoHideAfterCopyError": "The output was copied, but the window could not be hidden."
+  },
   "ollama": {
     "host": "Ollama Host",
     "translationModel": "Translation Model",

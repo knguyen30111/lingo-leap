@@ -3,6 +3,8 @@ import type { Change, CorrectionLevel } from '../types'
 
 export type Mode = 'translate' | 'correct'
 
+export type TargetLangOwner = 'default' | 'user'
+
 // Re-exported for the existing `../stores/appStore` importers; the single
 // declaration lives in `src/types`.
 export type { CorrectionLevel }
@@ -36,6 +38,10 @@ interface AppState {
   setLatestDetectedSourceLang: (lang: string | null) => void
   targetLang: string
   setTargetLang: (lang: string) => void
+  // Who the current target language belongs to. Session-only: a saved default
+  // may seed the request, but it must never reclaim a language the user picked.
+  targetLangOwner: TargetLangOwner
+  applyDefaultTargetLang: (lang: string) => void
 
   // Status
   isLoading: boolean
@@ -62,6 +68,7 @@ const initialState = {
   sourceLang: 'auto',
   latestDetectedSourceLang: null,
   targetLang: 'ja',
+  targetLangOwner: 'default' as TargetLangOwner,
   isLoading: false,
   error: null,
   changes: [],
@@ -83,7 +90,11 @@ export const useAppStore = create<AppState>((set) => ({
 
   setSourceLang: (lang) => set({ sourceLang: lang, latestDetectedSourceLang: null }),
   setLatestDetectedSourceLang: (lang) => set({ latestDetectedSourceLang: lang }),
-  setTargetLang: (lang) => set({ targetLang: lang }),
+  // Re-picking the current language is still a choice, so ownership moves even
+  // when the value does not.
+  setTargetLang: (lang) => set({ targetLang: lang, targetLangOwner: 'user' }),
+  applyDefaultTargetLang: (lang) =>
+    set((state) => (state.targetLangOwner === 'default' ? { targetLang: lang } : {})),
 
   setLoading: (loading) => set({ isLoading: loading }),
   setError: (error) => set({ error }),

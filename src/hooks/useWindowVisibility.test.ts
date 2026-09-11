@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { renderHook, act, waitFor } from '@testing-library/react'
-import { useWindowVisibility } from './useWindowVisibility'
+import { useWindowVisibility, notifyWindowHiddenByRuntime } from './useWindowVisibility'
 
 // Mock Tauri APIs - must be hoisted
 vi.mock('@tauri-apps/api/window', () => ({
@@ -252,6 +252,70 @@ describe('useWindowVisibility', () => {
 
     removeDocumentListener.mockRestore()
     removeWindowListener.mockRestore()
+  })
+
+  describe('runtime hide notification', () => {
+    it('reports hidden when the runtime hides the window', async () => {
+      const { result } = renderHook(() => useWindowVisibility())
+
+      await waitFor(() => {
+        expect(closeRequestedCallback).not.toBeNull()
+      })
+
+      act(() => {
+        notifyWindowHiddenByRuntime()
+      })
+
+      expect(result.current.isVisible).toBe(false)
+    })
+
+    it('does not own the native voice session when the runtime hides the window', async () => {
+      const { invoke } = await import('@tauri-apps/api/core')
+      const { result } = renderHook(() => useWindowVisibility())
+
+      await waitFor(() => {
+        expect(closeRequestedCallback).not.toBeNull()
+      })
+
+      act(() => {
+        notifyWindowHiddenByRuntime()
+      })
+
+      expect(result.current.isVisible).toBe(false)
+      expect(invoke).not.toHaveBeenCalled()
+    })
+
+    it('becomes visible again on focus after a runtime hide', async () => {
+      const { result } = renderHook(() => useWindowVisibility())
+
+      await waitFor(() => {
+        expect(closeRequestedCallback).not.toBeNull()
+      })
+
+      act(() => {
+        notifyWindowHiddenByRuntime()
+      })
+      act(() => {
+        window.dispatchEvent(new Event('focus'))
+      })
+
+      await waitFor(() => {
+        expect(result.current.isVisible).toBe(true)
+      })
+    })
+
+    it('stops reporting to an unmounted hook instance', async () => {
+      const { result, unmount } = renderHook(() => useWindowVisibility())
+
+      await waitFor(() => {
+        expect(closeRequestedCallback).not.toBeNull()
+      })
+
+      unmount()
+
+      expect(() => notifyWindowHiddenByRuntime()).not.toThrow()
+      expect(result.current.isVisible).toBe(true)
+    })
   })
 
   it('reports hidden only once per close request', async () => {

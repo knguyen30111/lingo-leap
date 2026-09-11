@@ -6,26 +6,51 @@ vi.mock('../i18n', () => ({
   changeLanguage: vi.fn(),
 }))
 
+const STORAGE_KEY = 'tran-app-settings'
+
+// A pristine snapshot keeps every rehydrate test independent. Zustand's
+// default merge is a shallow spread, so leftovers from an earlier fixture
+// would otherwise masquerade as preserved values.
+const pristineState = useSettingsStore.getState()
+
+// Every field the version-0 store persisted, with non-default values so any
+// loss during migration is observable, plus an unknown nested sentinel.
+const V0_STATE = {
+  ollamaHost: 'http://192.168.1.50:11434',
+  translationModel: 'gemma3:12b',
+  correctionModel: 'llama3.1:8b',
+  useSameModelForBoth: true,
+  theme: 'dark',
+  alwaysOnTop: true,
+  autoHideAfterCopy: true,
+  useStreaming: false,
+  uiLanguage: 'vi',
+  defaultTargetLang: 'ko',
+  explanationLang: 'en',
+  speechLang: 'ja',
+  isSetupComplete: true,
+  ollamaInstalled: true,
+  modelsInstalled: true,
+  legacyUnsupportedSettings: {
+    retiredToggle: 'kept',
+    nestedLegacy: { deep: [1, 2] },
+  },
+  unknownSentinel: { nested: ['keep'], object: { value: 54 } },
+} as const
+
+function writeRawStorage(state: unknown, version: number) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify({ state, version }))
+}
+
+function readRawStorage() {
+  const raw = localStorage.getItem(STORAGE_KEY)
+  return raw === null ? null : (JSON.parse(raw) as { state: Record<string, unknown>; version: number })
+}
+
 describe('settingsStore', () => {
   beforeEach(() => {
-    // Reset store to default values
-    useSettingsStore.setState({
-      ollamaHost: 'http://localhost:11434',
-      translationModel: 'aya:8b',
-      correctionModel: 'qwen2.5:7b',
-      useSameModelForBoth: false,
-      theme: 'system',
-      alwaysOnTop: false,
-      autoHideAfterCopy: false,
-      useStreaming: true,
-      uiLanguage: 'en',
-      defaultTargetLang: 'ja',
-      explanationLang: 'auto',
-      speechLang: 'en',
-      isSetupComplete: false,
-      ollamaInstalled: false,
-      modelsInstalled: false,
-    })
+    localStorage.clear()
+    useSettingsStore.setState(pristineState, true)
   })
 
   describe('initial state', () => {
@@ -34,7 +59,6 @@ describe('settingsStore', () => {
       expect(state.ollamaHost).toBe('http://localhost:11434')
       expect(state.translationModel).toBe('aya:8b')
       expect(state.correctionModel).toBe('qwen2.5:7b')
-      expect(state.useSameModelForBoth).toBe(false)
       expect(state.theme).toBe('system')
       expect(state.alwaysOnTop).toBe(false)
       expect(state.autoHideAfterCopy).toBe(false)
@@ -46,6 +70,13 @@ describe('settingsStore', () => {
       expect(state.isSetupComplete).toBe(false)
       expect(state.ollamaInstalled).toBe(false)
       expect(state.modelsInstalled).toBe(false)
+      expect(state.legacyUnsupportedSettings).toEqual({})
+    })
+
+    it('does not expose a same-model toggle in active state', () => {
+      const state = useSettingsStore.getState()
+      expect(state).not.toHaveProperty('useSameModelForBoth')
+      expect(state).not.toHaveProperty('setUseSameModelForBoth')
     })
   })
 
@@ -65,9 +96,9 @@ describe('settingsStore', () => {
       expect(useSettingsStore.getState().correctionModel).toBe('llama3.2:8b')
     })
 
-    it('setUseSameModelForBoth updates value', () => {
-      useSettingsStore.getState().setUseSameModelForBoth(true)
-      expect(useSettingsStore.getState().useSameModelForBoth).toBe(true)
+    it('keeps translation and correction models independent', () => {
+      useSettingsStore.getState().setTranslationModel('gemma2:9b')
+      expect(useSettingsStore.getState().correctionModel).toBe('qwen2.5:7b')
     })
   })
 
@@ -165,17 +196,19 @@ describe('settingsStore', () => {
 
   describe('persist middleware', () => {
     it('store has persist name', () => {
-      // The store uses persist middleware with name 'tran-app-settings'
-      // We can verify the store is wrapped with persist by checking its API
       expect(useSettingsStore.persist).toBeDefined()
-      expect(useSettingsStore.persist.getOptions().name).toBe('tran-app-settings')
+      expect(useSettingsStore.persist.getOptions().name).toBe(STORAGE_KEY)
+    })
+
+    it('persists under storage version 1', () => {
+      expect(useSettingsStore.persist.getOptions().version).toBe(1)
     })
 
     it('keeps the detected source language out of the persisted payload', () => {
       useSettingsStore.getState().setDefaultTargetLang('ko')
       useSettingsStore.getState().setExplanationLang('ja')
 
-      const payload = localStorage.getItem('tran-app-settings')
+      const payload = localStorage.getItem(STORAGE_KEY)
 
       expect(payload).toContain('defaultTargetLang')
       expect(payload).not.toContain('latestDetectedSourceLang')
@@ -184,6 +217,159 @@ describe('settingsStore', () => {
     it('does not own a detected source language field', () => {
       expect(useSettingsStore.getState()).not.toHaveProperty('latestDetectedSourceLang')
       expect(useSettingsStore.getState()).not.toHaveProperty('setLatestDetectedSourceLang')
+    })
+  })
+
+  describe('version 0 to version 1 migration', () => {
+    it('moves an enabled same-model flag into legacy settings', async () => {
+      writeRawStorage(V0_STATE, 0)
+
+      await useSettingsStore.persist.rehydrate()
+
+      const state = useSettingsStore.getState()
+      expect(state).not.toHaveProperty('useSameModelForBoth')
+      expect(state.legacyUnsupportedSettings.useSameModelForBoth).toBe(true)
+    })
+
+    it('preserves a disabled same-model flag as false rather than dropping it', async () => {
+      writeRawStorage({ ...V0_STATE, useSameModelForBoth: false }, 0)
+
+      await useSettingsStore.persist.rehydrate()
+
+      expect(
+        useSettingsStore.getState().legacyUnsupportedSettings.useSameModelForBoth
+      ).toBe(false)
+    })
+
+    it('treats the active version 0 value as authoritative over a stale legacy value', async () => {
+      writeRawStorage(
+        {
+          ...V0_STATE,
+          useSameModelForBoth: false,
+          legacyUnsupportedSettings: {
+            useSameModelForBoth: true,
+            retiredToggle: 'kept',
+            nestedLegacy: { deep: [1, 2] },
+          },
+        },
+        0
+      )
+
+      await useSettingsStore.persist.rehydrate()
+
+      const legacy = useSettingsStore.getState().legacyUnsupportedSettings
+      expect(legacy.useSameModelForBoth).toBe(false)
+      expect(legacy.retiredToggle).toBe('kept')
+      expect(legacy.nestedLegacy).toEqual({ deep: [1, 2] })
+    })
+
+    it('preserves every other persisted field and the unknown sentinel', async () => {
+      writeRawStorage(V0_STATE, 0)
+
+      await useSettingsStore.persist.rehydrate()
+
+      const state = useSettingsStore.getState() as unknown as Record<string, unknown>
+      const { useSameModelForBoth: _moved, legacyUnsupportedSettings: _legacy, ...unchanged } =
+        V0_STATE
+      for (const [key, value] of Object.entries(unchanged)) {
+        expect(state[key]).toEqual(value)
+      }
+      expect(state.unknownSentinel).toEqual({ nested: ['keep'], object: { value: 54 } })
+    })
+
+    it('never rewrites the translation or correction model during migration', async () => {
+      writeRawStorage(V0_STATE, 0)
+
+      await useSettingsStore.persist.rehydrate()
+
+      expect(useSettingsStore.getState().translationModel).toBe('gemma3:12b')
+      expect(useSettingsStore.getState().correctionModel).toBe('llama3.1:8b')
+      expect(readRawStorage()?.state.translationModel).toBe('gemma3:12b')
+      expect(readRawStorage()?.state.correctionModel).toBe('llama3.1:8b')
+    })
+
+    it('writes back a version 1 payload without the active same-model field', async () => {
+      writeRawStorage(V0_STATE, 0)
+
+      await useSettingsStore.persist.rehydrate()
+
+      const raw = readRawStorage()
+      expect(raw?.version).toBe(1)
+      expect(raw?.state).not.toHaveProperty('useSameModelForBoth')
+      expect(raw?.state.legacyUnsupportedSettings).toEqual({
+        useSameModelForBoth: true,
+        retiredToggle: 'kept',
+        nestedLegacy: { deep: [1, 2] },
+      })
+      expect(raw?.state.unknownSentinel).toEqual({ nested: ['keep'], object: { value: 54 } })
+    })
+
+    it('keeps the desktop preferences active rather than retiring them', async () => {
+      writeRawStorage(V0_STATE, 0)
+
+      await useSettingsStore.persist.rehydrate()
+
+      const state = useSettingsStore.getState()
+      expect(state.alwaysOnTop).toBe(true)
+      expect(state.autoHideAfterCopy).toBe(true)
+      expect(state.defaultTargetLang).toBe('ko')
+      expect(state.legacyUnsupportedSettings).not.toHaveProperty('alwaysOnTop')
+      expect(state.legacyUnsupportedSettings).not.toHaveProperty('autoHideAfterCopy')
+    })
+  })
+
+  describe('same-version restart', () => {
+    it('rehydrates version 1 storage without rerunning the legacy migration', async () => {
+      const v1State = {
+        ...V0_STATE,
+        useSameModelForBoth: undefined,
+        legacyUnsupportedSettings: { retiredToggle: 'kept' },
+      }
+      delete (v1State as Record<string, unknown>).useSameModelForBoth
+      writeRawStorage(v1State, 1)
+      const before = localStorage.getItem(STORAGE_KEY)
+
+      await useSettingsStore.persist.rehydrate()
+
+      expect(localStorage.getItem(STORAGE_KEY)).toBe(before)
+      expect(useSettingsStore.getState().legacyUnsupportedSettings).toEqual({
+        retiredToggle: 'kept',
+      })
+      expect(useSettingsStore.getState().ollamaHost).toBe('http://192.168.1.50:11434')
+    })
+  })
+
+  describe('fail-closed rehydration', () => {
+    it('keeps defaults and raw storage when the payload is not valid JSON', async () => {
+      localStorage.setItem(STORAGE_KEY, '{"state": {"theme": "dark"')
+
+      await expect(useSettingsStore.persist.rehydrate()).resolves.toBeUndefined()
+
+      expect(useSettingsStore.getState().theme).toBe('system')
+      expect(localStorage.getItem(STORAGE_KEY)).toBe('{"state": {"theme": "dark"')
+    })
+
+    it('keeps defaults and raw storage when the persisted state is not an object', async () => {
+      writeRawStorage('not-a-settings-object', 0)
+      const before = localStorage.getItem(STORAGE_KEY)
+
+      await useSettingsStore.persist.rehydrate()
+
+      expect(useSettingsStore.getState().theme).toBe('system')
+      expect(useSettingsStore.getState().ollamaHost).toBe('http://localhost:11434')
+      expect(localStorage.getItem(STORAGE_KEY)).toBe(before)
+    })
+
+    it('refuses to down-migrate a future storage version', async () => {
+      writeRawStorage({ ...V0_STATE, theme: 'light' }, 2)
+      const before = localStorage.getItem(STORAGE_KEY)
+
+      await useSettingsStore.persist.rehydrate()
+
+      expect(useSettingsStore.getState().theme).toBe('system')
+      expect(useSettingsStore.getState().ollamaHost).toBe('http://localhost:11434')
+      expect(useSettingsStore.getState().legacyUnsupportedSettings).toEqual({})
+      expect(localStorage.getItem(STORAGE_KEY)).toBe(before)
     })
   })
 })

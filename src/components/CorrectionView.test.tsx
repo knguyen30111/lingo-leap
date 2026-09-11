@@ -3,10 +3,17 @@ import { act, render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { CorrectionView } from './CorrectionView'
 import { useAppStore } from '../stores/appStore'
 import { useSettingsStore } from '../stores/settingsStore'
+import { useDesktopRuntimeStatusStore } from '../stores/desktop-runtime-status-store'
 
 // Mock Tauri clipboard
 vi.mock('@tauri-apps/plugin-clipboard-manager', () => ({
   writeText: vi.fn().mockResolvedValue(undefined),
+}))
+
+// Mock the Tauri window so auto-hide can be observed without a native window
+const mockHide = vi.fn<() => Promise<void>>()
+vi.mock('@tauri-apps/api/window', () => ({
+  getCurrentWindow: vi.fn(() => ({ hide: mockHide })),
 }))
 
 // Mock react-i18next
@@ -122,7 +129,14 @@ describe('CorrectionView', () => {
     })
     useSettingsStore.setState({
       speechLang: 'en',
+      autoHideAfterCopy: false,
     })
+    useDesktopRuntimeStatusStore.setState({
+      alwaysOnTopApplyError: null,
+      autoHideAfterCopyError: null,
+    })
+    mockHide.mockReset()
+    mockHide.mockResolvedValue(undefined)
     mockCorrect.mockClear()
     mockToggleListening.mockClear()
     capturedLang = undefined
@@ -509,6 +523,64 @@ describe('CorrectionView', () => {
       render(<CorrectionView />)
 
       expect(capturedLang).toBe('ja')
+    })
+  })
+
+  describe('Auto hide after copy', () => {
+    it('does not hide the window when auto hide is off', async () => {
+      useAppStore.setState({ outputText: 'Hello world' })
+      render(<CorrectionView />)
+
+      fireEvent.click(screen.getByText('Copy'))
+
+      await waitFor(() => {
+        expect(screen.getByText('Copied')).toBeInTheDocument()
+      })
+      expect(mockHide).not.toHaveBeenCalled()
+    })
+
+    it('hides the window after a successful copy when auto hide is on', async () => {
+      useSettingsStore.setState({ autoHideAfterCopy: true })
+      useAppStore.setState({ outputText: 'Hello world' })
+      render(<CorrectionView />)
+
+      fireEvent.click(screen.getByText('Copy'))
+
+      await waitFor(() => {
+        expect(mockHide).toHaveBeenCalledTimes(1)
+      })
+    })
+
+    it('never hides the window when the clipboard write fails', async () => {
+      const { writeText } = await import('@tauri-apps/plugin-clipboard-manager')
+      vi.mocked(writeText).mockRejectedValueOnce(new Error('Copy failed'))
+      useSettingsStore.setState({ autoHideAfterCopy: true })
+      useAppStore.setState({ outputText: 'Hello world' })
+      render(<CorrectionView />)
+
+      fireEvent.click(screen.getByText('Copy'))
+
+      await waitFor(() => {
+        expect(writeText).toHaveBeenCalled()
+      })
+      expect(mockHide).not.toHaveBeenCalled()
+      expect(screen.queryByText('Copied')).not.toBeInTheDocument()
+    })
+
+    it('keeps the copied state when only the hide fails', async () => {
+      mockHide.mockRejectedValueOnce(new Error('hide denied'))
+      useSettingsStore.setState({ autoHideAfterCopy: true })
+      useAppStore.setState({ outputText: 'Hello world' })
+      render(<CorrectionView />)
+
+      fireEvent.click(screen.getByText('Copy'))
+
+      await waitFor(() => {
+        expect(screen.getByText('Copied')).toBeInTheDocument()
+      })
+      expect(
+        useDesktopRuntimeStatusStore.getState().autoHideAfterCopyError
+      ).toContain('hide denied')
     })
   })
 })

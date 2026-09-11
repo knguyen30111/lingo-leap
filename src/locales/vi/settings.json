@@ -12,6 +12,14 @@
     "dark": "Tối",
     "auto": "Tự động"
   },
+  "desktop": {
+    "alwaysOnTop": "Luôn ở trên cùng",
+    "alwaysOnTopDesc": "Giữ cửa sổ nằm trên các cửa sổ khác",
+    "alwaysOnTopApplyError": "Không giữ được cửa sổ ở trên cùng. Trình quản lý cửa sổ đã từ chối yêu cầu.",
+    "autoHideAfterCopy": "Tự ẩn sau khi sao chép",
+    "autoHideAfterCopyDesc": "Ẩn cửa sổ sau khi sao chép kết quả",
+    "autoHideAfterCopyError": "Đã sao chép kết quả nhưng không ẩn được cửa sổ."
+  },
   "ollama": {
     "host": "Máy chủ Ollama",
     "translationModel": "Mô hình dịch",
