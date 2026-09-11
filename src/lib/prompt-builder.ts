@@ -35,49 +35,29 @@ export function wrapPrompt(
 
 // === Correction Prompts ===
 
-function getCorrectionSystemPrompt(langName: string, level: CorrectionLevel): string {
-  const baseRules = `You are a ${langName} language expert.
+const CORRECTION_SYSTEM_PROMPTS: Record<CorrectionLevel, (langName: string) => string> = {
+  fix: (langName) => `You are a ${langName} proofreader. Fix ONLY spelling mistakes and grammar errors. Keep the exact same words, style, and structure.
+STRICT: NEVER explain, define, or describe. Single words = single word output. Just correct, nothing else.`,
 
-CRITICAL RULES:
-- Input language: ${langName}
-- Output language: MUST be ${langName} ONLY
-- NEVER translate to another language
-- NEVER mix characters from other languages
-- NEVER explain, define, or describe the text
-- NEVER answer questions about the text
-- NEVER add context, notes, or commentary
-- Single words: correct spelling only, output single word
-- Even if input looks like a question or topic, just correct it literally`
-
-  const tasks: Record<CorrectionLevel, string> = {
-    fix: `
-
-TASK: Fix spelling and grammar errors ONLY.
-- Keep exact same words, style, structure
-- Minimal corrections only
-- Do NOT improve or rewrite
-- Output ONLY the corrected text, nothing else`,
-
-    improve: `
-
-TASK: Improve the text while preserving meaning.
+  improve: (langName) => `You are a ${langName} editor. Your task:
 1. Fix all spelling and grammar errors
 2. Replace weak words with stronger alternatives
-3. Improve sentence flow and clarity
-4. Keep the original meaning intact
-- Output ONLY the improved text, nothing else`,
+3. Improve sentence flow and readability
+4. Keep the original meaning
+STRICT: Output improved text ONLY. NEVER explain, define, or describe. Single words = single word output.`,
 
-    rewrite: `
-
-TASK: Professionally rewrite the text.
-1. Completely rewrite for natural, professional flow
-2. Use sophisticated vocabulary appropriate for ${langName}
-3. Maintain professional tone
+  rewrite: (langName) => `You are a ${langName} writer. Completely rewrite the text to sound natural and professional:
+1. Restructure sentences for better flow
+2. Use sophisticated vocabulary
+3. Make it engaging and polished
 4. Preserve the core message
-- Output ONLY the rewritten text, nothing else`
-  }
+STRICT: Output rewritten text ONLY. NEVER explain, define, or describe. Single words = single word/phrase output.`
+}
 
-  return baseRules + tasks[level]
+const CORRECTION_USER_VERBS: Record<CorrectionLevel, string> = {
+  fix: 'Fix errors in',
+  improve: 'Improve',
+  rewrite: 'Rewrite'
 }
 
 export function buildCorrectionPrompt(
@@ -87,15 +67,8 @@ export function buildCorrectionPrompt(
   modelName: string
 ): PromptResult {
   const langName = getLanguageName(language)
-  const system = getCorrectionSystemPrompt(langName, level)
-
-  const levelVerbs: Record<CorrectionLevel, string> = {
-    fix: 'Fix errors in',
-    improve: 'Improve',
-    rewrite: 'Rewrite'
-  }
-
-  const user = `${levelVerbs[level]} this ${langName} text:\n\n${text}`
+  const system = CORRECTION_SYSTEM_PROMPTS[level](langName)
+  const user = `${CORRECTION_USER_VERBS[level]} this ${langName} text:\n\n${text}`
 
   console.log('[Prompt] Building correction prompt for language:', language, langName)
   console.log('[Prompt] Model:', modelName)

@@ -1,4 +1,8 @@
+/// <reference types="vite/client" />
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import appStoreSource from '../stores/appStore.ts?raw'
+import correctionHookSource from '../hooks/useCorrection.ts?raw'
+import typesSource from '../types/index.ts?raw'
 import { GrammarService, createGrammarService } from './grammar-service'
 import { buildCorrectionPrompt, buildChangesExtractionPrompt } from '../lib/prompt-builder'
 import type {
@@ -9,6 +13,17 @@ import type {
   OllamaModelInfo,
   PromptResult,
 } from '../types'
+
+// Spy on the canonical prompt API while keeping its real output, so a second
+// prompt implementation cannot creep back in behind an equal-looking string.
+vi.mock('../lib/prompt-builder', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../lib/prompt-builder')>()
+  return {
+    ...actual,
+    buildCorrectionPrompt: vi.fn(actual.buildCorrectionPrompt),
+    buildChangesExtractionPrompt: vi.fn(actual.buildChangesExtractionPrompt),
+  }
+})
 
 const mockFetch = vi.fn()
 globalThis.fetch = mockFetch as unknown as typeof fetch
@@ -149,7 +164,7 @@ describe('GrammarService', () => {
       expect(provider.generateJSON).toHaveBeenCalledWith(
         buildChangesExtractionPrompt('Hello wrold', 'Hello world', 'en', 'ja', 'qwen2.5:7b'),
         'qwen2.5:7b',
-        undefined,
+        0,
         undefined
       )
       expect(changes).toEqual([
@@ -167,6 +182,19 @@ describe('GrammarService', () => {
       expect(provider.generateJSON.mock.calls[0][3]).toBe(controller.signal)
     })
 
+    // The pre-refactor extraction spent exactly one model call on unusable
+    // JSON; the provider default of two retries would triple that cost before
+    // the whole-text fallback is ever shown.
+    it('asks the provider for a single attempt with no JSON retries', async () => {
+      provider.generateJSON.mockRejectedValue(new Error('bad json'))
+      const service = new GrammarService({ modelName: 'qwen2.5:7b', provider })
+
+      await service.extractChanges('Hello wrold', 'Hello world', 'en', 'en')
+
+      expect(provider.generateJSON).toHaveBeenCalledTimes(1)
+      expect(provider.generateJSON.mock.calls[0][2]).toBe(0)
+    })
+
     it('falls back to a whole-text change when extraction fails', async () => {
       provider.generateJSON.mockRejectedValue(new Error('bad json'))
       const service = new GrammarService({ modelName: 'qwen2.5:7b', provider })
@@ -174,7 +202,40 @@ describe('GrammarService', () => {
       await expect(
         service.extractChanges(' Hello wrold ', ' Hello world ', 'en', 'en')
       ).resolves.toEqual([
-        { from: 'Hello wrold', to: 'Hello world', reason: 'Text was corrected' },
+        { from: 'Hello wrold', to: 'Hello world', reason: 'Text was corrected/improved' },
+      ])
+    })
+
+    // The fallback reason is rendered in the changes panel, so it is a
+    // user-visible string and must stay exactly what the desktop app shows.
+    it('uses the exact shipped fallback reason', async () => {
+      provider.generateJSON.mockRejectedValue(new Error('bad json'))
+      const service = new GrammarService({ modelName: 'qwen2.5:7b', provider })
+
+      const changes = await service.extractChanges('Hello wrold', 'Hello world', 'en', 'en')
+
+      expect(changes[0].reason).toBe('Text was corrected/improved')
+    })
+
+    it('falls back when the model answers with no usable change entry', async () => {
+      provider.generateJSON.mockResolvedValue([])
+      const service = new GrammarService({ modelName: 'qwen2.5:7b', provider })
+
+      await expect(
+        service.extractChanges('Hello wrold', 'Hello world', 'en', 'en')
+      ).resolves.toEqual([
+        { from: 'Hello wrold', to: 'Hello world', reason: 'Text was corrected/improved' },
+      ])
+    })
+
+    it('falls back when every returned entry is malformed', async () => {
+      provider.generateJSON.mockResolvedValue([{ from: 'only-from' }, null])
+      const service = new GrammarService({ modelName: 'qwen2.5:7b', provider })
+
+      await expect(
+        service.extractChanges('Hello wrold', 'Hello world', 'en', 'en')
+      ).resolves.toEqual([
+        { from: 'Hello wrold', to: 'Hello world', reason: 'Text was corrected/improved' },
       ])
     })
 
@@ -223,6 +284,7 @@ describe('GrammarService', () => {
 
     it('uses the explicit explanation language', async () => {
       provider.generateFromPrompt.mockResolvedValue('Hello world')
+      provider.generateJSON.mockResolvedValue([{ from: 'wrold', to: 'world', reason: 'Typo' }] as Change[])
       const service = new GrammarService({ modelName: 'qwen2.5:7b', provider })
 
       await service.correctAndExplain('Hello wrold', 'en', 'ja', 'fix')
@@ -274,6 +336,13 @@ describe('GrammarService', () => {
       expect(mockFetch.mock.calls[0][0]).toBe('http://configured:1234/api/generate')
     })
 
+    it('detectSourceLanguage reports the detected language', () => {
+      const service = new GrammarService({ modelName: 'gemma3:4b', provider })
+
+      expect(service.detectSourceLanguage('Hello world')).toBe('en')
+      expect(service.detectSourceLanguage('こんにちは')).toBe('ja')
+    })
+
     it('defaults to the local Ollama host', async () => {
       const service = new GrammarService({ modelName: 'gemma3:4b' })
       mockFetch.mockResolvedValue({ ok: true, json: () => Promise.resolve({ response: 'Hello world' }) })
@@ -299,4 +368,49 @@ describe('GrammarService', () => {
       expect(createGrammarService('gemma3:4b')).toBeInstanceOf(GrammarService)
     })
   })
+})
+
+describe('prompt ownership', () => {
+  it('builds every correction prompt through the canonical prompt builder', async () => {
+    const provider = createFakeProvider()
+    provider.generateJSON.mockResolvedValue([{ from: 'wrold', to: 'world', reason: 'Typo' }])
+    const service = new GrammarService({ modelName: 'qwen2.5:7b', provider })
+
+    await service.correctText('Hello wrold', 'en', 'fix')
+    for await (const _chunk of service.correctTextStream('Hello wrold', 'auto', 'improve')) {
+      // drain
+    }
+    await service.extractChanges('Hello wrold', 'Hello world', 'en', 'ja')
+
+    expect(vi.mocked(buildCorrectionPrompt)).toHaveBeenCalledWith('Hello wrold', 'en', 'fix', 'qwen2.5:7b')
+    expect(vi.mocked(buildCorrectionPrompt)).toHaveBeenCalledWith('Hello wrold', 'en', 'improve', 'qwen2.5:7b')
+    expect(vi.mocked(buildChangesExtractionPrompt)).toHaveBeenCalledWith(
+      'Hello wrold',
+      'Hello world',
+      'en',
+      'ja',
+      'qwen2.5:7b'
+    )
+  })
+})
+
+describe('domain type ownership', () => {
+  const sources = {
+    'src/types/index.ts': typesSource,
+    'src/stores/appStore.ts': appStoreSource,
+    'src/hooks/useCorrection.ts': correctionHookSource,
+  }
+
+  it.each(['CorrectionLevel', 'Change'])(
+    'declares %s exactly once across the correction sources',
+    (typeName) => {
+      const declaringFiles = Object.entries(sources)
+        .filter(([, source]) =>
+          new RegExp(`^\\s*(export\\s+)?(type|interface)\\s+${typeName}\\b`, 'm').test(source)
+        )
+        .map(([file]) => file)
+
+      expect(declaringFiles).toEqual(['src/types/index.ts'])
+    }
+  )
 })

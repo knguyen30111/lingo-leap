@@ -10,6 +10,13 @@ import type {
   PromptResult,
 } from '../types'
 
+// Spy on the canonical prompt API while keeping its real output, so a second
+// prompt implementation cannot creep back in behind an equal-looking string.
+vi.mock('../lib/prompt-builder', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../lib/prompt-builder')>()
+  return { ...actual, buildTranslationPrompt: vi.fn(actual.buildTranslationPrompt) }
+})
+
 const mockFetch = vi.fn()
 globalThis.fetch = mockFetch as unknown as typeof fetch
 
@@ -191,6 +198,20 @@ describe('TranslationService', () => {
 
     it('builds a service on the default host', () => {
       expect(createTranslationService('gemma3:4b')).toBeInstanceOf(TranslationService)
+    })
+  })
+
+  describe('prompt ownership', () => {
+    it('builds both prompt modes through the canonical prompt builder', async () => {
+      const service = new TranslationService({ modelName: 'qwen2.5:7b', provider })
+
+      await service.translate('Hello world', 'en', 'vi')
+      for await (const _chunk of service.translateStream('Hello world', 'auto', 'vi')) {
+        // drain
+      }
+
+      expect(vi.mocked(buildTranslationPrompt)).toHaveBeenCalledWith('Hello world', 'en', 'vi', 'qwen2.5:7b')
+      expect(vi.mocked(buildTranslationPrompt).mock.calls.length).toBeGreaterThanOrEqual(2)
     })
   })
 
