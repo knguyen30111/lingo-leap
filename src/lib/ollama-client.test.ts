@@ -774,14 +774,172 @@ describe('OllamaClient cancellation and stream completion', () => {
     })
   })
 
+  describe('listModels signal composition', () => {
+    function abortError(): Error {
+      const err = new Error('Aborted')
+      err.name = 'AbortError'
+      return err
+    }
+
+    /** Mocks `/api/tags` as a request that settles only once its signal aborts. */
+    function stallUntilAbort(): () => AbortSignal | undefined {
+      let requestSignal: AbortSignal | undefined
+      mockFetch.mockImplementation((_url: string, init: RequestInit) => {
+        requestSignal = init.signal as AbortSignal
+        return new Promise((_resolve, reject) => {
+          requestSignal!.addEventListener('abort', () => reject(abortError()))
+        })
+      })
+      return () => requestSignal
+    }
+
+    /**
+     * Records the abort listeners the transport installs on a caller signal so
+     * every exit path can prove the exact listener it added was removed again.
+     */
+    function trackAbortListeners(signal: AbortSignal) {
+      const added = vi.spyOn(signal, 'addEventListener')
+      const removed = vi.spyOn(signal, 'removeEventListener')
+      return {
+        expectNoneInstalled(): void {
+          const release = removed.mock.calls
+            .filter(call => call[0] === 'abort')
+            .map(call => call[1])
+          const installed = added.mock.calls
+            .filter(call => call[0] === 'abort')
+            .map(call => call[1])
+          for (const listener of installed) {
+            expect(release).toContain(listener)
+          }
+        },
+      }
+    }
+
+    it('aborts a stalled model list after five seconds while the caller stays active', async () => {
+      vi.useFakeTimers()
+      const requestSignalOf = stallUntilAbort()
+      const caller = new AbortController()
+      const listeners = trackAbortListeners(caller.signal)
+
+      const pending = client.listModels(caller.signal)
+
+      expect(requestSignalOf()?.aborted).toBe(false)
+      await vi.advanceTimersByTimeAsync(5000)
+      expect(requestSignalOf()?.aborted).toBe(true)
+      expect(caller.signal.aborted).toBe(false)
+
+      await expect(pending).resolves.toEqual([])
+      expect(vi.getTimerCount()).toBe(0)
+      listeners.expectNoneInstalled()
+    })
+
+    it('bounds a stalled model list with no caller signal', async () => {
+      vi.useFakeTimers()
+      const requestSignalOf = stallUntilAbort()
+
+      const pending = client.listModels()
+
+      expect(requestSignalOf()?.aborted).toBe(false)
+      await vi.advanceTimersByTimeAsync(5000)
+
+      await expect(pending).resolves.toEqual([])
+      expect(vi.getTimerCount()).toBe(0)
+    })
+
+    it('bounds a stalled response body with the same deadline', async () => {
+      vi.useFakeTimers()
+      let requestSignal: AbortSignal | undefined
+      mockFetch.mockImplementation((_url: string, init: RequestInit) => {
+        requestSignal = init.signal as AbortSignal
+        return Promise.resolve({
+          ok: true,
+          json: () =>
+            new Promise((_resolve, reject) => {
+              requestSignal!.addEventListener('abort', () => reject(abortError()))
+            }),
+        })
+      })
+      const caller = new AbortController()
+      const listeners = trackAbortListeners(caller.signal)
+
+      const pending = client.listModels(caller.signal)
+      await vi.advanceTimersByTimeAsync(5000)
+
+      expect(requestSignal?.aborted).toBe(true)
+      expect(caller.signal.aborted).toBe(false)
+      await expect(pending).resolves.toEqual([])
+      expect(vi.getTimerCount()).toBe(0)
+      listeners.expectNoneInstalled()
+    })
+
+    it('aborts the request immediately with the caller reason when the caller cancels', async () => {
+      vi.useFakeTimers()
+      const requestSignalOf = stallUntilAbort()
+      const caller = new AbortController()
+      const listeners = trackAbortListeners(caller.signal)
+
+      const pending = client.listModels(caller.signal)
+      caller.abort(new Error('caller cancelled'))
+
+      const requestSignal = requestSignalOf()
+      expect(requestSignal?.aborted).toBe(true)
+      if (requestSignal && 'reason' in requestSignal) {
+        expect(requestSignal.reason).toBe(caller.signal.reason)
+      }
+
+      await expect(pending).resolves.toEqual([])
+      expect(vi.getTimerCount()).toBe(0)
+      listeners.expectNoneInstalled()
+    })
+
+    it('does not wait for the deadline when the caller signal is already aborted', async () => {
+      vi.useFakeTimers()
+      let requestSignal: AbortSignal | undefined
+      mockFetch.mockImplementation((_url: string, init: RequestInit) => {
+        requestSignal = init.signal as AbortSignal
+        return Promise.reject(abortError())
+      })
+      const caller = new AbortController()
+      caller.abort()
+      const listeners = trackAbortListeners(caller.signal)
+
+      await expect(client.listModels(caller.signal)).resolves.toEqual([])
+
+      expect(requestSignal?.aborted).toBe(true)
+      expect(vi.getTimerCount()).toBe(0)
+      listeners.expectNoneInstalled()
+    })
+
+    it('returns server models and clears the deadline on success', async () => {
+      vi.useFakeTimers()
+      const models = [{ name: 'gemma3:4b', size: 1000, modified_at: '2026-01-01T00:00:00Z' }]
+      let requestSignal: AbortSignal | undefined
+      mockFetch.mockImplementation((_url: string, init: RequestInit) => {
+        requestSignal = init.signal as AbortSignal
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ models }) })
+      })
+      const caller = new AbortController()
+      const listeners = trackAbortListeners(caller.signal)
+
+      await expect(client.listModels(caller.signal)).resolves.toEqual(models)
+
+      expect(vi.getTimerCount()).toBe(0)
+      await vi.advanceTimersByTimeAsync(6000)
+      expect(requestSignal?.aborted).toBe(false)
+      listeners.expectNoneInstalled()
+    })
+  })
+
   describe('caller signal forwarding', () => {
-    it('forwards the signal to listModels', async () => {
+    it('composes a bounded request signal for listModels', async () => {
       const controller = new AbortController()
       mockFetch.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ models: [] }) })
 
       await client.listModels(controller.signal)
 
-      expect(mockFetch.mock.calls[0][1].signal).toBe(controller.signal)
+      const requestSignal = mockFetch.mock.calls[0][1].signal as AbortSignal
+      expect(requestSignal).toBeInstanceOf(AbortSignal)
+      expect(requestSignal).not.toBe(controller.signal)
     })
 
     it('forwards the signal to generate', async () => {
