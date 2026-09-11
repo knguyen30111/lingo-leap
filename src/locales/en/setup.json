@@ -1,6 +1,6 @@
 {
   "welcome": "Welcome to Lingo Leap",
-  "subtitle": "Offline translation powered by local AI",
+  "subtitle": "Translation powered by local AI",
   "ollama": {
     "checking": "Checking Ollama...",
     "connected": "Ollama Connected",

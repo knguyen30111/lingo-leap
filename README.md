@@ -1,6 +1,6 @@
 # Lingo Leap
 
-Offline translation and grammar correction app powered by local AI models. Available for **macOS**.
+Local-AI translation and grammar correction app powered by Ollama. Available for **macOS**.
 
 <p align="center">
   <img src="assets/logo.png" alt="Lingo Leap" width="200">
@@ -13,9 +13,11 @@ Offline translation and grammar correction app powered by local AI models. Avail
   - Light: Minor fixes only
   - Medium: Grammar and style improvements
   - Heavy: Full rewrite for clarity
-- **Speech-to-Text** - Voice input with continuous recording and silence detection
+- **Speech-to-Text** - Voice input with continuous recording and silence detection. Recognition is
+  provided by the browser and platform (Web Speech API), may use a network service, and always
+  listens through the system default microphone
 - **Language Swap** - One-click swap between source and target languages
-- **Offline First** - All processing happens locally via Ollama
+- **Local AI** - Translation and grammar correction run locally via Ollama
 - **Liquid Glass UI** - Modern design with light/dark/system themes
 - **Refined Settings** - Organized settings panel with grouped sections
 - **Menu Bar Integration** - Quick access from system tray
@@ -178,7 +180,7 @@ Access settings via the gear icon:
 | Default Target       | Default target language for translation |
 | Explanation Language | Language for correction explanations    |
 | Speech Recognition   | Language for voice input                |
-| Microphone           | Select audio input device               |
+| Microphone           | Always the system default (change it in OS sound settings) |
 
 ## License
 
