@@ -32,6 +32,7 @@ import { useSpeechToText } from './useSpeechToText'
 const recognitionBehavior = {
   autoStart: true,
   throwOnStart: false,
+  throwOnStop: false,
   endOnStop: false,
   endOnAbort: false,
 }
@@ -53,6 +54,7 @@ class MockSpeechRecognition {
   })
 
   stop = vi.fn(() => {
+    if (recognitionBehavior.throwOnStop) throw new Error('Stop failed')
     if (recognitionBehavior.endOnStop) this.onend?.()
   })
 
@@ -110,6 +112,7 @@ describe('useSpeechToText', () => {
     MockSpeechRecognition.instances = []
     recognitionBehavior.autoStart = true
     recognitionBehavior.throwOnStart = false
+    recognitionBehavior.throwOnStop = false
     recognitionBehavior.endOnStop = false
     recognitionBehavior.endOnAbort = false
     mockIsVisible = true
@@ -495,16 +498,64 @@ describe('useSpeechToText', () => {
     })
 
     expect(recognition.stop).toHaveBeenCalledTimes(1)
+    expect(result.current.isListening).toBe(false)
+    expect(onTextReady).not.toHaveBeenCalled()
+
+    act(() => {
+      recognition.onend?.()
+    })
+
     expect(onTextReady).toHaveBeenCalledTimes(1)
     expect(onTextReady).toHaveBeenCalledWith('pending text')
     expect(onEnd).not.toHaveBeenCalled()
-    expect(result.current.isListening).toBe(false)
     expect(invokeCount('deactivate_voice_session')).toBe(1)
 
     act(() => {
       recognition.onend?.()
     })
     expect(onTextReady).toHaveBeenCalledTimes(1)
+    expect(invokeCount('deactivate_voice_session')).toBe(1)
+  })
+
+  it('delivers a final result that arrives after a manual stop', async () => {
+    const onTextReady = vi.fn()
+    const onEnd = vi.fn()
+    const { result } = renderHook(() => useSpeechToText({ onTextReady, onEnd }))
+
+    await act(async () => {
+      await result.current.startListening()
+    })
+    act(() => {
+      latest().onresult?.(interim('hel'))
+    })
+
+    const recognition = latest()
+    vi.mocked(invoke).mockClear()
+
+    act(() => {
+      result.current.stopListening()
+    })
+
+    // The stopped session still owns the recognition until it reports onend
+    expect(recognition.stop).toHaveBeenCalledTimes(1)
+    expect(result.current.isListening).toBe(false)
+    expect(onTextReady).not.toHaveBeenCalled()
+
+    act(() => {
+      recognition.onresult?.(final('hello'))
+    })
+
+    expect(onTextReady).toHaveBeenCalledTimes(1)
+    expect(onTextReady).toHaveBeenCalledWith('hello')
+    expect(invokeCount('activate_voice_session')).toBe(0)
+
+    act(() => {
+      recognition.onend?.()
+    })
+
+    expect(onTextReady).toHaveBeenCalledTimes(1)
+    expect(onEnd).not.toHaveBeenCalled()
+    expect(result.current.interimTranscript).toBe('')
     expect(invokeCount('deactivate_voice_session')).toBe(1)
   })
 
@@ -532,6 +583,66 @@ describe('useSpeechToText', () => {
     expect(onTextReady).toHaveBeenCalledTimes(1)
     expect(onEnd).not.toHaveBeenCalled()
     expect(invokeCount('deactivate_voice_session')).toBe(1)
+  })
+
+  it('settles a stop that the recognition cannot acknowledge', async () => {
+    recognitionBehavior.throwOnStop = true
+    const onTextReady = vi.fn()
+    const onEnd = vi.fn()
+    const { result } = renderHook(() => useSpeechToText({ onTextReady, onEnd }))
+
+    await act(async () => {
+      await result.current.startListening()
+    })
+    act(() => {
+      latest().onresult?.(interim('pending text'))
+    })
+
+    vi.mocked(invoke).mockClear()
+
+    act(() => {
+      result.current.stopListening()
+    })
+
+    // No onend can follow a stop that threw, so the session settles now
+    expect(onTextReady).toHaveBeenCalledTimes(1)
+    expect(onTextReady).toHaveBeenCalledWith('pending text')
+    expect(onEnd).not.toHaveBeenCalled()
+    expect(result.current.isListening).toBe(false)
+    expect(invokeCount('deactivate_voice_session')).toBe(1)
+  })
+
+  it('settles a stop that arrives before the recognition exists', async () => {
+    let releasePermission: (value: { state: string }) => void = () => {}
+    const pending = new Promise<{ state: string }>((resolve) => {
+      releasePermission = resolve
+    })
+    Object.defineProperty(navigator, 'permissions', {
+      configurable: true,
+      value: { query: vi.fn().mockReturnValue(pending) },
+    })
+
+    const { result } = renderHook(() => useSpeechToText())
+
+    let start: Promise<void>
+    act(() => {
+      start = result.current.startListening()
+    })
+
+    act(() => {
+      result.current.stopListening()
+    })
+
+    expect(result.current.isListening).toBe(false)
+    expect(invokeCount('deactivate_voice_session')).toBe(1)
+
+    await act(async () => {
+      releasePermission({ state: 'granted' })
+      await start
+    })
+
+    expect(instances()).toHaveLength(0)
+    expect(invokeCount('activate_voice_session')).toBe(0)
   })
 
   it('ignores stop when no session is running', () => {
@@ -982,6 +1093,40 @@ describe('useSpeechToText', () => {
     expect(commands[commands.length - 1]).toBe('deactivate_voice_session')
   })
 
+  it('deactivates once and only after a cancelled start finishes acquiring audio', async () => {
+    let releaseActivation: () => void = () => {}
+    const pending = new Promise<void>((resolve) => {
+      releaseActivation = () => resolve()
+    })
+    vi.mocked(invoke).mockImplementation((command: string) =>
+      command === 'activate_voice_session' ? pending : Promise.resolve(undefined)
+    )
+
+    const { result, rerender } = renderHook(() => useSpeechToText())
+
+    let start: Promise<void>
+    await act(async () => {
+      start = result.current.startListening()
+    })
+
+    mockIsVisible = false
+    act(() => {
+      rerender()
+    })
+
+    // Releasing audio that is still being acquired can outrun the acquisition
+    expect(invokeCount('deactivate_voice_session')).toBe(0)
+
+    await act(async () => {
+      releaseActivation()
+      await start
+    })
+
+    expect(instances()).toHaveLength(0)
+    expect(invokeCount('activate_voice_session')).toBe(1)
+    expect(invokeCount('deactivate_voice_session')).toBe(1)
+  })
+
   it('never deactivates a newer session when a cancelled start resolves late', async () => {
     let releaseActivation: () => void = () => {}
     let pendingActivations = 0
@@ -1050,10 +1195,15 @@ describe('useSpeechToText', () => {
     })
 
     expect(recognition.stop).toHaveBeenCalledTimes(1)
+    expect(result.current.isListening).toBe(false)
+
+    act(() => {
+      recognition.onend?.()
+    })
+
     expect(onTextReady).toHaveBeenCalledTimes(1)
     expect(onTextReady).toHaveBeenCalledWith('trailing')
     expect(onEnd).not.toHaveBeenCalled()
-    expect(result.current.isListening).toBe(false)
   })
 
   it('reactivates the native session when speech resumes', async () => {

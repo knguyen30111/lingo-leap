@@ -19,13 +19,24 @@ export function useWindowVisibility(): UseWindowVisibilityReturn {
   useEffect(() => {
     const appWindow = getCurrentWindow()
     const unlisteners: (() => void)[] = []
+    let cleanedUp = false
+
+    // Registration is asynchronous, so a subscription can land after cleanup
+    // already ran. Release it immediately instead of storing it for nobody.
+    const register = (unlisten: () => void) => {
+      if (cleanedUp) {
+        unlisten()
+        return
+      }
+      unlisteners.push(unlisten)
+    }
 
     const setup = async () => {
       // Listen for window close (minimize to menu bar)
       const unlistenClose = await appWindow.onCloseRequested(() => {
         setIsVisible(false)
       })
-      unlisteners.push(unlistenClose)
+      register(unlistenClose)
 
       // Listen for window show/hide via Tauri events
       const { listen } = await import('@tauri-apps/api/event')
@@ -34,21 +45,21 @@ export function useWindowVisibility(): UseWindowVisibilityReturn {
       const unlistenShow = await listen('tauri://window-created', () => {
         setIsVisible(true)
       })
-      unlisteners.push(unlistenShow)
+      register(unlistenShow)
 
       // Also listen to document visibility for browser-level detection
       const handleVisibilityChange = () => {
         setIsVisible(document.visibilityState === 'visible')
       }
       document.addEventListener('visibilitychange', handleVisibilityChange)
-      unlisteners.push(() => document.removeEventListener('visibilitychange', handleVisibilityChange))
+      register(() => document.removeEventListener('visibilitychange', handleVisibilityChange))
 
       // Window focus at document level
       const handleWindowFocus = () => {
         setIsVisible(true)
       }
       window.addEventListener('focus', handleWindowFocus)
-      unlisteners.push(() => {
+      register(() => {
         window.removeEventListener('focus', handleWindowFocus)
       })
     }
@@ -56,7 +67,10 @@ export function useWindowVisibility(): UseWindowVisibilityReturn {
     setup()
 
     return () => {
-      unlisteners.forEach(unlisten => unlisten())
+      cleanedUp = true
+      while (unlisteners.length > 0) {
+        unlisteners.pop()?.()
+      }
     }
   }, [])
 

@@ -102,6 +102,9 @@ interface SpeechSession {
   timer: ReturnType<typeof setTimeout> | null
   intent: TerminationIntent
   finalized: boolean
+  // Pending native audio acquisition; null once it has settled
+  activation: Promise<void> | null
+  released: boolean
 }
 
 interface FinalizeOptions {
@@ -222,10 +225,30 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeech
     return sessionRef.current === session && !session.finalized
   }, [])
 
-  const releaseAudio = useCallback(() => {
-    invoke('deactivate_voice_session').catch(() => {})
-    // Reset WebKit's audio session to restore system audio (macOS workaround)
-    resetAudioSession()
+  // A stopped session still owns its recognition, but no longer listens
+  const isRunning = useCallback((session: SpeechSession) => {
+    return sessionRef.current === session && !session.finalized && session.intent === 'none'
+  }, [])
+
+  // The native audio session is one shared resource, so a session releases it
+  // at most once, never before its own acquisition settled, and never when a
+  // newer session has already taken ownership of it.
+  const releaseSessionAudio = useCallback((session: SpeechSession) => {
+    if (session.released) return
+    session.released = true
+
+    const release = () => {
+      if (sessionRef.current) return
+      invoke('deactivate_voice_session').catch(() => {})
+      // Reset WebKit's audio session to restore system audio (macOS workaround)
+      resetAudioSession()
+    }
+
+    if (session.activation) {
+      session.activation.then(release, release)
+      return
+    }
+    release()
   }, [])
 
   // Clear this session's silence timer
@@ -274,7 +297,7 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeech
       if (errorMessage) setError(errorMessage)
     }
 
-    releaseAudio()
+    releaseSessionAudio(session)
 
     if (flushInterim && pendingText) {
       onTextReadyRef.current?.(pendingText)
@@ -285,19 +308,32 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeech
     if (callOnEnd) {
       onEndRef.current?.()
     }
-  }, [isCurrent, releaseAudio])
+  }, [isCurrent, releaseSessionAudio])
 
-  // Graceful stop: flush what was recognized, keep the no-onEnd contract
+  // Graceful stop: the session keeps ownership until the recognition reports
+  // onend, so a final result that arrives after stop() still reaches the
+  // caller. Only the listening indicator settles now; cleanup stays in
+  // finalizeSession and still runs exactly once.
   const stopSession = useCallback((session: SpeechSession) => {
     if (!isCurrent(session) || session.intent !== 'none') return
 
     session.intent = 'stop'
     clearSilenceTimer(session)
+    if (mountedRef.current) setIsListening(false)
 
     const recognition = session.recognition
-    recognition?.stop()
-    // A synchronous onend already finalized; this call is then a no-op.
-    finalizeSession(session, { flushInterim: true, callOnEnd: false })
+    if (!recognition) {
+      // Nothing native to wait for: no onend will ever arrive
+      finalizeSession(session, { flushInterim: true, callOnEnd: false })
+      return
+    }
+
+    try {
+      recognition.stop()
+    } catch {
+      // A recognition that cannot stop will never report onend
+      finalizeSession(session, { flushInterim: true, callOnEnd: false })
+    }
   }, [isCurrent, clearSilenceTimer, finalizeSession])
 
   // Cancellation: discard pending text and silence every late event
@@ -338,7 +374,7 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeech
     recognition.lang = getSpeechLang(langRef.current)
 
     recognition.onstart = () => {
-      if (!isCurrent(session)) return
+      if (!isRunning(session)) return
       if (mountedRef.current) {
         setIsListening(true)
         setError(null)
@@ -349,8 +385,11 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeech
     recognition.onresult = (event: SpeechRecognitionEvent) => {
       if (!isCurrent(session)) return
 
-      // Reset silence timer on any result - reactivate audio session for new speech
-      clearSilenceTimer(session, true)
+      // Reset silence timer on any result - reactivate audio session for new
+      // speech. A stopped session is only draining its last results, so it
+      // must not re-acquire audio or arm another timer.
+      const running = isRunning(session)
+      if (running) clearSilenceTimer(session, true)
 
       let confirmedText = ''
       let interim = ''
@@ -380,7 +419,7 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeech
       }
 
       // Restart silence timer after processing
-      startSilenceTimer(session)
+      if (running) startSilenceTimer(session)
     }
 
     recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
@@ -408,7 +447,7 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeech
     }
 
     return recognition
-  }, [getSpeechLang, isCurrent, clearSilenceTimer, startSilenceTimer, finalizeSession])
+  }, [getSpeechLang, isCurrent, isRunning, clearSilenceTimer, startSilenceTimer, finalizeSession])
 
   // Settle a session that never reached the native layer
   const failStart = useCallback((session: SpeechSession, message: string) => {
@@ -436,6 +475,8 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeech
       timer: null,
       intent: 'none',
       finalized: false,
+      activation: null,
+      released: false,
     }
     sessionRef.current = session
 
@@ -466,17 +507,21 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeech
 
     // Activate native audio session for voice recording
     // This properly configures macOS audio routing
+    const activation = invoke('activate_voice_session')
+    // A cancellation during this await must wait for the acquisition it undoes
+    session.activation = activation.then(() => undefined, () => undefined)
     try {
-      await invoke('activate_voice_session')
+      await activation
     } catch (e) {
       console.warn('Failed to activate voice session:', e)
       // Continue anyway - speech recognition may still work
     }
+    session.activation = null
 
     if (!isCurrent(session) || !mountedRef.current) {
-      // The await was invalidated - release the session we just activated,
-      // unless a newer attempt already owns the native audio.
-      if (!sessionRef.current) releaseAudio()
+      // The await was invalidated - release what we just activated. A release
+      // the cancellation already requested settles this exactly once.
+      releaseSessionAudio(session)
       return
     }
 
@@ -489,7 +534,7 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeech
       const errorMsg = e instanceof Error ? e.message : 'Failed to start speech recognition'
       finalizeSession(session, { flushInterim: false, callOnEnd: false, errorMessage: errorMsg })
     }
-  }, [createRecognition, failStart, finalizeSession, isCurrent, releaseAudio])
+  }, [createRecognition, failStart, finalizeSession, isCurrent, releaseSessionAudio])
 
   // Stop listening
   const stopListening = useCallback(() => {
