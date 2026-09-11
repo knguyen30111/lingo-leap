@@ -5,6 +5,7 @@ import { SetupWizard } from "./components/SetupWizard";
 import { useSettingsStore } from "./stores/settingsStore";
 import { useTheme } from "./hooks/useTheme";
 import { useOllamaLifecycle } from "./hooks/useOllama";
+import { usePersistedSettingsRuntime } from "./hooks/usePersistedSettingsRuntime";
 import { changeLanguage } from "./i18n";
 
 function App() {
@@ -17,6 +18,9 @@ function App() {
 
   // The application owns the single Ollama lifecycle runtime.
   useOllamaLifecycle();
+
+  // Saved desktop settings only mean something once something applies them.
+  usePersistedSettingsRuntime();
 
   // Sync UI language from store to i18n
   useEffect(() => {
