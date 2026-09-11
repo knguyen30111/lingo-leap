@@ -1131,6 +1131,23 @@ describe('useTranslation request retirement', () => {
     }
   )
 
+  it('clears a detected language that a direct input mutation invalidates', async () => {
+    mockDetectSourceLanguage.mockReturnValue('fr')
+
+    const { result } = renderHook(() => useTranslation())
+
+    await act(async () => {
+      await result.current.translate()
+    })
+    expect(useAppStore.getState().latestDetectedSourceLang).toBe('fr')
+
+    act(() => {
+      useAppStore.setState({ inputText: 'Later text' })
+    })
+
+    expect(useAppStore.getState().latestDetectedSourceLang).toBeNull()
+  })
+
   it('stops listening to the store after unmount', async () => {
     mockDetectSourceLanguage.mockReturnValue('fr')
 
