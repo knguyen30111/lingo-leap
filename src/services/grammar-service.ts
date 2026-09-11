@@ -10,6 +10,12 @@ import { buildCorrectionPrompt, buildChangesExtractionPrompt } from '../lib/prom
 import { getModelType, cleanModelOutput } from '../lib/model'
 import { detectLanguage } from '../lib/language'
 
+// A cancelled extraction is not an extraction failure: it must reach the caller
+// instead of being answered with the whole-text fallback.
+function isAbortFailure(err: unknown, signal?: AbortSignal): boolean {
+  return (err instanceof Error && err.name === 'AbortError') || signal?.aborted === true
+}
+
 export class GrammarService {
   private modelName: string
   private provider: AiProvider
@@ -107,6 +113,8 @@ export class GrammarService {
       console.log('[GrammarService] Filtered changes:', filtered)
       return filtered
     } catch (err) {
+      if (isAbortFailure(err, signal)) throw err
+
       console.error('[GrammarService] Failed to extract changes:', err)
 
       // Fallback: return whole text as single change

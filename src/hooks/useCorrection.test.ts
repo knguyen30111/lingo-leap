@@ -726,3 +726,165 @@ describe('useCorrection cancellation and races', () => {
     expect(useAppStore.getState().error).toBeNull()
   })
 })
+
+describe('useCorrection settings invalidation', () => {
+  const settingsChanges = [
+    ['the correction model', { correctionModel: 'other-model:1b' }],
+    ['the explanation language', { explanationLang: 'ja' }],
+  ] as const
+
+  beforeEach(() => {
+    useAppStore.setState({
+      inputText: 'Hello wrold',
+      outputText: '',
+      correctionLevel: 'fix',
+      isLoading: false,
+      error: null,
+      changes: [],
+      isChangesLoading: false,
+    })
+    useSettingsStore.setState({
+      correctionModel: 'gemma3:4b',
+      ollamaHost: 'http://localhost:11434',
+      useStreaming: false,
+      explanationLang: 'auto',
+    })
+    transport.constructedHosts.length = 0
+    transport.generate.mockReset().mockResolvedValue('Hello world')
+    transport.generateStream.mockReset()
+    vi.mocked(translationCache.get).mockReset()
+    vi.mocked(translationCache.set).mockReset()
+  })
+
+  afterEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it.each(settingsChanges)(
+    'aborts and retires an in-flight correction when %s changes',
+    async (_label, change) => {
+      let resolveGenerate: (value: string) => void
+      transport.generate.mockReturnValue(new Promise(resolve => { resolveGenerate = resolve }))
+
+      const { result } = renderHook(() => useCorrection())
+
+      act(() => {
+        result.current.correct()
+      })
+      await waitFor(() => expect(useAppStore.getState().isLoading).toBe(true))
+
+      act(() => {
+        useSettingsStore.setState(change)
+      })
+
+      expect(transport.generate.mock.calls[0][1].aborted).toBe(true)
+
+      await act(async () => {
+        resolveGenerate!('Stale correction')
+      })
+
+      expect(useAppStore.getState().outputText).toBe('')
+      expect(translationCache.set).not.toHaveBeenCalled()
+      expect(useAppStore.getState().changes).toEqual([])
+      expect(useAppStore.getState().isLoading).toBe(false)
+      expect(useAppStore.getState().isChangesLoading).toBe(false)
+    }
+  )
+
+  it.each(settingsChanges)(
+    'does not report an error from a correction retired by a change to %s',
+    async (_label, change) => {
+      let rejectGenerate: (reason: unknown) => void
+      transport.generate.mockReturnValue(new Promise((_resolve, reject) => { rejectGenerate = reject }))
+
+      const { result } = renderHook(() => useCorrection())
+
+      act(() => {
+        result.current.correct()
+      })
+      await waitFor(() => expect(useAppStore.getState().isLoading).toBe(true))
+
+      act(() => {
+        useSettingsStore.setState(change)
+      })
+
+      await act(async () => {
+        rejectGenerate!(new Error('Server error'))
+      })
+
+      expect(useAppStore.getState().error).toBeNull()
+      expect(useAppStore.getState().outputText).toBe('')
+    }
+  )
+
+  it.each(settingsChanges)(
+    'aborts and retires a background change extraction when %s changes',
+    async (_label, change) => {
+      const resolvers: ((value: string) => void)[] = []
+      transport.generate.mockImplementation(
+        () => new Promise(resolve => { resolvers.push(resolve) })
+      )
+
+      const { result } = renderHook(() => useCorrection())
+
+      act(() => {
+        result.current.correct('first text')
+      })
+      await waitFor(() => expect(resolvers.length).toBe(1))
+
+      // The correction publishes and starts its background extraction.
+      await act(async () => {
+        resolvers[0]('First corrected')
+      })
+      await waitFor(() => expect(resolvers.length).toBe(2))
+      expect(useAppStore.getState().isChangesLoading).toBe(true)
+
+      act(() => {
+        useSettingsStore.setState(change)
+      })
+
+      expect(transport.generate.mock.calls[1][1].aborted).toBe(true)
+
+      await act(async () => {
+        resolvers[1]('[{"from": "stale", "to": "stale", "reason": "stale"}]')
+      })
+
+      expect(useAppStore.getState().changes).toEqual([])
+      expect(useAppStore.getState().isChangesLoading).toBe(false)
+    }
+  )
+
+  it.each(settingsChanges)(
+    'does not publish a fallback diff from an extraction retired by a change to %s',
+    async (_label, change) => {
+      const resolvers: ((value: string) => void)[] = []
+      transport.generate.mockImplementation(
+        () => new Promise(resolve => { resolvers.push(resolve) })
+      )
+
+      const { result } = renderHook(() => useCorrection())
+
+      act(() => {
+        result.current.correct('first text')
+      })
+      await waitFor(() => expect(resolvers.length).toBe(1))
+
+      await act(async () => {
+        resolvers[0]('First corrected')
+      })
+      await waitFor(() => expect(resolvers.length).toBe(2))
+
+      act(() => {
+        useSettingsStore.setState(change)
+      })
+
+      // The retired extraction answers with unparseable text.
+      await act(async () => {
+        resolvers[1]('no json here')
+      })
+
+      expect(useAppStore.getState().changes).toEqual([])
+      expect(useAppStore.getState().isChangesLoading).toBe(false)
+    }
+  )
+})

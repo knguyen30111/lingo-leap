@@ -177,6 +177,29 @@ describe('GrammarService', () => {
         { from: 'Hello wrold', to: 'Hello world', reason: 'Text was corrected' },
       ])
     })
+
+    it('propagates an AbortError instead of falling back', async () => {
+      const abortError = new Error('The operation was aborted')
+      abortError.name = 'AbortError'
+      provider.generateJSON.mockRejectedValue(abortError)
+      const service = new GrammarService({ modelName: 'qwen2.5:7b', provider })
+
+      await expect(
+        service.extractChanges('Hello wrold', 'Hello world', 'en', 'en')
+      ).rejects.toBe(abortError)
+    })
+
+    it('propagates a failure raised under an already-aborted signal', async () => {
+      const controller = new AbortController()
+      controller.abort()
+      const failure = new Error('fetch failed')
+      provider.generateJSON.mockRejectedValue(failure)
+      const service = new GrammarService({ modelName: 'qwen2.5:7b', provider })
+
+      await expect(
+        service.extractChanges('Hello wrold', 'Hello world', 'en', 'en', controller.signal)
+      ).rejects.toBe(failure)
+    })
   })
 
   describe('correctAndExplain', () => {

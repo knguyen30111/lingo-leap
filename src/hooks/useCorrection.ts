@@ -50,14 +50,21 @@ export function useCorrection() {
   const abortRef = useRef<AbortController | null>(null)
   const requestIdRef = useRef(0)
 
-  // A host change or an unmount retires whatever is still in flight.
+  // Retire whatever is still in flight so it can no longer publish anything.
+  const retireInFlight = useCallback(() => {
+    if (!abortRef.current) return
+    requestIdRef.current += 1
+    abortRef.current.abort()
+    abortRef.current = null
+    setLoading(false)
+    setChangesLoading(false)
+  }, [setLoading, setChangesLoading])
+
+  // Any setting a request captured — host, model, explanation language — or an
+  // unmount retires that request and its background change extraction.
   useEffect(() => {
-    return () => {
-      requestIdRef.current += 1
-      abortRef.current?.abort()
-      abortRef.current = null
-    }
-  }, [provider])
+    return retireInFlight
+  }, [provider, correctionModel, explanationLang, retireInFlight])
 
   // Create fallback change when JSON parsing fails
   const createFallbackChange = useCallback((original: string, corrected: string): Change[] => {
@@ -308,14 +315,8 @@ export function useCorrection() {
   ])
 
   const cancel = useCallback(() => {
-    if (abortRef.current) {
-      requestIdRef.current += 1
-      abortRef.current.abort()
-      abortRef.current = null
-      setLoading(false)
-      setChangesLoading(false)
-    }
-  }, [setLoading, setChangesLoading])
+    retireInFlight()
+  }, [retireInFlight])
 
   const setLevel = useCallback((level: CorrectionLevel) => {
     setCorrectionLevel(level)
