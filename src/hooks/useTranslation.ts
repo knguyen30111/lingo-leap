@@ -42,10 +42,11 @@ export function useTranslation() {
     }
   }, [setLoading])
 
-  // A host/model change or an unmount retires whatever is still in flight.
+  // Any setting a request captured — host, model, streaming — or an unmount
+  // retires whatever is still in flight.
   useEffect(() => {
     return retireInFlight
-  }, [service, retireInFlight])
+  }, [service, useStreaming, retireInFlight])
 
   // A later edit to any selection the request captured retires it, and it must
   // happen while the mutating setter runs: `translateText` updates the input

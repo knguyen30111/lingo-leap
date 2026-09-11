@@ -55,11 +55,12 @@ export function useCorrection() {
     }
   }, [setLoading, setChangesLoading])
 
-  // Any setting a request captured — host, model, explanation language — or an
-  // unmount retires that request and its background change extraction.
+  // Any setting a request captured — host, model, explanation language,
+  // streaming — or an unmount retires that request and its background change
+  // extraction.
   useEffect(() => {
     return retireInFlight
-  }, [service, explanationLang, retireInFlight])
+  }, [service, explanationLang, useStreaming, retireInFlight])
 
   // A later edit to any selection the request captured retires it before the
   // mutating setter returns, so no stale correction can answer new input.
