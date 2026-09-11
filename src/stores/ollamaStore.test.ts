@@ -3,6 +3,7 @@ import {
   useOllamaStore,
   setOllamaLifecycleClientFactory,
   resetOllamaRuntime,
+  retireOllamaLifecycleWork,
   type OllamaLifecycleClient,
   type OllamaLifecycleClientFactory,
 } from './ollamaStore'
@@ -665,7 +666,7 @@ describe('ollamaStore lifecycle runtime', () => {
       expect(runtime().models).toEqual(modelsB)
     })
 
-    it('does not let a superseded pull refresh the model list', async () => {
+    it('still refreshes the model list from a superseded pull that succeeded', async () => {
       await connect(HOST_A, [])
 
       const first = runtime().pullModel('gemma3:4b')
@@ -678,16 +679,77 @@ describe('ollamaStore lifecycle runtime', () => {
       transport.list[transport.list.length - 1].resolve(modelsB)
       await second
 
+      // Losing the progress slot does not invalidate the older pull's
+      // transport: its host, generation, and signal are still the current
+      // ones, so its success owes the runtime a fresh listing.
       const listCallsBefore = transport.list.length
       transport.pulls[0].resolve()
       await drain()
+      expect(transport.list).toHaveLength(listCallsBefore + 1)
 
-      expect(transport.list).toHaveLength(listCallsBefore)
-      expect(runtime().models).toEqual(modelsB)
+      transport.list[transport.list.length - 1].resolve(modelsA)
       await first
+
+      expect(runtime().models).toEqual(modelsA)
+      expect(settings().modelsInstalled).toBe(true)
     })
 
-    it('publishes a refresh failure without clearing a newer pull progress', async () => {
+    it('orders two pull refreshes by their listing ticket', async () => {
+      await connect(HOST_A, [])
+
+      const first = runtime().pullModel('gemma3:4b')
+      const second = runtime().pullModel('llama3:8b')
+      await drain()
+
+      // The superseding pull answers first, so its refresh holds the older
+      // ticket even though it started last.
+      transport.pulls[1].resolve()
+      await drain()
+      const supersedingList = transport.list[transport.list.length - 1]
+
+      transport.pulls[0].resolve()
+      await drain()
+      const supersededList = transport.list[transport.list.length - 1]
+      expect(supersededList).not.toBe(supersedingList)
+
+      supersededList.resolve(modelsA)
+      await drain()
+      supersedingList.resolve(modelsB)
+      await Promise.all([first, second])
+      await drain()
+
+      expect(runtime().models).toEqual(modelsA)
+    })
+
+    it('commits an older refresh listing without clearing a newer pull error', async () => {
+      await connect(HOST_A, [])
+
+      const first = runtime().pullModel('gemma3:4b')
+      await drain()
+      transport.pulls[0].resolve()
+      await drain()
+      const refresh = transport.list[transport.list.length - 1]
+
+      // A newer pull takes the progress slot and the error channel, then fails.
+      const second = runtime().pullModel('llama3:8b')
+      await drain()
+      transport.pulls[1].reject(new Error('Failed to pull model: Not Found'))
+      await second
+      expect(runtime().error).toBe('Failed to pull model: Not Found')
+
+      refresh.resolve(modelsA)
+      await first
+      await drain()
+
+      // Models and the derived flags are factual and ordered by ticket, but the
+      // error channel belongs to the newer pull.
+      expect(runtime().models).toEqual(modelsA)
+      expect(runtime().isConnected).toBe(true)
+      expect(settings().modelsInstalled).toBe(true)
+      expect(runtime().error).toBe('Failed to pull model: Not Found')
+    })
+
+    it('keeps a newer pull owning progress and error when an older refresh fails', async () => {
       await connect(HOST_A, [])
 
       const first = runtime().pullModel('gemma3:4b')
@@ -696,7 +758,7 @@ describe('ollamaStore lifecycle runtime', () => {
       await drain()
 
       // The finished pull released the slot before its refresh answered, so a
-      // newer pull owns the progress the failure must leave alone.
+      // newer pull owns the progress and the error the failure must leave alone.
       const second = runtime().pullModel('llama3:8b')
       await drain()
       expect(runtime().pull).toEqual({ model: 'llama3:8b', status: 'starting' })
@@ -704,8 +766,11 @@ describe('ollamaStore lifecycle runtime', () => {
       transport.list[transport.list.length - 1].reject(new Error('listing failed'))
       await first
 
-      expect(runtime().error).toBe('listing failed')
+      expect(runtime().error).toBeNull()
       expect(runtime().pull).toEqual({ model: 'llama3:8b', status: 'starting' })
+
+      transport.pulls[1].onProgress?.('verifying sha256')
+      expect(runtime().pull).toEqual({ model: 'llama3:8b', status: 'verifying sha256' })
 
       transport.pulls[1].resolve()
       await drain()
@@ -714,6 +779,7 @@ describe('ollamaStore lifecycle runtime', () => {
 
       expect(runtime().pull).toBeNull()
       expect(runtime().models).toEqual(modelsA)
+      expect(runtime().error).toBeNull()
     })
 
     it('does not settle a pending connection check from a pull refresh', async () => {
@@ -782,6 +848,68 @@ describe('ollamaStore lifecycle runtime', () => {
 
       expect(runtime().host).toBe(HOST_B)
       expect(transport.hosts).toEqual([])
+    })
+  })
+
+  describe('explicit retirement', () => {
+    it('drops in-flight work and clears only the transient snapshot', async () => {
+      await connect(HOST_A, modelsA)
+
+      const checking = runtime().checkConnection()
+      const failing = runtime().pullModel('mistral:7b')
+      await drain()
+      transport.pulls[0].reject(new Error('Failed to pull model: Not Found'))
+      await failing
+      expect(runtime().error).toBe('Failed to pull model: Not Found')
+
+      const pulling = runtime().pullModel('gemma3:4b')
+      await drain()
+      expect(runtime().isChecking).toBe(true)
+      expect(runtime().pull).toEqual({ model: 'gemma3:4b', status: 'starting' })
+
+      const health = transport.health[transport.health.length - 1]
+      const pull = transport.pulls[transport.pulls.length - 1]
+      const listCallsBefore = transport.list.length
+
+      retireOllamaLifecycleWork()
+
+      expect(health.signal?.aborted).toBe(true)
+      expect(pull.signal?.aborted).toBe(true)
+      // Only state that belongs to a request in flight is cleared.
+      expect(runtime().isChecking).toBe(false)
+      expect(runtime().pull).toBeNull()
+      // The committed snapshot, the user-facing error, and the persisted flags
+      // are document-lifetime answers that survive retirement.
+      expect(runtime().host).toBe(HOST_A)
+      expect(runtime().isConnected).toBe(true)
+      expect(runtime().models).toEqual(modelsA)
+      expect(runtime().error).toBe('Failed to pull model: Not Found')
+      expect(settings().ollamaInstalled).toBe(true)
+      expect(settings().modelsInstalled).toBe(true)
+
+      pull.onProgress?.('pulling manifest')
+      health.resolve(true)
+      pull.resolve()
+      await Promise.all([checking, pulling])
+      await drain()
+
+      expect(transport.list).toHaveLength(listCallsBefore)
+      expect(runtime().isChecking).toBe(false)
+      expect(runtime().pull).toBeNull()
+      expect(runtime().isConnected).toBe(true)
+      expect(runtime().models).toEqual(modelsA)
+      expect(runtime().error).toBe('Failed to pull model: Not Found')
+      expect(settings().ollamaInstalled).toBe(true)
+    })
+
+    it('keeps the committed listing available to a later model recomputation', async () => {
+      await connect(HOST_A, modelsA)
+
+      retireOllamaLifecycleWork()
+      useSettingsStore.setState({ correctionModel: 'mistral:7b' })
+      runtime().syncRequiredModels()
+
+      expect(settings().modelsInstalled).toBe(false)
     })
   })
 

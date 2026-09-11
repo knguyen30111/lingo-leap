@@ -1,3 +1,4 @@
+import { StrictMode } from 'react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { renderHook, act, waitFor } from '@testing-library/react'
 import { useOllama, useOllamaLifecycle } from './useOllama'
@@ -36,6 +37,17 @@ function renderApp() {
     useOllamaLifecycle()
     return useOllama()
   })
+}
+
+/** Mounts the coordinator the way `main.tsx` does: inside `React.StrictMode`. */
+function renderStrictApp() {
+  return renderHook(
+    () => {
+      useOllamaLifecycle()
+      return useOllama()
+    },
+    { wrapper: StrictMode }
+  )
 }
 
 describe('useOllama', () => {
@@ -391,7 +403,41 @@ describe('useOllama application ownership', () => {
     expect(useSettingsStore.getState().ollamaInstalled).toBe(true)
   })
 
-  it('retires owned lifecycle work when the application owner unmounts', async () => {
+  it('replays the coordinator effect under StrictMode on one request', async () => {
+    const setOllamaInstalled = vi.spyOn(useSettingsStore.getState(), 'setOllamaInstalled')
+    const healthSignals: (AbortSignal | undefined)[] = []
+    let resolveHealth!: (value: boolean) => void
+    transport.checkHealth.mockImplementation(
+      (signal?: AbortSignal) =>
+        new Promise<boolean>(resolve => {
+          healthSignals.push(signal)
+          resolveHealth = resolve
+        })
+    )
+    transport.listModels.mockResolvedValue(models)
+
+    const { result } = renderStrictApp()
+
+    await waitFor(() => expect(transport.checkHealth).toHaveBeenCalledTimes(1))
+    expect(transport.constructedHosts).toEqual(['http://localhost:11434'])
+    // The replayed mount reuses the shared runtime, so the first request's
+    // signal is still live when the effect runs a second time.
+    expect(healthSignals).toHaveLength(1)
+    expect(healthSignals[0]?.aborted).toBe(false)
+
+    await act(async () => {
+      resolveHealth(true)
+    })
+
+    await waitFor(() => expect(result.current.isConnected).toBe(true))
+    expect(transport.listModels).toHaveBeenCalledTimes(1)
+    expect(result.current.models).toEqual(models)
+    expect(setOllamaInstalled).toHaveBeenCalledTimes(1)
+    expect(setOllamaInstalled).toHaveBeenCalledWith(true)
+    expect(useSettingsStore.getState().modelsInstalled).toBe(true)
+  })
+
+  it('leaves the shared runtime running when the application owner unmounts', async () => {
     const healthSignals: (AbortSignal | undefined)[] = []
     let resolveHealth!: (value: boolean) => void
     transport.checkHealth.mockImplementation(
@@ -406,16 +452,19 @@ describe('useOllama application ownership', () => {
     const main = renderApp()
     await waitFor(() => expect(transport.checkHealth).toHaveBeenCalledTimes(1))
 
+    // The runtime is document-lifetime state; a React unmount is not a signal
+    // to abandon the request the application already paid for.
     main.unmount()
-    expect(healthSignals[0]?.aborted).toBe(true)
+    expect(healthSignals[0]?.aborted).toBe(false)
 
     await act(async () => {
       resolveHealth(true)
     })
+    await waitFor(() => expect(useOllamaStore.getState().isConnected).toBe(true))
 
-    expect(transport.listModels).not.toHaveBeenCalled()
-    expect(useOllamaStore.getState().isConnected).toBe(false)
-    expect(useSettingsStore.getState().ollamaInstalled).toBe(false)
+    expect(transport.listModels).toHaveBeenCalledTimes(1)
+    expect(useOllamaStore.getState().models).toEqual(models)
+    expect(useSettingsStore.getState().ollamaInstalled).toBe(true)
   })
 
   it('forwards a request signal to the health and model calls', async () => {
