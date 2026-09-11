@@ -47,8 +47,9 @@ const defaultClientFactory: OllamaLifecycleClientFactory = host => new OllamaCli
 
 // === Runtime identity ===
 // The runtime owns one immutable-host client at a time. Every async
-// continuation compares the generation, the host, and its own abort signal
-// before touching runtime state, pull progress, or the persisted flags.
+// continuation compares the generation, the host, and its own abort signal to
+// decide whether its request still stands; what a still-valid request may then
+// publish is decided by the presentation ownership below.
 let createClient: OllamaLifecycleClientFactory = defaultClientFactory
 let client: OllamaLifecycleClient | null = null
 let generation = 0
@@ -59,22 +60,35 @@ interface InFlight {
   host: string
   generation: number
   promise: Promise<void>
-  // A pull that lost the single progress slot to a newer pull. It stays
-  // in flight for its caller but may no longer publish anything.
-  superseded?: boolean
 }
 
 let activeCheck: InFlight | null = null
 const activePulls = new Map<string, InFlight>()
 
-// The pull that currently owns the single progress slot. A superseding pull
-// takes ownership, so an older one can neither publish progress nor clear it.
+// === Presentation ownership ===
+// Owning the progress slot or the error channel is separate from a request
+// being valid. A newer operation takes them over, which retires what an older
+// one may publish; the older request keeps its own transport and still owes
+// the runtime the factual model listing its success produces.
 let pullOwner: InFlight | null = null
+let errorOwner: InFlight | null = null
 
-/** Hands the single progress slot to `entry` and retires the previous owner. */
-function takeProgressSlot(entry: InFlight): void {
-  if (pullOwner && pullOwner !== entry) pullOwner.superseded = true
+/** Hands the progress slot and the error channel to a starting pull. */
+function claimPullPresentation(entry: InFlight): void {
   pullOwner = entry
+  errorOwner = entry
+}
+
+function claimErrorChannel(entry: InFlight): void {
+  errorOwner = entry
+}
+
+function ownsProgress(entry: InFlight): boolean {
+  return pullOwner === entry
+}
+
+function ownsErrorChannel(entry: InFlight): boolean {
+  return errorOwner === entry
 }
 
 // Model listings are issued by checks and by pull refreshes alike, so a
@@ -90,6 +104,7 @@ function retireActiveWork(): void {
   activeCheck = null
   activePulls.clear()
   pullOwner = null
+  errorOwner = null
   committedListTicket = 0
 }
 
@@ -124,13 +139,20 @@ export const useOllamaStore = create<OllamaLifecycleState>((set, get) => {
    * Publishes a healthy result plus the status the settings snapshot derives.
    * An out-of-order listing from an earlier request is dropped. `isChecking`
    * belongs to the connection check, so a pull refresh publishes an ordered
-   * listing here without settling a check that is still pending.
+   * listing here without settling a check that is still pending. Models and the
+   * flags they derive are factual, so any valid ordered listing may publish
+   * them; clearing the error is a presentation act reserved for the operation
+   * that still owns the error channel.
    */
-  const commitModels = (models: OllamaModelInfo[], ticket: number): void => {
+  const commitModels = (
+    models: OllamaModelInfo[],
+    ticket: number,
+    ownsError: boolean
+  ): void => {
     if (ticket < committedListTicket) return
     committedListTicket = ticket
     listCommitted = true
-    set({ isConnected: true, models, error: null })
+    set(ownsError ? { isConnected: true, models, error: null } : { isConnected: true, models })
     const settings = useSettingsStore.getState()
     settings.setOllamaInstalled(true)
     settings.setModelsInstalled(requiredModelsPresent(models))
@@ -196,6 +218,7 @@ export const useOllamaStore = create<OllamaLifecycleState>((set, get) => {
       const entry: InFlight = { host, generation: requestGeneration, promise: Promise.resolve() }
 
       const run = async (): Promise<void> => {
+        claimErrorChannel(entry)
         set({ isChecking: true, error: null })
         try {
           const isHealthy = await lifecycleClient.checkHealth(requestController.signal)
@@ -210,7 +233,7 @@ export const useOllamaStore = create<OllamaLifecycleState>((set, get) => {
           const models = await lifecycleClient.listModels(requestController.signal)
           if (!isCurrent()) return
 
-          commitModels(models, ticket)
+          commitModels(models, ticket, ownsErrorChannel(entry))
           // The check owns `isChecking`, including when a newer listing has
           // already superseded the one it just fetched.
           set({ isChecking: false })
@@ -239,43 +262,46 @@ export const useOllamaStore = create<OllamaLifecycleState>((set, get) => {
       const requestGeneration = generation
       const entry: InFlight = { host, generation: requestGeneration, promise: Promise.resolve() }
 
-      // A pull may publish only while it still owns its request: the runtime
-      // target is unchanged and no newer pull has taken the progress slot.
-      const isCurrent = () =>
+      // Request validity is a transport question only: the runtime target is
+      // unchanged and the signal is live. A newer pull takes over what this one
+      // may present, never whether its own request still stands.
+      const isRequestValid = () =>
         generation === requestGeneration &&
         get().host === host &&
-        !requestController.signal.aborted &&
-        !entry.superseded
+        !requestController.signal.aborted
 
-      const ownsProgress = () => pullOwner === entry
+      /** Frees the progress slot if this pull still holds it. */
       const releaseProgress = () => {
-        if (!ownsProgress()) return
+        if (!ownsProgress(entry)) return
         pullOwner = null
         set({ pull: null })
       }
 
       const run = async (): Promise<void> => {
-        takeProgressSlot(entry)
+        claimPullPresentation(entry)
         set({ pull: { model: modelName, status: PULL_STARTING_STATUS } })
         try {
           await lifecycleClient.pullModel(
             modelName,
             status => {
-              if (isCurrent() && ownsProgress()) set({ pull: { model: modelName, status } })
+              if (isRequestValid() && ownsProgress(entry)) {
+                set({ pull: { model: modelName, status } })
+              }
             },
             requestController.signal
           )
-          if (!isCurrent()) return
+          if (!isRequestValid()) return
 
           releaseProgress()
           const ticket = ++listTicket
           const models = await lifecycleClient.listModels(requestController.signal)
-          if (!isCurrent()) return
+          if (!isRequestValid()) return
 
-          commitModels(models, ticket)
+          commitModels(models, ticket, ownsErrorChannel(entry))
         } catch (err) {
-          if (!isCurrent()) return
+          if (!isRequestValid()) return
           releaseProgress()
+          if (!ownsErrorChannel(entry)) return
           set({ error: errorMessage(err, PULL_FAILED_ERROR) })
         } finally {
           if (activePulls.get(key) === entry) activePulls.delete(key)
@@ -307,12 +333,14 @@ export function setOllamaLifecycleClientFactory(
 }
 
 /**
- * Retires the lifecycle work started by the application-level owner. The bound
- * host and its published snapshot survive; only in-flight requests are dropped
- * so a late answer cannot publish runtime or persisted state.
+ * Retires lifecycle work on an explicit teardown of the application root. The
+ * bound host, the committed snapshot, the user-facing error, and the persisted
+ * flags survive; only the in-flight requests are dropped, so a late answer
+ * cannot publish, and only the state those requests owned is cleared.
  */
 export function retireOllamaLifecycleWork(): void {
   retireActiveWork()
+  useOllamaStore.setState({ isChecking: false, pull: null })
 }
 
 /** Retires in-flight lifecycle work and returns the runtime to its initial state. */

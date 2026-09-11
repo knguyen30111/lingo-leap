@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { retireOllamaLifecycleWork, useOllamaStore } from '../stores/ollamaStore'
+import { useOllamaStore } from '../stores/ollamaStore'
 import { useSettingsStore } from '../stores/settingsStore'
 
 /**
@@ -33,6 +33,11 @@ export function useOllama() {
  * Application-lifetime lifecycle coordinator. Mounted exactly once, it binds
  * the runtime to the configured host and keeps derived model status in step
  * with the selected models without spending an extra request.
+ *
+ * The runtime is document-lifetime state, not state this effect owns, so the
+ * coordinator never retires it on cleanup: a replayed mount would otherwise
+ * abort the very request it is about to repeat. A root teardown that really
+ * ends the document calls `retireOllamaLifecycleWork` explicitly.
  */
 export function useOllamaLifecycle(): void {
   const ollamaHost = useSettingsStore(state => state.ollamaHost)
@@ -52,8 +57,4 @@ export function useOllamaLifecycle(): void {
   useEffect(() => {
     syncRequiredModels()
   }, [translationModel, correctionModel, syncRequiredModels])
-
-  // Only the owner retires lifecycle work. A consumer adapter unmount leaves
-  // the shared runtime untouched, so the remaining consumers keep their state.
-  useEffect(() => retireOllamaLifecycleWork, [])
 }
