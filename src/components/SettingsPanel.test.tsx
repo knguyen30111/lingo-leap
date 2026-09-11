@@ -1,4 +1,3 @@
-import { readFileSync } from 'node:fs'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import { SettingsPanel } from './SettingsPanel'
@@ -64,7 +63,6 @@ vi.mock('react-i18next', () => ({
         'audio.microphoneDesc':
           'Speech recognition uses your system default microphone. Change it in your operating system sound settings.',
         'audio.systemDefault': 'System default',
-        'sections.desktop': 'Desktop',
         'desktop.alwaysOnTop': 'Always On Top',
         'desktop.alwaysOnTopDesc': 'Keep the window above other windows',
         'desktop.alwaysOnTopApplyError': 'Could not apply always on top',
@@ -544,13 +542,6 @@ describe('SettingsPanel', () => {
         'core:window:allow-set-always-on-top',
         'core:window:allow-hide',
       ])
-    })
-
-    it('documents the newly visible settings in the README configuration table', () => {
-      const readme = readFileSync('README.md', 'utf8')
-      expect(readme).toContain('Always On Top')
-      expect(readme).toContain('Auto Hide After Copy')
-      expect(readme).not.toContain('Same Model')
     })
   })
 

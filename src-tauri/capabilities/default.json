@@ -11,6 +11,8 @@
     "global-shortcut:allow-register",
     "global-shortcut:allow-unregister",
     "clipboard-manager:allow-read-text",
-    "clipboard-manager:allow-write-text"
+    "clipboard-manager:allow-write-text",
+    "core:window:allow-set-always-on-top",
+    "core:window:allow-hide"
   ]
 }

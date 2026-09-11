@@ -6,6 +6,21 @@ export interface UseWindowVisibilityReturn {
   isVisible: boolean
 }
 
+const runtimeHiddenListeners = new Set<() => void>()
+
+/**
+ * Report a window the app itself hid, such as after an auto-hide copy.
+ *
+ * Tauri raises no event for a hide the frontend requested, so without this the
+ * app would keep believing it is visible and would never release the resources
+ * a hidden window is supposed to give up.
+ */
+export function notifyWindowHiddenByRuntime(): void {
+  for (const listener of [...runtimeHiddenListeners]) {
+    listener()
+  }
+}
+
 /**
  * Hook to track window visibility state (lazy vs active mode)
  * - Lazy: Window closed/minimized to menu bar - releases audio resources
@@ -62,10 +77,18 @@ export function useWindowVisibility(): UseWindowVisibilityReturn {
       })
     }
 
+    // Registered synchronously: a hide the app triggers during setup still has
+    // to reach this instance.
+    const handleRuntimeHidden = () => {
+      setIsVisible(false)
+    }
+    runtimeHiddenListeners.add(handleRuntimeHidden)
+
     setup()
 
     return () => {
       cleanedUp = true
+      runtimeHiddenListeners.delete(handleRuntimeHidden)
       while (unlisteners.length > 0) {
         unlisteners.pop()?.()
       }

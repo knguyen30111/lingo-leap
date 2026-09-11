@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSettingsStore, ThemeMode } from "../stores/settingsStore";
+import { useDesktopRuntimeStatusStore } from "../stores/desktop-runtime-status-store";
 import { useOllama } from "../hooks/useOllama";
 import { UI_LANGUAGES, type UILanguageCode } from "../i18n";
 
@@ -54,6 +55,29 @@ function SettingRow({
   );
 }
 
+// Toggle that reports its own state, so it can be found and read by name
+function ToggleSwitch({
+  label,
+  checked,
+  onChange,
+}: {
+  label: string;
+  checked: boolean;
+  onChange: (value: boolean) => void;
+}) {
+  return (
+    <button
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      onClick={() => onChange(!checked)}
+      className={`toggle-switch ${checked ? "active" : ""}`}
+    >
+      <span className="toggle-switch-knob" />
+    </button>
+  );
+}
+
 export function SettingsPanel({ onClose }: SettingsPanelProps) {
   const { t } = useTranslation(["settings", "common"]);
   const {
@@ -75,7 +99,13 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
     setUseStreaming,
     uiLanguage,
     setUILanguage,
+    alwaysOnTop,
+    setAlwaysOnTop,
+    autoHideAfterCopy,
+    setAutoHideAfterCopy,
   } = useSettingsStore();
+  const { alwaysOnTopApplyError, autoHideAfterCopyError } =
+    useDesktopRuntimeStatusStore();
 
   const { models } = useOllama();
   const [localHost, setLocalHost] = useState(ollamaHost);
@@ -193,6 +223,54 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                 </button>
               ))}
             </div>
+
+            <SettingRow
+              label={t("desktop.alwaysOnTop")}
+              description={t("desktop.alwaysOnTopDesc")}
+              inline
+            >
+              <div className="flex items-center gap-2">
+                {/* The preference stays saved even when the platform refuses
+                    it, so the failure is reported next to the control. */}
+                {alwaysOnTopApplyError && (
+                  <span
+                    role="alert"
+                    title={alwaysOnTopApplyError}
+                    className="text-[10px] text-[var(--error)]"
+                  >
+                    {t("desktop.alwaysOnTopApplyError")}
+                  </span>
+                )}
+                <ToggleSwitch
+                  label={t("desktop.alwaysOnTop")}
+                  checked={alwaysOnTop}
+                  onChange={setAlwaysOnTop}
+                />
+              </div>
+            </SettingRow>
+
+            <SettingRow
+              label={t("desktop.autoHideAfterCopy")}
+              description={t("desktop.autoHideAfterCopyDesc")}
+              inline
+            >
+              <div className="flex items-center gap-2">
+                {autoHideAfterCopyError && (
+                  <span
+                    role="alert"
+                    title={autoHideAfterCopyError}
+                    className="text-[10px] text-[var(--error)]"
+                  >
+                    {t("desktop.autoHideAfterCopyError")}
+                  </span>
+                )}
+                <ToggleSwitch
+                  label={t("desktop.autoHideAfterCopy")}
+                  checked={autoHideAfterCopy}
+                  onChange={setAutoHideAfterCopy}
+                />
+              </div>
+            </SettingRow>
           </SettingsSection>
 
           {/* AI & Models Section */}

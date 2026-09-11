@@ -12,6 +12,14 @@
     "dark": "ダーク",
     "auto": "自動"
   },
+  "desktop": {
+    "alwaysOnTop": "常に最前面",
+    "alwaysOnTopDesc": "ウィンドウを他のウィンドウより前面に保ちます",
+    "alwaysOnTopApplyError": "ウィンドウを最前面に保てませんでした。ウィンドウマネージャーが要求を拒否しました。",
+    "autoHideAfterCopy": "コピー後に自動で隠す",
+    "autoHideAfterCopyDesc": "出力をコピーしたらウィンドウを隠します",
+    "autoHideAfterCopyError": "出力はコピーされましたが、ウィンドウを隠せませんでした。"
+  },
   "ollama": {
     "host": "Ollamaホスト",
     "translationModel": "翻訳モデル",

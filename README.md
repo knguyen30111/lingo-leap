@@ -184,6 +184,8 @@ Access settings via the gear icon:
 | Explanation Language | Language for correction explanations    |
 | Speech Recognition   | Language for voice input                |
 | Microphone           | Always the system default (change it in OS sound settings) |
+| Always On Top        | Keep the window above other windows     |
+| Auto Hide After Copy | Hide the window once the output is copied |
 
 ## License
 
