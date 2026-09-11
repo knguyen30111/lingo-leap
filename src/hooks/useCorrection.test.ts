@@ -1067,22 +1067,20 @@ describe('useCorrection detected language', () => {
     })
     await waitFor(() => expect(extractionResolvers.length).toBe(1))
 
-    let second!: Promise<string | undefined>
-    act(() => {
-      second = result.current.correct('second text')
+    expect(useAppStore.getState().latestDetectedSourceLang).toBe('fr')
+
+    await act(async () => {
+      await result.current.correct('second text')
     })
+
+    expect(useAppStore.getState().latestDetectedSourceLang).toBe('ja')
 
     await act(async () => {
       extractionResolvers[0]([{ from: 'stale', to: 'stale', reason: 'stale' }])
     })
 
-    expect(useAppStore.getState().latestDetectedSourceLang).toBe('fr')
-
-    await act(async () => {
-      await second
-    })
-
     expect(useAppStore.getState().latestDetectedSourceLang).toBe('ja')
+    expect(useAppStore.getState().changes).toEqual([])
     expect(grammar.extractChanges.mock.calls[0][2]).toBe('fr')
   })
 })

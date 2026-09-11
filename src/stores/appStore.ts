@@ -30,6 +30,10 @@ interface AppState {
   // Language
   sourceLang: string
   setSourceLang: (lang: string) => void
+  // The language the detector resolved for the latest published result. It
+  // describes an answer, never a request, so it is display state only.
+  latestDetectedSourceLang: string | null
+  setLatestDetectedSourceLang: (lang: string | null) => void
   targetLang: string
   setTargetLang: (lang: string) => void
 
@@ -56,6 +60,7 @@ const initialState = {
   inputText: '',
   outputText: '',
   sourceLang: 'auto',
+  latestDetectedSourceLang: null,
   targetLang: 'ja',
   isLoading: false,
   error: null,
@@ -69,13 +74,15 @@ export const useAppStore = create<AppState>((set) => ({
   setEnabled: (enabled) => set({ isEnabled: enabled }),
   toggleEnabled: () => set((state) => ({ isEnabled: !state.isEnabled })),
 
-  setMode: (mode) => set({ mode, outputText: '', changes: [], error: null }),
+  setMode: (mode) => set({ mode, outputText: '', changes: [], error: null, latestDetectedSourceLang: null }),
   setCorrectionLevel: (level) => set({ correctionLevel: level, outputText: '', changes: [], error: null }),
 
-  setInputText: (text) => set({ inputText: text }),
+  // A detected language belongs to the text it was detected from.
+  setInputText: (text) => set({ inputText: text, latestDetectedSourceLang: null }),
   setOutputText: (text) => set({ outputText: text }),
 
-  setSourceLang: (lang) => set({ sourceLang: lang }),
+  setSourceLang: (lang) => set({ sourceLang: lang, latestDetectedSourceLang: null }),
+  setLatestDetectedSourceLang: (lang) => set({ latestDetectedSourceLang: lang }),
   setTargetLang: (lang) => set({ targetLang: lang }),
 
   setLoading: (loading) => set({ isLoading: loading }),
