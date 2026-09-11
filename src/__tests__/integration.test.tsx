@@ -1,8 +1,17 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import { MainWindow } from '../components/MainWindow'
 import { useAppStore } from '../stores/appStore'
 import { useSettingsStore } from '../stores/settingsStore'
+import { useOllama, useOllamaLifecycle } from '../hooks/useOllama'
+import {
+  useOllamaStore,
+  resetOllamaRuntime,
+  setOllamaLifecycleClientFactory,
+  type OllamaLifecycleClient,
+  type OllamaLifecycleClientFactory,
+} from '../stores/ollamaStore'
+import { OllamaModelInfo } from '../types'
 
 // Mock Tauri APIs
 vi.mock('@tauri-apps/plugin-clipboard-manager', () => ({
@@ -27,6 +36,7 @@ vi.mock('react-i18next', () => ({
         'settings:title': 'Settings',
         'errors.ollamaConnection': 'Cannot connect to Ollama',
         'common:retry': 'Retry',
+        'common:save': 'Save',
         autoDetect: 'Auto-detect',
         translate: 'Translate',
         correct: 'Correct',
@@ -58,14 +68,13 @@ vi.mock('react-i18next', () => ({
   }),
 }))
 
-// Mock useOllama hook
-const mockCheckConnection = vi.fn()
-vi.mock('../hooks/useOllama', () => ({
-  useOllama: () => ({
-    isConnected: true,
-    isChecking: false,
-    checkConnection: mockCheckConnection,
-  }),
+// Mock UI_LANGUAGES so the settings panel renders without the i18n runtime
+vi.mock('../i18n', () => ({
+  UI_LANGUAGES: [
+    { code: 'en', nativeName: 'English' },
+    { code: 'vi', nativeName: 'Tiếng Việt' },
+  ],
+  changeLanguage: vi.fn(),
 }))
 
 // Mock useTranslation hook (translation logic)
@@ -131,6 +140,16 @@ describe('App Integration', () => {
       correctionModel: 'gemma3:4b',
       speechLang: 'en',
       explanationLang: 'auto',
+    })
+
+    // The lifecycle runtime is shared; these flows assume a connected host.
+    useOllamaStore.setState({
+      host: 'http://localhost:11434',
+      isConnected: true,
+      isChecking: false,
+      models: [],
+      error: null,
+      pull: null,
     })
 
     mockTranslate.mockClear()
@@ -387,5 +406,180 @@ describe('App Integration', () => {
 
       expect(screen.getByText('11 chars')).toBeInTheDocument()
     })
+  })
+})
+
+describe('Ollama lifecycle ownership', () => {
+  const MODIFIED_AT = '2026-01-01T00:00:00Z'
+  const localModels: OllamaModelInfo[] = [
+    { name: 'gemma3:4b', size: 1000000, modified_at: MODIFIED_AT },
+    { name: 'llama3:8b', size: 2000000, modified_at: MODIFIED_AT },
+  ]
+  const remoteModels: OllamaModelInfo[] = [
+    { name: 'qwen2.5:7b', size: 3000000, modified_at: MODIFIED_AT },
+  ]
+
+  const transport = {
+    constructedHosts: [] as string[],
+    checkHealth: vi.fn(),
+    listModels: vi.fn(),
+    pullModel: vi.fn(),
+  }
+
+  const fakeFactory: OllamaLifecycleClientFactory = (host): OllamaLifecycleClient => {
+    transport.constructedHosts.push(host)
+    return {
+      checkHealth: transport.checkHealth,
+      listModels: transport.listModels,
+      pullModel: transport.pullModel,
+    }
+  }
+
+  /** Mounts the application-level lifecycle owner around the rendered tree. */
+  function App({ children }: { children: React.ReactNode }) {
+    useOllamaLifecycle()
+    return <>{children}</>
+  }
+
+  /** A second consumer that only reads the shared lifecycle snapshot. */
+  function StatusProbe() {
+    const { isConnected, models } = useOllama()
+    return (
+      <div data-testid="probe">
+        {isConnected ? 'connected' : 'offline'}:{models.length}
+      </div>
+    )
+  }
+
+  beforeEach(() => {
+    useAppStore.setState({
+      mode: 'translate',
+      inputText: '',
+      outputText: '',
+      sourceLang: 'auto',
+      targetLang: 'vi',
+      isEnabled: true,
+      isLoading: false,
+      error: null,
+      correctionLevel: 'fix',
+      changes: [],
+      isChangesLoading: false,
+    })
+    useSettingsStore.setState({
+      ollamaHost: 'http://localhost:11434',
+      ollamaInstalled: false,
+      modelsInstalled: false,
+      translationModel: 'gemma3:4b',
+      correctionModel: 'llama3:8b',
+    })
+
+    transport.constructedHosts.length = 0
+    transport.checkHealth.mockReset()
+    transport.listModels.mockReset()
+    transport.pullModel.mockReset()
+    transport.checkHealth.mockResolvedValue(true)
+    transport.listModels.mockResolvedValue(localModels)
+
+    setOllamaLifecycleClientFactory(fakeFactory)
+    resetOllamaRuntime()
+  })
+
+  afterEach(() => {
+    resetOllamaRuntime()
+    setOllamaLifecycleClientFactory(null)
+    vi.clearAllMocks()
+  })
+
+  it('serves the main window and an opened settings panel from one request', async () => {
+    const setOllamaInstalled = vi.spyOn(useSettingsStore.getState(), 'setOllamaInstalled')
+
+    render(
+      <App>
+        <MainWindow />
+        <StatusProbe />
+      </App>
+    )
+
+    await waitFor(() => expect(screen.getByTestId('probe')).toHaveTextContent('connected:2'))
+
+    // Opening settings mounts a third consumer of the same runtime.
+    fireEvent.click(screen.getByTitle('Settings'))
+    await waitFor(() => expect(screen.getByDisplayValue('http://localhost:11434')).toBeInTheDocument())
+
+    expect(screen.getAllByRole('option', { name: 'gemma3:4b' }).length).toBeGreaterThan(0)
+    expect(transport.constructedHosts).toEqual(['http://localhost:11434'])
+    expect(transport.checkHealth).toHaveBeenCalledTimes(1)
+    expect(transport.listModels).toHaveBeenCalledTimes(1)
+    expect(setOllamaInstalled).toHaveBeenCalledTimes(1)
+    expect(setOllamaInstalled).toHaveBeenCalledWith(true)
+    expect(useSettingsStore.getState().modelsInstalled).toBe(true)
+  })
+
+  it('saving a new host retires the old models and checks the new host', async () => {
+    render(
+      <App>
+        <MainWindow />
+        <StatusProbe />
+      </App>
+    )
+    await waitFor(() => expect(screen.getByTestId('probe')).toHaveTextContent('connected:2'))
+
+    fireEvent.click(screen.getByTitle('Settings'))
+    const hostInput = await screen.findByDisplayValue('http://localhost:11434')
+
+    let resolveRemoteHealth!: (value: boolean) => void
+    transport.checkHealth.mockReturnValue(
+      new Promise<boolean>(resolve => {
+        resolveRemoteHealth = resolve
+      })
+    )
+    transport.listModels.mockResolvedValue(remoteModels)
+
+    fireEvent.change(hostInput, { target: { value: 'http://remote:11434' } })
+    fireEvent.click(screen.getByText('Save'))
+
+    // The retired host's status and models are gone before the new answer.
+    await waitFor(() => expect(screen.getByTestId('probe')).toHaveTextContent('offline:0'))
+    expect(useSettingsStore.getState().ollamaInstalled).toBe(false)
+    expect(useSettingsStore.getState().modelsInstalled).toBe(false)
+    expect(transport.constructedHosts).toEqual([
+      'http://localhost:11434',
+      'http://remote:11434',
+    ])
+
+    await act(async () => {
+      resolveRemoteHealth(true)
+    })
+
+    await waitFor(() => expect(screen.getByTestId('probe')).toHaveTextContent('connected:1'))
+    expect(useSettingsStore.getState().ollamaInstalled).toBe(true)
+    expect(useSettingsStore.getState().modelsInstalled).toBe(false)
+  })
+
+  it('selecting a model that is not installed flips the derived flag from the cached list', async () => {
+    render(
+      <App>
+        <MainWindow />
+        <StatusProbe />
+      </App>
+    )
+    await waitFor(() => expect(useSettingsStore.getState().modelsInstalled).toBe(true))
+
+    fireEvent.click(screen.getByTitle('Settings'))
+    const selects = await screen.findAllByRole('combobox')
+    const translationSelect = selects.find(select =>
+      (select as HTMLSelectElement).value === 'gemma3:4b'
+    ) as HTMLSelectElement
+
+    fireEvent.change(translationSelect, { target: { value: 'llama3:8b' } })
+    expect(useSettingsStore.getState().modelsInstalled).toBe(true)
+
+    act(() => {
+      useSettingsStore.getState().setCorrectionModel('mistral:7b')
+    })
+
+    expect(useSettingsStore.getState().modelsInstalled).toBe(false)
+    expect(transport.checkHealth).toHaveBeenCalledTimes(1)
+    expect(transport.listModels).toHaveBeenCalledTimes(1)
   })
 })
