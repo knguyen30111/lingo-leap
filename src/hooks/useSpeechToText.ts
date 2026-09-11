@@ -48,6 +48,29 @@ const SPEECH_LANG_MAP: Record<string, string> = {
 // Silence timeout in milliseconds
 const SILENCE_TIMEOUT = 2500
 
+const MIC_DENIED_ERROR = 'Microphone access denied'
+
+// Web Speech error codes that end a session without being a user-facing failure
+const BENIGN_ERROR_CODES = ['aborted', 'no-speech']
+
+// Normalized, actionable message for every reported recognition error
+function normalizeError(code: string): string {
+  switch (code) {
+    case 'not-allowed':
+      return MIC_DENIED_ERROR
+    case 'audio-capture':
+      return 'Microphone unavailable'
+    case 'network':
+      return 'Speech recognition requires a network connection'
+    case 'service-not-allowed':
+      return 'Speech recognition service unavailable'
+    case 'language-not-supported':
+      return 'Speech recognition language not supported'
+    default:
+      return `Speech error: ${code}`
+  }
+}
+
 export interface UseSpeechToTextOptions {
   lang?: string // App language code (e.g., 'vi', 'ja', 'en')
   onTextReady?: (text: string) => void // Called when final text is ready to append
@@ -62,10 +85,29 @@ export interface UseSpeechToTextReturn {
   interimTranscript: string
   silenceDetected: boolean // True when silence is being detected
   error: string | null
-  startListening: () => void
+  startListening: () => Promise<void>
   stopListening: () => void
-  toggleListening: () => void
+  toggleListening: () => Promise<void>
   clearTranscript: () => void
+}
+
+// How the current session is expected to terminate
+type TerminationIntent = 'none' | 'stop' | 'cancel'
+
+// One owned recognition attempt. Every native event carries its session, so an
+// event from a replaced attempt is recognizable and ignorable.
+interface SpeechSession {
+  id: number
+  recognition: SpeechRecognition | null
+  timer: ReturnType<typeof setTimeout> | null
+  intent: TerminationIntent
+  finalized: boolean
+}
+
+interface FinalizeOptions {
+  flushInterim: boolean
+  callOnEnd: boolean
+  errorMessage?: string
 }
 
 // Check if running in Tauri dev mode (no Info.plist = will crash on speech recognition)
@@ -113,13 +155,6 @@ function resetAudioSession(): void {
 
 // Check if microphone permission is granted (without triggering audio session)
 async function checkMicrophonePermission(): Promise<boolean> {
-  // In dev mode, speech recognition will crash due to missing Info.plist
-  // Only the built app has the plist merged
-  if (isDevMode()) {
-    console.warn('[Speech] Speech recognition disabled in dev mode - build the app to test')
-    return false
-  }
-
   try {
     // Only check via permissions API - don't use getUserMedia as it triggers audio ducking
     if (navigator.permissions) {
@@ -148,23 +183,33 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeech
   const [interimTranscript, setInterimTranscript] = useState('')
   const [silenceDetected, setSilenceDetected] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [micPermissionGranted, setMicPermissionGranted] = useState<boolean | null>(null)
 
-  // Track window visibility for lazy/active mode
+  // Track window visibility for lazy/active mode. This hook owns the native
+  // voice-session cleanup for a hidden window; useWindowVisibility only reports.
   const { isVisible } = useWindowVisibility()
 
-  const recognitionRef = useRef<SpeechRecognition | null>(null)
-  const isStoppingRef = useRef(false)
-  const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const lastSpeechTimeRef = useRef<number>(0)
-  const accumulatedTextRef = useRef('')
+  // Latest-value refs: native handlers must never read render-time values
+  const langRef = useRef(lang)
+  const onTextReadyRef = useRef(onTextReady)
+  const onEndRef = useRef(onEnd)
+  const onErrorRef = useRef(onError)
+  langRef.current = lang
+  onTextReadyRef.current = onTextReady
+  onEndRef.current = onEnd
+  onErrorRef.current = onError
 
-  // Check browser support - API must exist (permission checked lazily on first use)
-  const hasAPI = typeof window !== 'undefined' &&
-    ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)
-  // Show as supported if API exists and permission not yet denied
-  // This prevents audio interruption on app startup
-  const isSupported = hasAPI && micPermissionGranted !== false
+  const sessionRef = useRef<SpeechSession | null>(null)
+  const sessionIdRef = useRef(0)
+  const interimTranscriptRef = useRef('')
+  const permissionGrantedRef = useRef(false)
+  const mountedRef = useRef(true)
+
+  // Support is a capability question only: the constructor must exist and the
+  // runtime must not be the dev build that crashes on recognition. A denied or
+  // failed attempt stays retryable and is reported as an error instead.
+  const isSupported = typeof window !== 'undefined' &&
+    Boolean(window.webkitSpeechRecognition || window.SpeechRecognition) &&
+    !isDevMode()
 
   // Get speech API language code
   const getSpeechLang = useCallback((appLang: string): string => {
@@ -172,62 +217,140 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeech
     return SPEECH_LANG_MAP[appLang] || 'en-US'
   }, [])
 
-  // Clear silence timer
-  const clearSilenceTimer = useCallback((reactivateSession = false) => {
-    if (silenceTimerRef.current) {
-      clearTimeout(silenceTimerRef.current)
-      silenceTimerRef.current = null
+  // A session may only act while it is the owned, unfinished one
+  const isCurrent = useCallback((session: SpeechSession) => {
+    return sessionRef.current === session && !session.finalized
+  }, [])
+
+  const releaseAudio = useCallback(() => {
+    invoke('deactivate_voice_session').catch(() => {})
+    // Reset WebKit's audio session to restore system audio (macOS workaround)
+    resetAudioSession()
+  }, [])
+
+  // Clear this session's silence timer
+  const clearSilenceTimer = useCallback((session: SpeechSession, reactivateSession = false) => {
+    if (session.timer) {
+      clearTimeout(session.timer)
+      session.timer = null
       // Re-activate audio session only when user speaks again (not when stopping)
       if (reactivateSession) {
         invoke('activate_voice_session').catch(() => {})
       }
     }
-    setSilenceDetected(false)
+    if (mountedRef.current) setSilenceDetected(false)
   }, [])
 
-  // Start silence detection timer
-  const startSilenceTimer = useCallback(() => {
-    clearSilenceTimer()
-    setSilenceDetected(true)
+  // The single cleanup boundary: timers, handlers, listening state, pending
+  // text, and the native audio session all settle here exactly once.
+  const finalizeSession = useCallback((session: SpeechSession, { flushInterim, callOnEnd, errorMessage }: FinalizeOptions) => {
+    if (!isCurrent(session)) return
+
+    session.finalized = true
+    sessionRef.current = null
+
+    if (session.timer) {
+      clearTimeout(session.timer)
+      session.timer = null
+    }
+
+    const recognition = session.recognition
+    if (recognition) {
+      recognition.onstart = null
+      recognition.onresult = null
+      recognition.onerror = null
+      recognition.onend = null
+      session.recognition = null
+    }
+
+    const pendingText = interimTranscriptRef.current.trim()
+    interimTranscriptRef.current = ''
+
+    if (mountedRef.current) {
+      setIsListening(false)
+      setSilenceDetected(false)
+      setInterimTranscript('')
+      setTranscript('')
+      if (errorMessage) setError(errorMessage)
+    }
+
+    releaseAudio()
+
+    if (flushInterim && pendingText) {
+      onTextReadyRef.current?.(pendingText)
+    }
+    if (errorMessage) {
+      onErrorRef.current?.(errorMessage)
+    }
+    if (callOnEnd) {
+      onEndRef.current?.()
+    }
+  }, [isCurrent, releaseAudio])
+
+  // Graceful stop: flush what was recognized, keep the no-onEnd contract
+  const stopSession = useCallback((session: SpeechSession) => {
+    if (!isCurrent(session) || session.intent !== 'none') return
+
+    session.intent = 'stop'
+    clearSilenceTimer(session)
+
+    const recognition = session.recognition
+    recognition?.stop()
+    // A synchronous onend already finalized; this call is then a no-op.
+    finalizeSession(session, { flushInterim: true, callOnEnd: false })
+  }, [isCurrent, clearSilenceTimer, finalizeSession])
+
+  // Cancellation: discard pending text and silence every late event
+  const cancelSession = useCallback((session: SpeechSession) => {
+    if (!isCurrent(session) || session.intent === 'cancel') return
+
+    session.intent = 'cancel'
+    const recognition = session.recognition
+    interimTranscriptRef.current = ''
+    finalizeSession(session, { flushInterim: false, callOnEnd: false })
+    recognition?.abort()
+  }, [isCurrent, finalizeSession])
+
+  // Start this session's silence detection timer
+  const startSilenceTimer = useCallback((session: SpeechSession) => {
+    clearSilenceTimer(session)
+    if (mountedRef.current) setSilenceDetected(true)
 
     // Deactivate audio session immediately when silence detected
     // This restores other apps' audio volume without waiting for timeout
     invoke('deactivate_voice_session').catch(() => {})
 
-    silenceTimerRef.current = setTimeout(() => {
-      // Auto-stop after silence timeout
-      if (recognitionRef.current && !isStoppingRef.current) {
-        isStoppingRef.current = true
-        recognitionRef.current.stop()
-      }
+    session.timer = setTimeout(() => {
+      session.timer = null
+      // Auto-stop after silence timeout - a stale timer must change nothing
+      stopSession(session)
     }, SILENCE_TIMEOUT)
-  }, [clearSilenceTimer])
+  }, [clearSilenceTimer, stopSession])
 
-  // Initialize recognition
-  const createRecognition = useCallback(() => {
-    if (!isSupported) return null
-
+  // Install handlers for one owned session
+  const createRecognition = useCallback((session: SpeechSession): SpeechRecognition => {
     const SpeechRecognitionAPI = window.webkitSpeechRecognition || window.SpeechRecognition
     const recognition = new SpeechRecognitionAPI()
 
     // Enable continuous mode for ongoing dictation
     recognition.continuous = true
     recognition.interimResults = true
-    recognition.lang = getSpeechLang(lang)
+    recognition.lang = getSpeechLang(langRef.current)
 
     recognition.onstart = () => {
-      setIsListening(true)
-      setError(null)
-      isStoppingRef.current = false
-      lastSpeechTimeRef.current = Date.now()
-      // Start initial silence timer
-      startSilenceTimer()
+      if (!isCurrent(session)) return
+      if (mountedRef.current) {
+        setIsListening(true)
+        setError(null)
+      }
+      startSilenceTimer(session)
     }
 
     recognition.onresult = (event: SpeechRecognitionEvent) => {
+      if (!isCurrent(session)) return
+
       // Reset silence timer on any result - reactivate audio session for new speech
-      lastSpeechTimeRef.current = Date.now()
-      clearSilenceTimer(true)
+      clearSilenceTimer(session, true)
 
       let confirmedText = ''
       let interim = ''
@@ -242,84 +365,103 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeech
       }
 
       if (confirmedText) {
-        // Send to input immediately
-        onTextReady?.(confirmedText.trim())
-        // Clear transcript for next segment (text is already in input)
-        accumulatedTextRef.current = ''
-        setTranscript('')
-        setInterimTranscript('')
+        // Final text is delivered now, so it can never be flushed again
+        interimTranscriptRef.current = ''
+        if (mountedRef.current) {
+          setTranscript('')
+          setInterimTranscript('')
+        }
+        onTextReadyRef.current?.(confirmedText.trim())
       }
 
       if (interim) {
-        setInterimTranscript(interim)
+        interimTranscriptRef.current = interim
+        if (mountedRef.current) setInterimTranscript(interim)
       }
 
       // Restart silence timer after processing
-      startSilenceTimer()
+      startSilenceTimer(session)
     }
 
     recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
-      clearSilenceTimer()
+      if (!isCurrent(session)) return
 
-      // Ignore 'aborted' errors (user stopped) and 'no-speech' in continuous mode
-      if (event.error === 'aborted') return
-      if (event.error === 'no-speech') {
-        // In continuous mode, no-speech is handled by silence timer
+      // Benign lifecycle codes: the following onend settles the session
+      if (BENIGN_ERROR_CODES.includes(event.error)) {
+        clearSilenceTimer(session)
         return
       }
 
-      const errorMsg = event.error === 'not-allowed'
-        ? 'Microphone access denied'
-        : `Speech error: ${event.error}`
-
-      setError(errorMsg)
-      onError?.(errorMsg)
-      setIsListening(false)
+      finalizeSession(session, {
+        flushInterim: true,
+        callOnEnd: false,
+        errorMessage: normalizeError(event.error),
+      })
     }
 
     recognition.onend = () => {
-      clearSilenceTimer()
-      setIsListening(false)
-
-      // Include any pending interim text
-      if (interimTranscript) {
-        onTextReady?.(interimTranscript.trim())
-      }
-
-      // Deactivate audio session when recognition ends (e.g., silence timeout)
-      invoke('deactivate_voice_session').catch(() => {})
-      // Reset WebKit's audio session to restore system audio (macOS workaround)
-      resetAudioSession()
-
-      if (!isStoppingRef.current) {
-        onEnd?.()
-      }
+      if (!isCurrent(session)) return
+      finalizeSession(session, {
+        flushInterim: true,
+        callOnEnd: session.intent === 'none',
+      })
     }
 
     return recognition
-  }, [isSupported, lang, getSpeechLang, onTextReady, onEnd, onError, startSilenceTimer, clearSilenceTimer, interimTranscript])
+  }, [getSpeechLang, isCurrent, clearSilenceTimer, startSilenceTimer, finalizeSession])
+
+  // Settle a session that never reached the native layer
+  const failStart = useCallback((session: SpeechSession, message: string) => {
+    if (!isCurrent(session)) return
+
+    session.finalized = true
+    sessionRef.current = null
+    if (mountedRef.current) {
+      setIsListening(false)
+      setError(message)
+    }
+    onErrorRef.current?.(message)
+  }, [isCurrent])
 
   // Start listening
   const startListening = useCallback(async () => {
-    if (!hasAPI || isListening) return
+    if (typeof window === 'undefined') return
+    if (!(window.webkitSpeechRecognition || window.SpeechRecognition)) return
+    // One owned session at a time, including while a start is still awaiting
+    if (sessionRef.current) return
+
+    const session: SpeechSession = {
+      id: ++sessionIdRef.current,
+      recognition: null,
+      timer: null,
+      intent: 'none',
+      finalized: false,
+    }
+    sessionRef.current = session
 
     // Reset state
-    accumulatedTextRef.current = ''
+    interimTranscriptRef.current = ''
     setTranscript('')
     setInterimTranscript('')
     setSilenceDetected(false)
     setError(null)
 
+    // Speech recognition crashes the dev runtime (no merged Info.plist)
+    if (isDevMode()) {
+      console.warn('[Speech] Speech recognition disabled in dev mode - build the app to test')
+      failStart(session, MIC_DENIED_ERROR)
+      return
+    }
+
     // Request microphone permission first (prevents WKWebView crash)
-    if (!micPermissionGranted) {
+    if (!permissionGrantedRef.current) {
       const granted = await checkMicrophonePermission()
-      setMicPermissionGranted(granted)
+      if (!isCurrent(session)) return
       if (!granted) {
-        const errorMsg = 'Microphone access denied'
-        setError(errorMsg)
-        onError?.(errorMsg)
+        failStart(session, MIC_DENIED_ERROR)
         return
       }
+      permissionGrantedRef.current = true
     }
 
     // Activate native audio session for voice recording
@@ -331,80 +473,63 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeech
       // Continue anyway - speech recognition may still work
     }
 
-    const recognition = createRecognition()
-    if (recognition) {
-      recognitionRef.current = recognition
-      try {
-        recognition.start()
-      } catch (e) {
-        // Deactivate session if recognition fails to start
-        invoke('deactivate_voice_session').catch(() => {})
-        const errorMsg = e instanceof Error ? e.message : 'Failed to start speech recognition'
-        setError(errorMsg)
-        onError?.(errorMsg)
-      }
+    if (!isCurrent(session) || !mountedRef.current) {
+      // The await was invalidated - release the session we just activated,
+      // unless a newer attempt already owns the native audio.
+      if (!sessionRef.current) releaseAudio()
+      return
     }
-  }, [hasAPI, isListening, micPermissionGranted, createRecognition, onError])
+
+    const recognition = createRecognition(session)
+    session.recognition = recognition
+
+    try {
+      recognition.start()
+    } catch (e) {
+      const errorMsg = e instanceof Error ? e.message : 'Failed to start speech recognition'
+      finalizeSession(session, { flushInterim: false, callOnEnd: false, errorMessage: errorMsg })
+    }
+  }, [createRecognition, failStart, finalizeSession, isCurrent, releaseAudio])
 
   // Stop listening
   const stopListening = useCallback(() => {
-    clearSilenceTimer()
-    if (recognitionRef.current && isListening) {
-      isStoppingRef.current = true
-      recognitionRef.current.stop()
-    }
-    // Deactivate native audio session to restore system audio quality
-    invoke('deactivate_voice_session').catch((e) => {
-      console.warn('Failed to deactivate voice session:', e)
-    })
-    // Reset WebKit's audio session to restore system audio (macOS workaround)
-    resetAudioSession()
-  }, [isListening, clearSilenceTimer])
+    const session = sessionRef.current
+    if (session) stopSession(session)
+  }, [stopSession])
 
   // Toggle listening
   const toggleListening = useCallback(async () => {
-    if (isListening) {
+    if (sessionRef.current) {
       stopListening()
     } else {
       await startListening()
     }
-  }, [isListening, startListening, stopListening])
+  }, [startListening, stopListening])
 
   // Clear transcript
   const clearTranscript = useCallback(() => {
-    accumulatedTextRef.current = ''
+    interimTranscriptRef.current = ''
     setTranscript('')
     setInterimTranscript('')
   }, [])
 
-  // Stop listening when window becomes invisible (lazy mode)
-  // This releases audio resources when app is minimized to menu bar
+  // Cancel the session when the window becomes invisible (lazy mode)
+  // This releases audio resources when the app is minimized to the menu bar
   useEffect(() => {
-    if (!isVisible && isListening) {
-      // Window hidden - enter lazy mode, release audio
-      clearSilenceTimer()
-      if (recognitionRef.current) {
-        isStoppingRef.current = true
-        recognitionRef.current.abort()
-      }
-      setIsListening(false)
-      invoke('deactivate_voice_session').catch(() => {})
-      resetAudioSession()
-    }
-  }, [isVisible, isListening, clearSilenceTimer])
+    if (isVisible) return
+    const session = sessionRef.current
+    if (session) cancelSession(session)
+  }, [isVisible, cancelSession])
 
   // Cleanup on unmount
   useEffect(() => {
+    mountedRef.current = true
     return () => {
-      clearSilenceTimer()
-      if (recognitionRef.current) {
-        recognitionRef.current.abort()
-      }
-      // Ensure audio session is deactivated on cleanup
-      invoke('deactivate_voice_session').catch(() => {})
-      resetAudioSession()
+      mountedRef.current = false
+      const session = sessionRef.current
+      if (session) cancelSession(session)
     }
-  }, [clearSilenceTimer])
+  }, [cancelSession])
 
   return {
     isListening,

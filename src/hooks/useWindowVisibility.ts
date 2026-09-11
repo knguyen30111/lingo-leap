@@ -1,6 +1,5 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import { getCurrentWindow } from '@tauri-apps/api/window'
-import { invoke } from '@tauri-apps/api/core'
 
 export interface UseWindowVisibilityReturn {
   isVisible: boolean
@@ -10,15 +9,12 @@ export interface UseWindowVisibilityReturn {
  * Hook to track window visibility state (lazy vs active mode)
  * - Lazy: Window closed/minimized to menu bar - releases audio resources
  * - Active: Window visible and focused - normal operation
+ *
+ * This hook reports visibility only. Releasing the native voice session is
+ * owned by useSpeechToText, so a hidden window reaches that cleanup once.
  */
 export function useWindowVisibility(): UseWindowVisibilityReturn {
   const [isVisible, setIsVisible] = useState(true)
-
-  // Deactivate audio session when going to lazy mode
-  const enterLazyMode = useCallback(() => {
-    // Release audio session to prevent ducking while in menu bar
-    invoke('deactivate_voice_session').catch(() => {})
-  }, [])
 
   useEffect(() => {
     const appWindow = getCurrentWindow()
@@ -28,7 +24,6 @@ export function useWindowVisibility(): UseWindowVisibilityReturn {
       // Listen for window close (minimize to menu bar)
       const unlistenClose = await appWindow.onCloseRequested(() => {
         setIsVisible(false)
-        enterLazyMode()
       })
       unlisteners.push(unlistenClose)
 
@@ -43,11 +38,7 @@ export function useWindowVisibility(): UseWindowVisibilityReturn {
 
       // Also listen to document visibility for browser-level detection
       const handleVisibilityChange = () => {
-        const visible = document.visibilityState === 'visible'
-        setIsVisible(visible)
-        if (!visible) {
-          enterLazyMode()
-        }
+        setIsVisible(document.visibilityState === 'visible')
       }
       document.addEventListener('visibilitychange', handleVisibilityChange)
       unlisteners.push(() => document.removeEventListener('visibilitychange', handleVisibilityChange))
@@ -67,7 +58,7 @@ export function useWindowVisibility(): UseWindowVisibilityReturn {
     return () => {
       unlisteners.forEach(unlisten => unlisten())
     }
-  }, [enterLazyMode])
+  }, [])
 
   return {
     isVisible,
