@@ -125,6 +125,11 @@ Every pull request and every push to `main` or an `epic/**` branch runs the `CI`
 branch ruleset lists `frontend` and `rust` as required checks. Until then, and on every other
 branch, the checks report their result without blocking the merge button.
 
+Required check names do not make their workflow definitions immutable: a pull request that changes
+`.github/workflows/**` must receive a trusted owner review of the workflow diff before merge. This
+manual trust boundary is required while the repository has a single maintainer and cannot require
+an independent GitHub approval without making owner-authored pull requests unmergeable.
+
 | Check      | What it runs                                                           | Run it locally                                              |
 | ---------- | ---------------------------------------------------------------------- | ----------------------------------------------------------- |
 | `frontend` | locked install, TypeScript, Vite build, unit tests, coverage thresholds | `npm ci && npm run build && npm run test:coverage`           |
