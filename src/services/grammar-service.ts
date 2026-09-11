@@ -1,22 +1,28 @@
 import {
+  AiProvider,
   CorrectionLevel,
   CorrectionResult,
   Change,
   ServiceOptions
 } from '../types'
-import { ollamaClient } from '../lib/ollama-client'
+import { OllamaClient } from '../lib/ollama-client'
 import { buildCorrectionPrompt, buildChangesExtractionPrompt } from '../lib/prompt-builder'
 import { getModelType, cleanModelOutput } from '../lib/model'
 import { detectLanguage } from '../lib/language'
 
+// A cancelled extraction is not an extraction failure: it must reach the caller
+// instead of being answered with the whole-text fallback.
+function isAbortFailure(err: unknown, signal?: AbortSignal): boolean {
+  return (err instanceof Error && err.name === 'AbortError') || signal?.aborted === true
+}
+
 export class GrammarService {
   private modelName: string
-  private ollamaHost: string
+  private provider: AiProvider
 
   constructor(options: ServiceOptions) {
     this.modelName = options.modelName
-    this.ollamaHost = options.ollamaHost || 'http://localhost:11434'
-    ollamaClient.setBaseUrl(this.ollamaHost)
+    this.provider = options.provider ?? new OllamaClient(options.ollamaHost || 'http://localhost:11434')
   }
 
   // === Configuration ===
@@ -26,8 +32,7 @@ export class GrammarService {
   }
 
   setHost(host: string): void {
-    this.ollamaHost = host
-    ollamaClient.setBaseUrl(host)
+    this.provider = new OllamaClient(host)
   }
 
   // === Core Methods ===
@@ -35,12 +40,13 @@ export class GrammarService {
   async correctText(
     text: string,
     language: string,
-    level: CorrectionLevel
+    level: CorrectionLevel,
+    signal?: AbortSignal
   ): Promise<string> {
     const detectedLang = language === 'auto' ? detectLanguage(text) : language
     const prompt = buildCorrectionPrompt(text, detectedLang, level, this.modelName)
 
-    const response = await ollamaClient.generateFromPrompt(prompt, this.modelName)
+    const response = await this.provider.generateFromPrompt(prompt, this.modelName, {}, signal)
     const modelType = getModelType(this.modelName)
 
     return cleanModelOutput(response, modelType)
@@ -49,14 +55,15 @@ export class GrammarService {
   async *correctTextStream(
     text: string,
     language: string,
-    level: CorrectionLevel
+    level: CorrectionLevel,
+    signal?: AbortSignal
   ): AsyncGenerator<string> {
     const detectedLang = language === 'auto' ? detectLanguage(text) : language
     const prompt = buildCorrectionPrompt(text, detectedLang, level, this.modelName)
     const modelType = getModelType(this.modelName)
 
     let accumulated = ''
-    for await (const chunk of ollamaClient.streamFromPrompt(prompt, this.modelName)) {
+    for await (const chunk of this.provider.streamFromPrompt(prompt, this.modelName, {}, signal)) {
       accumulated += chunk
       yield cleanModelOutput(accumulated, modelType)
     }
@@ -66,7 +73,8 @@ export class GrammarService {
     original: string,
     corrected: string,
     textLanguage: string,
-    explanationLanguage: string
+    explanationLanguage: string,
+    signal?: AbortSignal
   ): Promise<Change[]> {
     // No changes if text is identical
     if (original.trim() === corrected.trim()) {
@@ -85,7 +93,12 @@ export class GrammarService {
     console.log('[GrammarService] Extracting changes with prompt:', prompt)
 
     try {
-      const changes = await ollamaClient.generateJSON<Change[]>(prompt, this.modelName)
+      const changes = await this.provider.generateJSON<Change[]>(
+        prompt,
+        this.modelName,
+        undefined,
+        signal
+      )
       console.log('[GrammarService] Raw changes:', changes)
 
       // Validate and filter changes
@@ -100,6 +113,8 @@ export class GrammarService {
       console.log('[GrammarService] Filtered changes:', filtered)
       return filtered
     } catch (err) {
+      if (isAbortFailure(err, signal)) throw err
+
       console.error('[GrammarService] Failed to extract changes:', err)
 
       // Fallback: return whole text as single change
@@ -115,16 +130,17 @@ export class GrammarService {
     text: string,
     textLanguage: string,
     explanationLanguage: string,
-    level: CorrectionLevel
+    level: CorrectionLevel,
+    signal?: AbortSignal
   ): Promise<CorrectionResult> {
     const detectedLang = textLanguage === 'auto' ? detectLanguage(text) : textLanguage
     const explainLang = explanationLanguage === 'auto' ? detectedLang : explanationLanguage
 
     // Step 1: Correct text
-    const corrected = await this.correctText(text, detectedLang, level)
+    const corrected = await this.correctText(text, detectedLang, level, signal)
 
     // Step 2: Extract changes (async, can be done in parallel in UI)
-    const changes = await this.extractChanges(text, corrected, detectedLang, explainLang)
+    const changes = await this.extractChanges(text, corrected, detectedLang, explainLang, signal)
 
     return {
       original: text,

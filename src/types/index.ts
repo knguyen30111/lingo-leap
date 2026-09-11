@@ -45,6 +45,7 @@ export interface ServiceOptions {
   ollamaHost?: string
   temperature?: number
   streaming?: boolean
+  provider?: AiProvider
 }
 
 // === Ollama Types ===
@@ -72,4 +73,40 @@ export interface OllamaModelInfo {
   name: string
   modified_at: string
   size: number
+}
+
+// === Provider Contract ===
+export interface GenerateOptions {
+  temperature?: number
+  num_ctx?: number
+}
+
+/**
+ * The typed seam every local AI transport implements. Each network-capable
+ * method accepts an optional caller signal so a cancelled request stops at the
+ * transport instead of racing a newer one.
+ */
+export interface AiProvider {
+  checkHealth(signal?: AbortSignal): Promise<boolean>
+  listModels(signal?: AbortSignal): Promise<OllamaModelInfo[]>
+  generate(request: OllamaGenerateRequest, signal?: AbortSignal): Promise<string>
+  generateStream(request: OllamaGenerateRequest, signal?: AbortSignal): AsyncGenerator<string>
+  generateFromPrompt(
+    promptResult: PromptResult,
+    modelName: string,
+    options?: GenerateOptions,
+    signal?: AbortSignal
+  ): Promise<string>
+  streamFromPrompt(
+    promptResult: PromptResult,
+    modelName: string,
+    options?: GenerateOptions,
+    signal?: AbortSignal
+  ): AsyncGenerator<string>
+  generateJSON<T>(
+    promptResult: PromptResult,
+    modelName: string,
+    maxRetries?: number,
+    signal?: AbortSignal
+  ): Promise<T>
 }

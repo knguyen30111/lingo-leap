@@ -1,15 +1,23 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { renderHook, waitFor } from '@testing-library/react'
+import { renderHook, act, waitFor } from '@testing-library/react'
 import { useOllama } from './useOllama'
 import { useSettingsStore } from '../stores/settingsStore'
-import { ollamaClient } from '../lib/ollama-client'
 
-// Mock ollama client
+// Mock the transport class: each hook instance owns a client for one host.
+const transport = vi.hoisted(() => ({
+  constructedHosts: [] as string[],
+  checkHealth: vi.fn(),
+  listModels: vi.fn(),
+}))
+
 vi.mock('../lib/ollama-client', () => ({
-  ollamaClient: {
-    setBaseUrl: vi.fn(),
-    checkHealth: vi.fn(),
-    listModels: vi.fn(),
+  OllamaClient: class MockOllamaClient {
+    checkHealth = transport.checkHealth
+    listModels = transport.listModels
+
+    constructor(baseUrl: string) {
+      transport.constructedHosts.push(baseUrl)
+    }
   },
 }))
 
@@ -32,9 +40,9 @@ describe('useOllama', () => {
     })
 
     // Reset mocks
-    vi.mocked(ollamaClient.setBaseUrl).mockClear()
-    vi.mocked(ollamaClient.checkHealth).mockReset()
-    vi.mocked(ollamaClient.listModels).mockReset()
+    transport.constructedHosts.length = 0
+    transport.checkHealth.mockReset()
+    transport.listModels.mockReset()
   })
 
   afterEach(() => {
@@ -42,8 +50,8 @@ describe('useOllama', () => {
   })
 
   it('returns initial checking state', () => {
-    vi.mocked(ollamaClient.checkHealth).mockResolvedValue(true)
-    vi.mocked(ollamaClient.listModels).mockResolvedValue(mockModels)
+    transport.checkHealth.mockResolvedValue(true)
+    transport.listModels.mockResolvedValue(mockModels)
 
     const { result } = renderHook(() => useOllama())
 
@@ -52,8 +60,8 @@ describe('useOllama', () => {
   })
 
   it('connects successfully when Ollama is running', async () => {
-    vi.mocked(ollamaClient.checkHealth).mockResolvedValue(true)
-    vi.mocked(ollamaClient.listModels).mockResolvedValue(mockModels)
+    transport.checkHealth.mockResolvedValue(true)
+    transport.listModels.mockResolvedValue(mockModels)
 
     const { result } = renderHook(() => useOllama())
 
@@ -67,8 +75,8 @@ describe('useOllama', () => {
   })
 
   it('sets ollamaInstalled when connected', async () => {
-    vi.mocked(ollamaClient.checkHealth).mockResolvedValue(true)
-    vi.mocked(ollamaClient.listModels).mockResolvedValue(mockModels)
+    transport.checkHealth.mockResolvedValue(true)
+    transport.listModels.mockResolvedValue(mockModels)
 
     renderHook(() => useOllama())
 
@@ -78,8 +86,8 @@ describe('useOllama', () => {
   })
 
   it('sets modelsInstalled when required models exist', async () => {
-    vi.mocked(ollamaClient.checkHealth).mockResolvedValue(true)
-    vi.mocked(ollamaClient.listModels).mockResolvedValue(mockModels)
+    transport.checkHealth.mockResolvedValue(true)
+    transport.listModels.mockResolvedValue(mockModels)
 
     renderHook(() => useOllama())
 
@@ -89,7 +97,7 @@ describe('useOllama', () => {
   })
 
   it('handles connection failure when Ollama not running', async () => {
-    vi.mocked(ollamaClient.checkHealth).mockResolvedValue(false)
+    transport.checkHealth.mockResolvedValue(false)
 
     const { result } = renderHook(() => useOllama())
 
@@ -102,7 +110,7 @@ describe('useOllama', () => {
   })
 
   it('handles network error', async () => {
-    vi.mocked(ollamaClient.checkHealth).mockRejectedValue(new Error('Network error'))
+    transport.checkHealth.mockRejectedValue(new Error('Network error'))
 
     const { result } = renderHook(() => useOllama())
 
@@ -115,7 +123,7 @@ describe('useOllama', () => {
   })
 
   it('handles non-Error thrown', async () => {
-    vi.mocked(ollamaClient.checkHealth).mockRejectedValue('string error')
+    transport.checkHealth.mockRejectedValue('string error')
 
     const { result } = renderHook(() => useOllama())
 
@@ -124,21 +132,21 @@ describe('useOllama', () => {
     })
   })
 
-  it('sets base URL from settings', async () => {
+  it('constructs a client bound to the configured host', async () => {
     useSettingsStore.setState({ ollamaHost: 'http://custom:8080' })
-    vi.mocked(ollamaClient.checkHealth).mockResolvedValue(true)
-    vi.mocked(ollamaClient.listModels).mockResolvedValue([])
+    transport.checkHealth.mockResolvedValue(true)
+    transport.listModels.mockResolvedValue([])
 
     renderHook(() => useOllama())
 
     await waitFor(() => {
-      expect(ollamaClient.setBaseUrl).toHaveBeenCalledWith('http://custom:8080')
+      expect(transport.constructedHosts).toEqual(['http://custom:8080'])
     })
   })
 
   it('hasModel returns true for exact model name match', async () => {
-    vi.mocked(ollamaClient.checkHealth).mockResolvedValue(true)
-    vi.mocked(ollamaClient.listModels).mockResolvedValue(mockModels)
+    transport.checkHealth.mockResolvedValue(true)
+    transport.listModels.mockResolvedValue(mockModels)
 
     const { result } = renderHook(() => useOllama())
 
@@ -152,8 +160,8 @@ describe('useOllama', () => {
   })
 
   it('hasModel returns false for partial model name', async () => {
-    vi.mocked(ollamaClient.checkHealth).mockResolvedValue(true)
-    vi.mocked(ollamaClient.listModels).mockResolvedValue(mockModels)
+    transport.checkHealth.mockResolvedValue(true)
+    transport.listModels.mockResolvedValue(mockModels)
 
     const { result } = renderHook(() => useOllama())
 
@@ -171,8 +179,8 @@ describe('useOllama', () => {
       { name: 'qwen2.5:7b', size: 1000000, modified_at: MODIFIED_AT },
       { name: 'qwen2.5-coder:1.5b', size: 500000, modified_at: MODIFIED_AT },
     ]
-    vi.mocked(ollamaClient.checkHealth).mockResolvedValue(true)
-    vi.mocked(ollamaClient.listModels).mockResolvedValue(similarModels)
+    transport.checkHealth.mockResolvedValue(true)
+    transport.listModels.mockResolvedValue(similarModels)
 
     const { result } = renderHook(() => useOllama())
 
@@ -188,8 +196,8 @@ describe('useOllama', () => {
   })
 
   it('hasModel returns false for non-existing model', async () => {
-    vi.mocked(ollamaClient.checkHealth).mockResolvedValue(true)
-    vi.mocked(ollamaClient.listModels).mockResolvedValue(mockModels)
+    transport.checkHealth.mockResolvedValue(true)
+    transport.listModels.mockResolvedValue(mockModels)
 
     const { result } = renderHook(() => useOllama())
 
@@ -201,8 +209,8 @@ describe('useOllama', () => {
   })
 
   it('checkConnection can be called manually', async () => {
-    vi.mocked(ollamaClient.checkHealth).mockResolvedValue(true)
-    vi.mocked(ollamaClient.listModels).mockResolvedValue(mockModels)
+    transport.checkHealth.mockResolvedValue(true)
+    transport.listModels.mockResolvedValue(mockModels)
 
     const { result } = renderHook(() => useOllama())
 
@@ -211,13 +219,13 @@ describe('useOllama', () => {
     })
 
     // Clear mocks and call again
-    vi.mocked(ollamaClient.checkHealth).mockClear()
-    vi.mocked(ollamaClient.listModels).mockClear()
+    transport.checkHealth.mockClear()
+    transport.listModels.mockClear()
 
     await result.current.checkConnection()
 
-    expect(ollamaClient.checkHealth).toHaveBeenCalled()
-    expect(ollamaClient.listModels).toHaveBeenCalled()
+    expect(transport.checkHealth).toHaveBeenCalled()
+    expect(transport.listModels).toHaveBeenCalled()
   })
 
   it('modelsInstalled is false when required models missing', async () => {
@@ -225,13 +233,120 @@ describe('useOllama', () => {
       translationModel: 'mistral:7b',
       correctionModel: 'mistral:7b',
     })
-    vi.mocked(ollamaClient.checkHealth).mockResolvedValue(true)
-    vi.mocked(ollamaClient.listModels).mockResolvedValue(mockModels)
+    transport.checkHealth.mockResolvedValue(true)
+    transport.listModels.mockResolvedValue(mockModels)
 
     renderHook(() => useOllama())
 
     await waitFor(() => {
       expect(useSettingsStore.getState().modelsInstalled).toBe(false)
     })
+  })
+})
+
+describe('useOllama cancellation and races', () => {
+  const models = [{ name: 'gemma3:4b', size: 1, modified_at: MODIFIED_AT }]
+
+  beforeEach(() => {
+    useSettingsStore.setState({
+      ollamaHost: 'http://localhost:11434',
+      ollamaInstalled: false,
+      modelsInstalled: false,
+      translationModel: 'gemma3:4b',
+      correctionModel: 'gemma3:4b',
+    })
+    transport.constructedHosts.length = 0
+    transport.checkHealth.mockReset()
+    transport.listModels.mockReset()
+  })
+
+  afterEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('forwards a request signal to the health and model calls', async () => {
+    transport.checkHealth.mockResolvedValue(true)
+    transport.listModels.mockResolvedValue(models)
+
+    const { result } = renderHook(() => useOllama())
+
+    await waitFor(() => expect(result.current.isConnected).toBe(true))
+
+    expect(transport.checkHealth.mock.calls[0][0]).toBeInstanceOf(AbortSignal)
+    expect(transport.listModels.mock.calls[0][0]).toBeInstanceOf(AbortSignal)
+  })
+
+  it('lets only the newest check publish its status and store flags', async () => {
+    const healthResolvers: ((value: boolean) => void)[] = []
+    transport.checkHealth.mockImplementation(
+      () => new Promise(resolve => { healthResolvers.push(resolve) })
+    )
+    transport.listModels.mockResolvedValue(models)
+
+    const { result } = renderHook(() => useOllama())
+    await waitFor(() => expect(healthResolvers.length).toBe(1))
+
+    await act(async () => {
+      result.current.checkConnection()
+    })
+    await waitFor(() => expect(healthResolvers.length).toBe(2))
+
+    // The newest check succeeds, then the superseded one reports a failure.
+    await act(async () => {
+      healthResolvers[1](true)
+    })
+    await act(async () => {
+      healthResolvers[0](false)
+    })
+
+    expect(result.current.isConnected).toBe(true)
+    expect(result.current.error).toBeNull()
+    expect(useSettingsStore.getState().ollamaInstalled).toBe(true)
+  })
+
+  it('ignores a superseded model listing', async () => {
+    const listResolvers: ((value: typeof models) => void)[] = []
+    transport.checkHealth.mockResolvedValue(true)
+    transport.listModels.mockImplementation(
+      () => new Promise(resolve => { listResolvers.push(resolve) })
+    )
+
+    const { result } = renderHook(() => useOllama())
+    await waitFor(() => expect(listResolvers.length).toBe(1))
+
+    await act(async () => {
+      result.current.checkConnection()
+    })
+    await waitFor(() => expect(listResolvers.length).toBe(2))
+
+    await act(async () => {
+      listResolvers[1](models)
+    })
+    await act(async () => {
+      listResolvers[0]([])
+    })
+
+    expect(result.current.models).toEqual(models)
+    expect(useSettingsStore.getState().modelsInstalled).toBe(true)
+  })
+
+  it('does not publish an error for a check cancelled by unmount', async () => {
+    let rejectHealth: (reason: unknown) => void
+    transport.checkHealth.mockReturnValue(
+      new Promise((_resolve, reject) => { rejectHealth = reject })
+    )
+
+    const { result, unmount } = renderHook(() => useOllama())
+    await waitFor(() => expect(transport.checkHealth).toHaveBeenCalled())
+
+    const stateBefore = result.current
+    unmount()
+
+    await act(async () => {
+      rejectHealth!(new Error('Network error'))
+    })
+
+    expect(stateBefore.error).toBeNull()
+    expect(useSettingsStore.getState().ollamaInstalled).toBe(false)
   })
 })

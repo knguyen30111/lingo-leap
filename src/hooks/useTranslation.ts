@@ -1,4 +1,4 @@
-import { useCallback, useRef, useMemo } from 'react'
+import { useCallback, useEffect, useRef, useMemo } from 'react'
 import { useAppStore } from '../stores/appStore'
 import { useSettingsStore } from '../stores/settingsStore'
 import { TranslationService } from '../services/translation-service'
@@ -18,12 +18,22 @@ export function useTranslation() {
 
   const { translationModel, ollamaHost, useStreaming } = useSettingsStore()
   const abortRef = useRef<AbortController | null>(null)
+  const requestIdRef = useRef(0)
 
   // Create service instance (memoized)
   const service = useMemo(
     () => new TranslationService({ modelName: translationModel, ollamaHost }),
     [translationModel, ollamaHost]
   )
+
+  // A host/model change or an unmount retires whatever is still in flight.
+  useEffect(() => {
+    return () => {
+      requestIdRef.current += 1
+      abortRef.current?.abort()
+      abortRef.current = null
+    }
+  }, [service])
 
   const translate = useCallback(async (text?: string, options?: { skipCache?: boolean }) => {
     const textToProcess = text || inputText
@@ -35,7 +45,10 @@ export function useTranslation() {
     if (abortRef.current) {
       abortRef.current.abort()
     }
-    abortRef.current = new AbortController()
+    const controller = new AbortController()
+    abortRef.current = controller
+    const requestId = ++requestIdRef.current
+    const isCurrent = () => requestIdRef.current === requestId && !controller.signal.aborted
 
     setLoading(true)
     setError(null)
@@ -65,15 +78,30 @@ export function useTranslation() {
       let result = ''
 
       if (useStreaming) {
-        for await (const chunk of service.translateStream(textToProcess, detectedSource, targetLang)) {
+        for await (const chunk of service.translateStream(
+          textToProcess,
+          detectedSource,
+          targetLang,
+          controller.signal
+        )) {
+          if (!isCurrent()) return
           result = chunk
           setOutputText(result)
         }
       } else {
-        const response = await service.translate(textToProcess, detectedSource, targetLang)
+        const response = await service.translate(
+          textToProcess,
+          detectedSource,
+          targetLang,
+          controller.signal
+        )
+        if (!isCurrent()) return
         result = response.translated
         setOutputText(result)
       }
+
+      // Only the current request may publish its result
+      if (!isCurrent()) return
 
       // Cache result
       translationCache.set(cacheKey, result)
@@ -81,6 +109,7 @@ export function useTranslation() {
       setLoading(false)
       return result
     } catch (err) {
+      if (!isCurrent()) return
       if (err instanceof Error && err.name === 'AbortError') return
       const errorMsg = err instanceof Error ? err.message : 'Translation failed'
       setError(errorMsg)
@@ -102,6 +131,7 @@ export function useTranslation() {
 
   const cancel = useCallback(() => {
     if (abortRef.current) {
+      requestIdRef.current += 1
       abortRef.current.abort()
       abortRef.current = null
       setLoading(false)
