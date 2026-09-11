@@ -28,16 +28,15 @@
     "explanation": "Ngôn ngữ giải thích",
     "explanationDesc": "Cho phần sửa ngữ pháp",
     "speech": "Nhận dạng giọng nói",
-    "speechDesc": "Ngôn ngữ nhập bằng giọng nói",
+    "speechDesc": "Ngôn ngữ nhập bằng giọng nói. Nhận dạng do trình duyệt và nền tảng cung cấp, có thể dùng dịch vụ mạng.",
     "interface": "Ngôn ngữ giao diện",
     "interfaceDesc": "Ngôn ngữ hiển thị ứng dụng",
     "matchInput": "Theo văn bản gốc"
   },
   "audio": {
     "microphone": "Micrô",
-    "microphoneDesc": "Thiết bị nhập giọng nói",
-    "noMicrophones": "Không tìm thấy micrô",
-    "default": "(Mặc định)"
+    "microphoneDesc": "Nhận dạng giọng nói dùng micrô mặc định của hệ thống. Hãy đổi trong cài đặt âm thanh của hệ điều hành.",
+    "systemDefault": "Mặc định hệ thống"
   },
   "version": "Lingo Leap v0.1.0"
 }

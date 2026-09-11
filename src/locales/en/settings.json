@@ -28,16 +28,15 @@
     "explanation": "Explanation Language",
     "explanationDesc": "For grammar corrections",
     "speech": "Speech Recognition",
-    "speechDesc": "Voice input language",
+    "speechDesc": "Voice input language. Recognition is provided by the browser and platform, and may use a network service.",
     "interface": "Interface Language",
     "interfaceDesc": "Display language for the app",
     "matchInput": "Match input"
   },
   "audio": {
     "microphone": "Microphone",
-    "microphoneDesc": "Voice input device",
-    "noMicrophones": "No microphones found",
-    "default": "(Default)"
+    "microphoneDesc": "Speech recognition uses your system default microphone. Change it in your operating system sound settings.",
+    "systemDefault": "System default"
   },
   "version": "Lingo Leap v0.1.0"
 }

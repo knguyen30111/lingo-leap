@@ -53,6 +53,7 @@ export function CorrectionView() {
     transcript,
     interimTranscript,
     silenceDetected,
+    error: speechError,
     toggleListening,
   } = useSpeechToText({
     lang: speechLang,
@@ -140,6 +141,7 @@ export function CorrectionView() {
                         onChange={(e) => setSpeechLang(e.target.value)}
                         className="speech-lang-select"
                         title="Speech language"
+                        aria-label="Speech language"
                       >
                         {SPEECH_LANGS.map(({ code, label }) => (
                           <option key={code} value={code}>
@@ -155,6 +157,12 @@ export function CorrectionView() {
                     interimTranscript={interimTranscript}
                   />
                 </div>
+                {/* A failed attempt stays retryable - report it next to the control */}
+                {speechError && (
+                  <span role="alert" className="ml-2 text-[10px] text-[var(--error)]">
+                    {speechError}
+                  </span>
+                )}
               </div>
               {/* Right: Char count */}
               <span className="text-[10px] text-[var(--text-tertiary)]">

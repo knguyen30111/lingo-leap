@@ -28,16 +28,15 @@
     "explanation": "설명 언어",
     "explanationDesc": "문법 교정 설명용",
     "speech": "음성 인식",
-    "speechDesc": "음성 입력 언어",
+    "speechDesc": "음성 입력 언어. 인식은 브라우저와 플랫폼이 제공하며 네트워크 서비스를 사용할 수 있습니다.",
     "interface": "인터페이스 언어",
     "interfaceDesc": "앱 표시 언어",
     "matchInput": "입력에 맞춤"
   },
   "audio": {
     "microphone": "마이크",
-    "microphoneDesc": "음성 입력 장치",
-    "noMicrophones": "마이크를 찾을 수 없음",
-    "default": "(기본값)"
+    "microphoneDesc": "음성 인식은 시스템 기본 마이크를 사용합니다. 변경하려면 운영체제 사운드 설정에서 바꾸세요.",
+    "systemDefault": "시스템 기본값"
   },
   "version": "Lingo Leap v0.1.0"
 }
