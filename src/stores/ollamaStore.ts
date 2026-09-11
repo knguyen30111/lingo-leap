@@ -158,12 +158,24 @@ export const useOllamaStore = create<OllamaLifecycleState>((set, get) => {
     settings.setModelsInstalled(requiredModelsPresent(models))
   }
 
-  // `modelsInstalled` deliberately survives a failed check: it stays the last
-  // known answer for the host until a listing recomputes it, as it did before
-  // the lifecycle moved into this runtime.
-  const commitDisconnected = (error: string): void => {
+  /**
+   * Publishes a failed check. `isChecking` and the factual connection state are
+   * the check's own to settle, so they always publish. The progress slot is
+   * never the check's to write, and the error message is presentation reserved
+   * for the operation that still owns the error channel: a pull that started
+   * later keeps presenting its own progress and its own failure.
+   *
+   * `modelsInstalled` deliberately survives a failed check: it stays the last
+   * known answer for the host until a listing recomputes it, as it did before
+   * the lifecycle moved into this runtime.
+   */
+  const commitDisconnected = (error: string, ownsError: boolean): void => {
     listCommitted = false
-    set({ isConnected: false, isChecking: false, models: [], error, pull: null })
+    set(
+      ownsError
+        ? { isConnected: false, isChecking: false, models: [], error }
+        : { isConnected: false, isChecking: false, models: [] }
+    )
     useSettingsStore.getState().setOllamaInstalled(false)
   }
 
@@ -225,7 +237,7 @@ export const useOllamaStore = create<OllamaLifecycleState>((set, get) => {
           if (!isCurrent()) return
 
           if (!isHealthy) {
-            commitDisconnected(NOT_CONNECTED_ERROR)
+            commitDisconnected(NOT_CONNECTED_ERROR, ownsErrorChannel(entry))
             return
           }
 
@@ -239,7 +251,7 @@ export const useOllamaStore = create<OllamaLifecycleState>((set, get) => {
           set({ isChecking: false })
         } catch (err) {
           if (!isCurrent()) return
-          commitDisconnected(errorMessage(err, CONNECT_FAILED_ERROR))
+          commitDisconnected(errorMessage(err, CONNECT_FAILED_ERROR), ownsErrorChannel(entry))
         } finally {
           if (activeCheck === entry) activeCheck = null
         }
