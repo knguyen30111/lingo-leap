@@ -38,6 +38,7 @@ describe('LanguageSelector', () => {
       sourceLang: 'en',
       latestDetectedSourceLang: null,
       targetLang: 'vi',
+      targetLangOwner: 'default',
       inputText: 'Hello',
       outputText: 'Xin chào',
     })
@@ -65,6 +66,26 @@ describe('LanguageSelector', () => {
 
       expect(useAppStore.getState().sourceLang).toBe('vi')
       expect(useAppStore.getState().targetLang).toBe('en')
+    })
+
+    it('claims user ownership of the target language when swapping', () => {
+      render(<LanguageSelector />)
+
+      fireEvent.click(screen.getByTitle('Swap languages'))
+
+      expect(useAppStore.getState().targetLangOwner).toBe('user')
+    })
+
+    it('claims user ownership when the swap leaves the target unchanged', () => {
+      // Swapping two identical languages still expresses a deliberate choice,
+      // so the saved default must not reclaim the target afterwards.
+      useAppStore.setState({ sourceLang: 'vi', targetLang: 'vi' })
+      render(<LanguageSelector />)
+
+      fireEvent.click(screen.getByTitle('Swap languages'))
+
+      expect(useAppStore.getState().targetLang).toBe('vi')
+      expect(useAppStore.getState().targetLangOwner).toBe('user')
     })
 
     it('swaps input and output text when clicked', () => {

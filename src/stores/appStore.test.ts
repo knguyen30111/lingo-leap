@@ -12,6 +12,7 @@ describe('appStore', () => {
       sourceLang: 'auto',
       latestDetectedSourceLang: null,
       targetLang: 'ja',
+      targetLangOwner: 'default',
       isLoading: false,
       error: null,
       changes: [],
@@ -30,6 +31,7 @@ describe('appStore', () => {
       expect(state.sourceLang).toBe('auto')
       expect(state.latestDetectedSourceLang).toBeNull()
       expect(state.targetLang).toBe('ja')
+      expect(state.targetLangOwner).toBe('default')
       expect(state.isLoading).toBe(false)
       expect(state.error).toBeNull()
       expect(state.changes).toEqual([])
@@ -190,6 +192,34 @@ describe('appStore', () => {
       useAppStore.getState().setTargetLang('ko')
       expect(useAppStore.getState().targetLang).toBe('ko')
     })
+
+    it('claims user ownership of the target language', () => {
+      useAppStore.getState().setTargetLang('ko')
+      expect(useAppStore.getState().targetLangOwner).toBe('user')
+    })
+
+    it('claims user ownership even when the value does not change', () => {
+      // Re-picking the current language is still a deliberate choice, so the
+      // saved default must stop overwriting it from then on.
+      useAppStore.getState().setTargetLang('ja')
+      expect(useAppStore.getState().targetLang).toBe('ja')
+      expect(useAppStore.getState().targetLangOwner).toBe('user')
+    })
+  })
+
+  describe('applyDefaultTargetLang', () => {
+    it('applies the saved default while the target is still default-owned', () => {
+      useAppStore.getState().applyDefaultTargetLang('vi')
+      expect(useAppStore.getState().targetLang).toBe('vi')
+      expect(useAppStore.getState().targetLangOwner).toBe('default')
+    })
+
+    it('does not overwrite a user-owned target language', () => {
+      useAppStore.getState().setTargetLang('ko')
+      useAppStore.getState().applyDefaultTargetLang('vi')
+      expect(useAppStore.getState().targetLang).toBe('ko')
+      expect(useAppStore.getState().targetLangOwner).toBe('user')
+    })
   })
 
   describe('setLoading', () => {
@@ -259,6 +289,7 @@ describe('appStore', () => {
         sourceLang: 'en',
         latestDetectedSourceLang: 'fr',
         targetLang: 'ko',
+        targetLangOwner: 'user',
         isLoading: true,
         error: 'some error',
         changes: [{ from: 'a', to: 'b', reason: 'c' }],
@@ -280,6 +311,19 @@ describe('appStore', () => {
       expect(state.error).toBeNull()
       expect(state.changes).toEqual([])
       expect(state.isChangesLoading).toBe(false)
+    })
+
+    it('restores default ownership of the target language', () => {
+      useAppStore.getState().setTargetLang('ko')
+      useAppStore.getState().reset()
+      expect(useAppStore.getState().targetLangOwner).toBe('default')
+    })
+
+    it('lets the saved default apply again after a reset', () => {
+      useAppStore.getState().setTargetLang('ko')
+      useAppStore.getState().reset()
+      useAppStore.getState().applyDefaultTargetLang('vi')
+      expect(useAppStore.getState().targetLang).toBe('vi')
     })
   })
 })

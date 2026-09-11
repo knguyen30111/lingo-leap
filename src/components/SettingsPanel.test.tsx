@@ -1,7 +1,14 @@
+import { readFileSync } from 'node:fs'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import { SettingsPanel } from './SettingsPanel'
 import { useSettingsStore } from '../stores/settingsStore'
+import { useDesktopRuntimeStatusStore } from '../stores/desktop-runtime-status-store'
+import enSettings from '../locales/en/settings.json'
+import jaSettings from '../locales/ja/settings.json'
+import koSettings from '../locales/ko/settings.json'
+import viSettings from '../locales/vi/settings.json'
+import tauriCapabilities from '../../src-tauri/capabilities/default.json'
 
 // Mock useOllama hook: the adapter always exposes the full lifecycle contract
 const mockModels = [
@@ -57,6 +64,13 @@ vi.mock('react-i18next', () => ({
         'audio.microphoneDesc':
           'Speech recognition uses your system default microphone. Change it in your operating system sound settings.',
         'audio.systemDefault': 'System default',
+        'sections.desktop': 'Desktop',
+        'desktop.alwaysOnTop': 'Always On Top',
+        'desktop.alwaysOnTopDesc': 'Keep the window above other windows',
+        'desktop.alwaysOnTopApplyError': 'Could not apply always on top',
+        'desktop.autoHideAfterCopy': 'Auto Hide After Copy',
+        'desktop.autoHideAfterCopyDesc': 'Hide the window after copying output',
+        'desktop.autoHideAfterCopyError': 'Could not hide the window after copying',
         version: 'Version 1.0.0',
         'common:save': 'Save',
         'common:languages.en': 'English',
@@ -107,6 +121,12 @@ describe('SettingsPanel', () => {
       speechLang: 'en',
       useStreaming: false,
       uiLanguage: 'en',
+      alwaysOnTop: false,
+      autoHideAfterCopy: false,
+    })
+    useDesktopRuntimeStatusStore.setState({
+      alwaysOnTopApplyError: null,
+      autoHideAfterCopyError: null,
     })
     onClose.mockClear()
     mockGetUserMedia.mockClear()
@@ -372,6 +392,165 @@ describe('SettingsPanel', () => {
         fireEvent.change(explanationSelect, { target: { value: 'ja' } })
         expect(useSettingsStore.getState().explanationLang).toBe('ja')
       }
+    })
+  })
+
+  describe('Desktop settings', () => {
+    it('renders an accessible always-on-top switch', () => {
+      render(<SettingsPanel onClose={onClose} />)
+
+      const toggle = screen.getByRole('switch', { name: 'Always On Top' })
+      expect(toggle).toHaveAttribute('aria-checked', 'false')
+    })
+
+    it('renders an accessible auto-hide switch', () => {
+      render(<SettingsPanel onClose={onClose} />)
+
+      const toggle = screen.getByRole('switch', { name: 'Auto Hide After Copy' })
+      expect(toggle).toHaveAttribute('aria-checked', 'false')
+    })
+
+    it('reflects the saved always-on-top value as checked state', () => {
+      useSettingsStore.setState({ alwaysOnTop: true })
+      render(<SettingsPanel onClose={onClose} />)
+
+      expect(screen.getByRole('switch', { name: 'Always On Top' })).toHaveAttribute(
+        'aria-checked',
+        'true'
+      )
+    })
+
+    it('toggles the saved always-on-top preference', () => {
+      render(<SettingsPanel onClose={onClose} />)
+
+      fireEvent.click(screen.getByRole('switch', { name: 'Always On Top' }))
+
+      expect(useSettingsStore.getState().alwaysOnTop).toBe(true)
+    })
+
+    it('toggles the saved auto-hide preference', () => {
+      render(<SettingsPanel onClose={onClose} />)
+
+      fireEvent.click(screen.getByRole('switch', { name: 'Auto Hide After Copy' }))
+
+      expect(useSettingsStore.getState().autoHideAfterCopy).toBe(true)
+    })
+
+    it('shows no desktop alert while nothing has failed', () => {
+      render(<SettingsPanel onClose={onClose} />)
+
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    })
+
+    it('surfaces a localized alert when always on top cannot be applied', () => {
+      useDesktopRuntimeStatusStore.setState({
+        alwaysOnTopApplyError: 'window manager refused',
+      })
+      render(<SettingsPanel onClose={onClose} />)
+
+      expect(screen.getByRole('alert')).toHaveTextContent('Could not apply always on top')
+    })
+
+    it('surfaces a localized alert when the window cannot hide after copying', () => {
+      useDesktopRuntimeStatusStore.setState({
+        autoHideAfterCopyError: 'hide denied',
+      })
+      render(<SettingsPanel onClose={onClose} />)
+
+      expect(screen.getByRole('alert')).toHaveTextContent(
+        'Could not hide the window after copying'
+      )
+    })
+
+    it('keeps the saved preference after a failed apply', () => {
+      useSettingsStore.setState({ alwaysOnTop: true })
+      useDesktopRuntimeStatusStore.setState({
+        alwaysOnTopApplyError: 'window manager refused',
+      })
+      render(<SettingsPanel onClose={onClose} />)
+
+      expect(screen.getByRole('switch', { name: 'Always On Top' })).toHaveAttribute(
+        'aria-checked',
+        'true'
+      )
+    })
+
+    it('does not offer a shared-model control', () => {
+      render(<SettingsPanel onClose={onClose} />)
+
+      expect(screen.queryByText(/same model/i)).not.toBeInTheDocument()
+      expect(useSettingsStore.getState()).not.toHaveProperty('useSameModelForBoth')
+    })
+
+    it('keeps the translation and correction model selectors independent', () => {
+      render(<SettingsPanel onClose={onClose} />)
+      const selects = screen.getAllByRole('combobox')
+      const modelSelects = selects.filter((select) =>
+        Array.from(select.querySelectorAll('option')).some(
+          (option) => option.textContent === 'llama3:8b'
+        )
+      )
+
+      expect(modelSelects).toHaveLength(2)
+
+      fireEvent.change(modelSelects[0], { target: { value: 'llama3:8b' } })
+
+      expect(useSettingsStore.getState().translationModel).toBe('llama3:8b')
+      expect(useSettingsStore.getState().correctionModel).toBe('gemma3:4b')
+    })
+
+    it('keeps the microphone row read-only at the system default', () => {
+      render(<SettingsPanel onClose={onClose} />)
+
+      expect(screen.getByText('System default')).toBeInTheDocument()
+      expect(screen.queryByRole('combobox', { name: /microphone/i })).not.toBeInTheDocument()
+      expect(mockEnumerateDevices).not.toHaveBeenCalled()
+      expect(mockGetUserMedia).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('Desktop settings contract', () => {
+    const desktopKeys = [
+      'alwaysOnTop',
+      'alwaysOnTopDesc',
+      'alwaysOnTopApplyError',
+      'autoHideAfterCopy',
+      'autoHideAfterCopyDesc',
+      'autoHideAfterCopyError',
+    ] as const
+
+    it.each([
+      ['en', enSettings],
+      ['ja', jaSettings],
+      ['ko', koSettings],
+      ['vi', viSettings],
+    ])('localizes every desktop setting string in %s', (_locale, bundle) => {
+      const desktop = (bundle as Record<string, unknown>).desktop as
+        | Record<string, string>
+        | undefined
+      expect(desktop).toBeDefined()
+      for (const key of desktopKeys) {
+        expect(typeof desktop?.[key]).toBe('string')
+        expect(desktop?.[key]?.length ?? 0).toBeGreaterThan(0)
+      }
+    })
+
+    it('grants the exact window permissions the desktop settings need', () => {
+      const permissions = tauriCapabilities.permissions as string[]
+      expect(permissions).toContain('core:window:allow-set-always-on-top')
+      expect(permissions).toContain('core:window:allow-hide')
+      expect(tauriCapabilities.windows).toContain('main')
+      expect(permissions.filter((p) => p.startsWith('core:window:'))).toEqual([
+        'core:window:allow-set-always-on-top',
+        'core:window:allow-hide',
+      ])
+    })
+
+    it('documents the newly visible settings in the README configuration table', () => {
+      const readme = readFileSync('README.md', 'utf8')
+      expect(readme).toContain('Always On Top')
+      expect(readme).toContain('Auto Hide After Copy')
+      expect(readme).not.toContain('Same Model')
     })
   })
 
