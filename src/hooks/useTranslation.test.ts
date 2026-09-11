@@ -4,7 +4,6 @@ import { useTranslation } from './useTranslation'
 import { useAppStore } from '../stores/appStore'
 import { useSettingsStore } from '../stores/settingsStore'
 import { translationCache } from '../lib/cache'
-import { TranslationService } from '../services/translation-service'
 
 // Mock dependencies
 vi.mock('../lib/cache', () => ({

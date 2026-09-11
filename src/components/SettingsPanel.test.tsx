@@ -334,7 +334,7 @@ describe('SettingsPanel', () => {
       const event = new MouseEvent('click', { bubbles: true })
       const stopPropagation = vi.spyOn(event, 'stopPropagation')
       modal.dispatchEvent(event)
-      // The stopPropagation is called internally
+      expect(stopPropagation).toHaveBeenCalled()
     }
   })
 

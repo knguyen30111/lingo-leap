@@ -13,10 +13,12 @@ vi.mock('../lib/ollama-client', () => ({
   },
 }))
 
+const MODIFIED_AT = '2026-01-01T00:00:00Z'
+
 describe('useOllama', () => {
   const mockModels = [
-    { name: 'gemma3:4b', size: 1000000 },
-    { name: 'llama3:8b', size: 2000000 },
+    { name: 'gemma3:4b', size: 1000000, modified_at: MODIFIED_AT },
+    { name: 'llama3:8b', size: 2000000, modified_at: MODIFIED_AT },
   ]
 
   beforeEach(() => {
@@ -166,8 +168,8 @@ describe('useOllama', () => {
 
   it('hasModel correctly distinguishes similar model names', async () => {
     const similarModels = [
-      { name: 'qwen2.5:7b', size: 1000000 },
-      { name: 'qwen2.5-coder:1.5b', size: 500000 },
+      { name: 'qwen2.5:7b', size: 1000000, modified_at: MODIFIED_AT },
+      { name: 'qwen2.5-coder:1.5b', size: 500000, modified_at: MODIFIED_AT },
     ]
     vi.mocked(ollamaClient.checkHealth).mockResolvedValue(true)
     vi.mocked(ollamaClient.listModels).mockResolvedValue(similarModels)
