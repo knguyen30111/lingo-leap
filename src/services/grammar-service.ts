@@ -16,6 +16,18 @@ function isAbortFailure(err: unknown, signal?: AbortSignal): boolean {
   return (err instanceof Error && err.name === 'AbortError') || signal?.aborted === true
 }
 
+// Shown verbatim in the changes panel whenever the model cannot describe what it
+// changed, so the wording is part of the user-visible contract.
+const FALLBACK_CHANGE_REASON = 'Text was corrected/improved'
+
+function wholeTextFallback(original: string, corrected: string): Change[] {
+  return [{
+    from: original.trim(),
+    to: corrected.trim(),
+    reason: FALLBACK_CHANGE_REASON
+  }]
+}
+
 export class GrammarService {
   private modelName: string
   private provider: AiProvider
@@ -111,18 +123,15 @@ export class GrammarService {
       }))
 
       console.log('[GrammarService] Filtered changes:', filtered)
-      return filtered
+
+      // An answer that describes no change is as unusable as a failed one.
+      return filtered.length > 0 ? filtered : wholeTextFallback(original, corrected)
     } catch (err) {
       if (isAbortFailure(err, signal)) throw err
 
       console.error('[GrammarService] Failed to extract changes:', err)
 
-      // Fallback: return whole text as single change
-      return [{
-        from: original.trim(),
-        to: corrected.trim(),
-        reason: 'Text was corrected'
-      }]
+      return wholeTextFallback(original, corrected)
     }
   }
 

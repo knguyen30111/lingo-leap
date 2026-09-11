@@ -1,7 +1,11 @@
 import { create } from 'zustand'
+import type { Change, CorrectionLevel } from '../types'
 
 export type Mode = 'translate' | 'correct'
-export type CorrectionLevel = 'fix' | 'improve' | 'rewrite'
+
+// Re-exported for the existing `../stores/appStore` importers; the single
+// declaration lives in `src/types`.
+export type { CorrectionLevel }
 
 interface AppState {
   // Global toggle
@@ -36,8 +40,8 @@ interface AppState {
   setError: (error: string | null) => void
 
   // Changes (for correction mode)
-  changes: Array<{ from: string; to: string; reason: string }>
-  setChanges: (changes: Array<{ from: string; to: string; reason: string }>) => void
+  changes: Change[]
+  setChanges: (changes: Change[]) => void
   isChangesLoading: boolean
   setChangesLoading: (loading: boolean) => void
 

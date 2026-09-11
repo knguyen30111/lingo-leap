@@ -5,12 +5,7 @@ import { OllamaClient } from '../lib/ollama-client'
 import { detectLanguage } from '../lib/language'
 import { getCorrectionPrompt, getChangesExtractionPrompt } from '../lib/prompts'
 import { translationCache, createCorrectionKey } from '../lib/cache'
-
-interface Change {
-  from: string
-  to: string
-  reason: string
-}
+import type { Change } from '../types'
 
 /**
  * One correction attempt plus the background extraction it starts. Anything
