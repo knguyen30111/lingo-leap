@@ -148,15 +148,12 @@ Lint rules live in `eslint.config.js` and are enforced by `npm run lint`, which 
 warning. A lint failure is fixed at its cause, never with an `eslint-disable` comment.
 
 Coverage thresholds live in `vitest.config.ts` and are enforced by `npm run test:coverage`.
-A coverage failure is fixed by adding a test, never by lowering a threshold.
+Coverage failures are fixed by adding behavior tests, never by lowering thresholds.
 
-Coverage is measured only over files the test suite imports, so files such as `src/App.tsx`,
-`src/main.tsx`, and `src/services/**` are not represented in the reported percentages.
-Two consequences worth knowing before you trust the number: a new file that no test imports
-moves these percentages by exactly zero, and the first test written for a currently unmeasured
-file pulls that whole file into the denominator and may push the total below the threshold.
-When that happens, widening `coverage.include` and re-baselining the thresholds together is the
-correct response; it is tracked separately from the per-PR gate.
+Coverage explicitly includes executable `src` TypeScript and TSX files so unimported application and service entry points stay in the denominator.
+Excluded surfaces are tests, declarations, the test harness, exact type-only and localization setup files, JSON resources, build output, and dependencies.
+A new file therefore moves the reported percentages as soon as it is added, and an entry point
+that no test exercises reads as uncovered rather than going silently unmeasured.
 
 macOS packaging is **not** a pull-request check. It runs on demand through the
 `package-macos` workflow (manual dispatch, or a `v*` tag) and produces an arm64
