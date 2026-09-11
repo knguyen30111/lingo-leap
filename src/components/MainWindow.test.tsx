@@ -23,13 +23,20 @@ vi.mock('react-i18next', () => ({
   }),
 }))
 
-// Mock useOllama hook
+// Mock useOllama hook: the adapter always exposes the full lifecycle contract
 const mockCheckConnection = vi.fn()
+const mockPullModel = vi.fn()
+const mockHasModel = vi.fn(() => false)
 vi.mock('../hooks/useOllama', () => ({
   useOllama: () => ({
     isConnected: mockOllamaState.isConnected,
     isChecking: mockOllamaState.isChecking,
+    models: mockOllamaState.models,
+    error: mockOllamaState.error,
+    pull: mockOllamaState.pull,
     checkConnection: mockCheckConnection,
+    pullModel: mockPullModel,
+    hasModel: mockHasModel,
   }),
 }))
 
@@ -57,6 +64,9 @@ vi.mock('./SettingsPanel', () => ({
 const mockOllamaState = {
   isConnected: true,
   isChecking: false,
+  models: [] as { name: string; size: number; modified_at: string }[],
+  error: null as string | null,
+  pull: null as { model: string; status: string } | null,
 }
 
 describe('MainWindow', () => {
@@ -67,7 +77,11 @@ describe('MainWindow', () => {
     })
     mockOllamaState.isConnected = true
     mockOllamaState.isChecking = false
+    mockOllamaState.models = []
+    mockOllamaState.error = null
+    mockOllamaState.pull = null
     mockCheckConnection.mockClear()
+    mockPullModel.mockClear()
   })
 
   afterEach(() => {

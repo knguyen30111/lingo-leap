@@ -3,13 +3,23 @@ import { render, screen, fireEvent } from '@testing-library/react'
 import { SettingsPanel } from './SettingsPanel'
 import { useSettingsStore } from '../stores/settingsStore'
 
-// Mock useOllama hook
+// Mock useOllama hook: the adapter always exposes the full lifecycle contract
+const mockModels = [
+  { name: 'gemma3:4b', size: 1000000, modified_at: '2026-01-01T00:00:00Z' },
+  { name: 'llama3:8b', size: 2000000, modified_at: '2026-01-01T00:00:00Z' },
+]
+const mockCheckConnection = vi.fn()
+const mockPullModel = vi.fn()
 vi.mock('../hooks/useOllama', () => ({
   useOllama: () => ({
-    models: [
-      { name: 'gemma3:4b', size: 1000000 },
-      { name: 'llama3:8b', size: 2000000 },
-    ],
+    isConnected: true,
+    isChecking: false,
+    models: mockModels,
+    error: null,
+    pull: null,
+    checkConnection: mockCheckConnection,
+    pullModel: mockPullModel,
+    hasModel: (name: string) => mockModels.some(model => model.name === name),
   }),
 }))
 

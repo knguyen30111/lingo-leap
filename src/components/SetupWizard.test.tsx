@@ -6,12 +6,16 @@ import { useSettingsStore } from '../stores/settingsStore'
 // Mock useOllama hook
 const mockCheckConnection = vi.fn()
 const mockHasModel = vi.fn()
+const mockPullModel = vi.fn()
 vi.mock('../hooks/useOllama', () => ({
   useOllama: () => ({
     isConnected: mockOllamaState.isConnected,
     isChecking: mockOllamaState.isChecking,
-    checkConnection: mockCheckConnection,
     models: mockOllamaState.models,
+    error: mockOllamaState.error,
+    pull: mockOllamaState.pull,
+    checkConnection: mockCheckConnection,
+    pullModel: mockPullModel,
     hasModel: mockHasModel,
   }),
 }))
@@ -62,6 +66,8 @@ const mockOllamaState = {
   isConnected: false,
   isChecking: false,
   models: [] as { name: string; size: number }[],
+  error: null as string | null,
+  pull: null as { model: string; status: string } | null,
 }
 
 describe('SetupWizard', () => {
@@ -76,8 +82,11 @@ describe('SetupWizard', () => {
     mockOllamaState.isConnected = false
     mockOllamaState.isChecking = false
     mockOllamaState.models = []
+    mockOllamaState.error = null
+    mockOllamaState.pull = null
 
     mockCheckConnection.mockClear()
+    mockPullModel.mockClear()
     mockHasModel.mockReset()
     mockHasModel.mockReturnValue(false)
   })
