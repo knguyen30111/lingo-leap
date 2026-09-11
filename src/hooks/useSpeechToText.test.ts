@@ -559,6 +559,82 @@ describe('useSpeechToText', () => {
     expect(invokeCount('deactivate_voice_session')).toBe(1)
   })
 
+  it('keeps the pre-stop interim when a stopped session reports a later interim', async () => {
+    const onTextReady = vi.fn()
+    const onEnd = vi.fn()
+    const { result } = renderHook(() => useSpeechToText({ onTextReady, onEnd }))
+
+    await act(async () => {
+      await result.current.startListening()
+    })
+    act(() => {
+      latest().onresult?.(interim('hello'))
+    })
+
+    const recognition = latest()
+    vi.mocked(invoke).mockClear()
+
+    act(() => {
+      result.current.stopListening()
+    })
+
+    // A stopped session only drains confirmed text; a late interim guess must
+    // not replace the snapshot the user already saw
+    act(() => {
+      recognition.onresult?.(interim('hel'))
+    })
+
+    expect(onTextReady).not.toHaveBeenCalled()
+    expect(result.current.interimTranscript).toBe('hello')
+
+    act(() => {
+      recognition.onend?.()
+    })
+
+    expect(onTextReady).toHaveBeenCalledTimes(1)
+    expect(onTextReady).toHaveBeenCalledWith('hello')
+    expect(result.current.interimTranscript).toBe('')
+    expect(onEnd).not.toHaveBeenCalled()
+    expect(invokeCount('activate_voice_session')).toBe(0)
+    expect(invokeCount('deactivate_voice_session')).toBe(1)
+  })
+
+  it('never resurrects interim text after a stopped session delivered its final', async () => {
+    const onTextReady = vi.fn()
+    const onEnd = vi.fn()
+    const { result } = renderHook(() => useSpeechToText({ onTextReady, onEnd }))
+
+    await act(async () => {
+      await result.current.startListening()
+    })
+
+    const recognition = latest()
+    vi.mocked(invoke).mockClear()
+
+    act(() => {
+      result.current.stopListening()
+    })
+    act(() => {
+      recognition.onresult?.(final('hello world'))
+    })
+
+    expect(onTextReady).toHaveBeenCalledTimes(1)
+    expect(onTextReady).toHaveBeenCalledWith('hello world')
+
+    act(() => {
+      recognition.onresult?.(interim('hello wor'))
+    })
+    act(() => {
+      recognition.onend?.()
+    })
+
+    expect(onTextReady).toHaveBeenCalledTimes(1)
+    expect(result.current.interimTranscript).toBe('')
+    expect(onEnd).not.toHaveBeenCalled()
+    expect(invokeCount('activate_voice_session')).toBe(0)
+    expect(invokeCount('deactivate_voice_session')).toBe(1)
+  })
+
   it('stays exactly-once when stop triggers a synchronous end', async () => {
     recognitionBehavior.endOnStop = true
     const onTextReady = vi.fn()

@@ -413,7 +413,11 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeech
         onTextReadyRef.current?.(confirmedText.trim())
       }
 
-      if (interim) {
+      // Interim text is a guess about speech still in progress. A stopped
+      // session is only draining confirmed results, so its interim guesses may
+      // not overwrite the snapshot the user left behind or resurrect text a
+      // final result already delivered.
+      if (interim && running) {
         interimTranscriptRef.current = interim
         if (mountedRef.current) setInterimTranscript(interim)
       }
