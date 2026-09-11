@@ -91,11 +91,25 @@ function ownsErrorChannel(entry: InFlight): boolean {
   return errorOwner === entry
 }
 
-// Model listings are issued by checks and by pull refreshes alike, so a
-// generation alone cannot order them. Each listing takes a monotonic ticket and
-// only a newer ticket may commit.
-let listTicket = 0
-let committedListTicket = 0
+// === Factual publication order ===
+// Model listings and disconnect results are both factual, and both checks and
+// pull refreshes produce them, so a generation alone cannot order them. Every
+// factual result carries a monotonic ticket: a check takes one when it starts
+// and carries it through its health answer and its listing, while a pull takes
+// one only once its transfer succeeded, immediately before the refresh it owes.
+// A result whose ticket is older than the committed one is stale and publishes
+// nothing, and the committed ticket advances only when factual state actually
+// publishes — so a failed pull and a failed refresh bar nothing.
+let factualTicket = 0
+let committedFactualTicket = 0
+
+function reserveFactualTicket(): number {
+  return ++factualTicket
+}
+
+function isStaleFactual(ticket: number): boolean {
+  return ticket < committedFactualTicket
+}
 
 function retireActiveWork(): void {
   generation += 1
@@ -105,7 +119,7 @@ function retireActiveWork(): void {
   activePulls.clear()
   pullOwner = null
   errorOwner = null
-  committedListTicket = 0
+  committedFactualTicket = 0
 }
 
 function currentController(): AbortController {
@@ -137,20 +151,20 @@ const initialState = {
 export const useOllamaStore = create<OllamaLifecycleState>((set, get) => {
   /**
    * Publishes a healthy result plus the status the settings snapshot derives.
-   * An out-of-order listing from an earlier request is dropped. `isChecking`
-   * belongs to the connection check, so a pull refresh publishes an ordered
-   * listing here without settling a check that is still pending. Models and the
-   * flags they derive are factual, so any valid ordered listing may publish
-   * them; clearing the error is a presentation act reserved for the operation
-   * that still owns the error channel.
+   * A listing from a request a newer factual result already superseded is
+   * dropped. `isChecking` belongs to the connection check, so a pull refresh
+   * publishes an ordered listing here without settling a check that is still
+   * pending. Models and the flags they derive are factual, so any valid ordered
+   * listing may publish them; clearing the error is a presentation act reserved
+   * for the operation that still owns the error channel.
    */
   const commitModels = (
     models: OllamaModelInfo[],
     ticket: number,
     ownsError: boolean
   ): void => {
-    if (ticket < committedListTicket) return
-    committedListTicket = ticket
+    if (isStaleFactual(ticket)) return
+    committedFactualTicket = ticket
     listCommitted = true
     set(ownsError ? { isConnected: true, models, error: null } : { isConnected: true, models })
     const settings = useSettingsStore.getState()
@@ -159,17 +173,24 @@ export const useOllamaStore = create<OllamaLifecycleState>((set, get) => {
   }
 
   /**
-   * Publishes a failed check. `isChecking` and the factual connection state are
-   * the check's own to settle, so they always publish. The progress slot is
-   * never the check's to write, and the error message is presentation reserved
-   * for the operation that still owns the error channel: a pull that started
-   * later keeps presenting its own progress and its own failure.
+   * Publishes a failed check. Disconnection is a factual result, so it takes
+   * its place in the same order as a listing: a check a newer factual result
+   * already superseded settles only the spinner it owns and leaves the
+   * connection state, the models, and the persisted flags alone. The progress
+   * slot is never the check's to write, and the error message is presentation
+   * reserved for the operation that still owns the error channel: a pull that
+   * started later keeps presenting its own progress and its own failure.
    *
    * `modelsInstalled` deliberately survives a failed check: it stays the last
    * known answer for the host until a listing recomputes it, as it did before
    * the lifecycle moved into this runtime.
    */
-  const commitDisconnected = (error: string, ownsError: boolean): void => {
+  const commitDisconnected = (error: string, ticket: number, ownsError: boolean): void => {
+    if (isStaleFactual(ticket)) {
+      set({ isChecking: false })
+      return
+    }
+    committedFactualTicket = ticket
     listCommitted = false
     set(
       ownsError
@@ -228,6 +249,9 @@ export const useOllamaStore = create<OllamaLifecycleState>((set, get) => {
         !requestController.signal.aborted
 
       const entry: InFlight = { host, generation: requestGeneration, promise: Promise.resolve() }
+      // The check takes its place in the factual order now and keeps it for
+      // both the health answer and the listing that answer may lead to.
+      const requestTicket = reserveFactualTicket()
 
       const run = async (): Promise<void> => {
         claimErrorChannel(entry)
@@ -237,21 +261,32 @@ export const useOllamaStore = create<OllamaLifecycleState>((set, get) => {
           if (!isCurrent()) return
 
           if (!isHealthy) {
-            commitDisconnected(NOT_CONNECTED_ERROR, ownsErrorChannel(entry))
+            commitDisconnected(NOT_CONNECTED_ERROR, requestTicket, ownsErrorChannel(entry))
             return
           }
 
-          const ticket = ++listTicket
+          // A listing issued from a superseded place in the factual order could
+          // only answer with older inventory, so it is never requested; the
+          // spinner is still this check's to settle.
+          if (isStaleFactual(requestTicket)) {
+            set({ isChecking: false })
+            return
+          }
+
           const models = await lifecycleClient.listModels(requestController.signal)
           if (!isCurrent()) return
 
-          commitModels(models, ticket, ownsErrorChannel(entry))
+          commitModels(models, requestTicket, ownsErrorChannel(entry))
           // The check owns `isChecking`, including when a newer listing has
           // already superseded the one it just fetched.
           set({ isChecking: false })
         } catch (err) {
           if (!isCurrent()) return
-          commitDisconnected(errorMessage(err, CONNECT_FAILED_ERROR), ownsErrorChannel(entry))
+          commitDisconnected(
+            errorMessage(err, CONNECT_FAILED_ERROR),
+            requestTicket,
+            ownsErrorChannel(entry)
+          )
         } finally {
           if (activeCheck === entry) activeCheck = null
         }
@@ -305,7 +340,9 @@ export const useOllamaStore = create<OllamaLifecycleState>((set, get) => {
           if (!isRequestValid()) return
 
           releaseProgress()
-          const ticket = ++listTicket
+          // The refresh takes its place in the factual order only now: a pull
+          // that never finished owes the runtime no listing and bars none.
+          const ticket = reserveFactualTicket()
           const models = await lifecycleClient.listModels(requestController.signal)
           if (!isRequestValid()) return
 
