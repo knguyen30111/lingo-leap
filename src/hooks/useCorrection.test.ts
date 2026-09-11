@@ -624,10 +624,10 @@ describe('useCorrection cancellation and races', () => {
 
     const { result } = renderHook(() => useCorrection())
 
-    act(() => {
+    await act(async () => {
       result.current.correct('first text')
     })
-    act(() => {
+    await act(async () => {
       result.current.correct('second text')
     })
 
@@ -1013,10 +1013,10 @@ describe('useCorrection detected language', () => {
 
     let first!: Promise<string | undefined>
     let second!: Promise<string | undefined>
-    act(() => {
+    await act(async () => {
       first = result.current.correct('first text')
     })
-    act(() => {
+    await act(async () => {
       second = result.current.correct('second text')
     })
 

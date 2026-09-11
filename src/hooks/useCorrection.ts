@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef } from 'react'
 import { useAppStore, CorrectionLevel } from '../stores/appStore'
 import { useSettingsStore } from '../stores/settingsStore'
 import { GrammarService } from '../services/grammar-service'
-import { translationCache, createCorrectionKey } from '../lib/cache'
+import { correctionResultCache, createCorrectionCacheKey } from '../lib/cache'
 
 /**
  * One correction attempt plus the background extraction it starts. Anything
@@ -155,9 +155,21 @@ export function useCorrection() {
       const explainLang = explanationLang === 'auto' ? detectedLang : explanationLang
 
       // Check cache (skip if regenerating)
-      const cacheKey = createCorrectionKey(textToProcess, detectedLang, levelToUse, correctionModel)
+      const cacheKey = await createCorrectionCacheKey({
+        endpoint: ollamaHost,
+        model: correctionModel,
+        language: detectedLang,
+        level: levelToUse,
+        input: textToProcess,
+      })
+
+      // Digesting the key is asynchronous, so a request can be retired while
+      // it runs and must not reach the cache, the service, or the background
+      // extraction afterwards.
+      if (!request.isCurrent()) return
+
       if (!skipCache) {
-        const cached = translationCache.get(cacheKey)
+        const cached = correctionResultCache.get(cacheKey)
         if (cached) {
           if (!request.isCurrent()) return
           setOutputText(cached)
@@ -198,7 +210,7 @@ export function useCorrection() {
       if (!request.isCurrent()) return
 
       // Cache result
-      translationCache.set(cacheKey, result)
+      correctionResultCache.set(cacheKey, result)
       setLatestDetectedSourceLang(detectedLang)
 
       // Extract changes if text was modified (async, non-blocking)
@@ -220,6 +232,7 @@ export function useCorrection() {
     }
   }, [
     correctionModel,
+    ollamaHost,
     service,
     useStreaming,
     explanationLang,

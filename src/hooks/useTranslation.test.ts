@@ -439,10 +439,10 @@ describe('useTranslation cancellation and races', () => {
 
     const { result } = renderHook(() => useTranslation())
 
-    act(() => {
+    await act(async () => {
       result.current.translate('first')
     })
-    act(() => {
+    await act(async () => {
       result.current.translate('second')
     })
 
@@ -466,10 +466,10 @@ describe('useTranslation cancellation and races', () => {
 
     const { result } = renderHook(() => useTranslation())
 
-    act(() => {
+    await act(async () => {
       result.current.translate('first')
     })
-    act(() => {
+    await act(async () => {
       result.current.translate('second')
     })
 
@@ -857,10 +857,10 @@ describe('useTranslation automatic source language', () => {
 
     let first!: Promise<string | undefined>
     let second!: Promise<string | undefined>
-    act(() => {
+    await act(async () => {
       first = result.current.translate('Bonjour')
     })
-    act(() => {
+    await act(async () => {
       second = result.current.translate('こんにちは')
     })
 

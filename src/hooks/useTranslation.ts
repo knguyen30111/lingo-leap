@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useMemo } from 'react'
 import { useAppStore } from '../stores/appStore'
 import { useSettingsStore } from '../stores/settingsStore'
 import { TranslationService } from '../services/translation-service'
-import { translationCache, createTranslationKey } from '../lib/cache'
+import { translationResultCache, createTranslationCacheKey } from '../lib/cache'
 
 /** The request that currently owns the output, the cache write, and loading. */
 interface ActiveRequest {
@@ -114,9 +114,20 @@ export function useTranslation() {
       }
 
       // Check cache (skip if regenerating)
-      const cacheKey = createTranslationKey(textToProcess, resolvedSourceLang, targetLang, translationModel)
+      const cacheKey = await createTranslationCacheKey({
+        endpoint: ollamaHost,
+        model: translationModel,
+        sourceLang: resolvedSourceLang,
+        targetLang,
+        input: textToProcess,
+      })
+
+      // Digesting the key is asynchronous, so a request can be retired while
+      // it runs and must not reach the cache or the service afterwards.
+      if (!isCurrent()) return
+
       if (!skipCache) {
-        const cached = translationCache.get(cacheKey)
+        const cached = translationResultCache.get(cacheKey)
         if (cached) {
           if (!isCurrent()) return
           setOutputText(cached)
@@ -155,7 +166,7 @@ export function useTranslation() {
       if (!isCurrent()) return
 
       // Cache result
-      translationCache.set(cacheKey, result)
+      translationResultCache.set(cacheKey, result)
       publishResolvedSourceLang()
 
       settle()
@@ -170,6 +181,7 @@ export function useTranslation() {
     }
   }, [
     translationModel,
+    ollamaHost,
     useStreaming,
     service,
     retireInFlight,
