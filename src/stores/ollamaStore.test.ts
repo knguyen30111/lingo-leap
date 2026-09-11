@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import {
   useOllamaStore,
   setOllamaLifecycleClientFactory,
@@ -1139,6 +1139,124 @@ describe('ollamaStore lifecycle runtime', () => {
 
       expect(runtime().host).toBe(HOST_B)
       expect(transport.hosts).toEqual([])
+    })
+  })
+
+  describe('bounded model listing', () => {
+    interface TagsCall extends Deferred<unknown> {
+      url: string
+      signal?: AbortSignal
+    }
+
+    const originalFetch = globalThis.fetch
+    let tagsCalls: TagsCall[]
+
+    beforeEach(() => {
+      tagsCalls = []
+      // The regression runs against the real OllamaClient so the transport
+      // deadline, not a fake, is what settles the centralized check.
+      setOllamaLifecycleClientFactory(null)
+      resetOllamaRuntime()
+      vi.useFakeTimers()
+      globalThis.fetch = vi.fn((url: string, init?: RequestInit) => {
+        const call: TagsCall = {
+          url,
+          signal: init?.signal ?? undefined,
+          ...deferred<unknown>(),
+        }
+        tagsCalls.push(call)
+        return call.promise
+      }) as unknown as typeof fetch
+    })
+
+    afterEach(() => {
+      vi.useRealTimers()
+      globalThis.fetch = originalFetch
+    })
+
+    /** Rejects a recorded request the way a real fetch does once it is aborted. */
+    function rejectOnAbort(call: TagsCall): void {
+      call.signal?.addEventListener('abort', () => {
+        const err = new Error('The operation was aborted.')
+        err.name = 'AbortError'
+        call.reject(err)
+      })
+    }
+
+    it('settles a stalled model list as connected without required models', async () => {
+      runtime().configureHost(HOST_A)
+
+      const first = runtime().checkConnection()
+      const second = runtime().checkConnection()
+      expect(second).toBe(first)
+
+      await drain()
+      expect(tagsCalls).toHaveLength(1)
+      expect(tagsCalls[0].url).toBe(`${HOST_A}/api/tags`)
+      tagsCalls[0].resolve({ ok: true })
+      await drain()
+
+      // Two same-host callers share one health probe and one model list.
+      expect(tagsCalls).toHaveLength(2)
+      const stalled = tagsCalls[1]
+      rejectOnAbort(stalled)
+      expect(stalled.signal?.aborted).toBe(false)
+
+      await vi.advanceTimersByTimeAsync(5000)
+      await Promise.all([first, second])
+
+      expect(stalled.signal?.aborted).toBe(true)
+      expect(runtime().isChecking).toBe(false)
+      expect(runtime().isConnected).toBe(true)
+      expect(runtime().models).toEqual([])
+      expect(runtime().error).toBeNull()
+      expect(settings().ollamaInstalled).toBe(true)
+      expect(settings().modelsInstalled).toBe(false)
+    })
+
+    it('lets a same-host retry recover and keeps a late answer from publishing', async () => {
+      runtime().configureHost(HOST_A)
+
+      const timingOut = runtime().checkConnection()
+      await drain()
+      tagsCalls[0].resolve({ ok: true })
+      await drain()
+      const stalled = tagsCalls[1]
+      rejectOnAbort(stalled)
+
+      await vi.advanceTimersByTimeAsync(5000)
+      await timingOut
+
+      // The timed-out check released the shared slot, so Refresh starts a new
+      // request instead of joining retired work.
+      const retry = runtime().checkConnection()
+      expect(retry).not.toBe(timingOut)
+      await drain()
+      expect(tagsCalls).toHaveLength(3)
+      tagsCalls[2].resolve({ ok: true })
+      await drain()
+      expect(tagsCalls).toHaveLength(4)
+      tagsCalls[3].resolve({ ok: true, json: () => Promise.resolve({ models: modelsA }) })
+      await retry
+
+      expect(runtime().isConnected).toBe(true)
+      expect(runtime().models).toEqual(modelsA)
+      expect(settings().modelsInstalled).toBe(true)
+
+      // The timed-out request is finished: a late answer or a late failure from
+      // it reaches no continuation and publishes nothing over the retry.
+      stalled.resolve({ ok: true, json: () => Promise.resolve({ models: modelsB }) })
+      stalled.reject(new Error('late transport failure'))
+      await drain()
+      await drain()
+
+      expect(tagsCalls).toHaveLength(4)
+      expect(runtime().isChecking).toBe(false)
+      expect(runtime().isConnected).toBe(true)
+      expect(runtime().models).toEqual(modelsA)
+      expect(runtime().error).toBeNull()
+      expect(settings().ollamaInstalled).toBe(true)
+      expect(settings().modelsInstalled).toBe(true)
     })
   })
 
