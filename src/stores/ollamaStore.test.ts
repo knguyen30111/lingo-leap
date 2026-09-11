@@ -641,6 +641,79 @@ describe('ollamaStore lifecycle runtime', () => {
       expect(settings().ollamaInstalled).toBe(false)
     })
 
+    it('does not publish the error of a superseded pull', async () => {
+      await connect(HOST_A, modelsA)
+
+      const first = runtime().pullModel('mistral:7b')
+      const second = runtime().pullModel('llama3:8b')
+      expect(second).not.toBe(first)
+      await drain()
+
+      // The superseding pull owns the slot; it completes and refreshes.
+      transport.pulls[1].resolve()
+      await drain()
+      transport.list[transport.list.length - 1].resolve(modelsB)
+      await second
+
+      // The superseded pull answers last and owns no runtime state.
+      transport.pulls[0].reject(new Error('Failed to pull model: Not Found'))
+      await first
+      await drain()
+
+      expect(runtime().error).toBeNull()
+      expect(runtime().pull).toBeNull()
+      expect(runtime().models).toEqual(modelsB)
+    })
+
+    it('does not let a superseded pull refresh the model list', async () => {
+      await connect(HOST_A, [])
+
+      const first = runtime().pullModel('gemma3:4b')
+      const second = runtime().pullModel('llama3:8b')
+      expect(second).not.toBe(first)
+      await drain()
+
+      transport.pulls[1].resolve()
+      await drain()
+      transport.list[transport.list.length - 1].resolve(modelsB)
+      await second
+
+      const listCallsBefore = transport.list.length
+      transport.pulls[0].resolve()
+      await drain()
+
+      expect(transport.list).toHaveLength(listCallsBefore)
+      expect(runtime().models).toEqual(modelsB)
+      await first
+    })
+
+    it('does not settle a pending connection check from a pull refresh', async () => {
+      await connect(HOST_A, [])
+
+      const checking = runtime().checkConnection()
+      await drain()
+      expect(runtime().isChecking).toBe(true)
+
+      const pulling = runtime().pullModel('gemma3:4b')
+      await drain()
+      transport.pulls[0].resolve()
+      await drain()
+      transport.list[transport.list.length - 1].resolve(modelsA)
+      await pulling
+
+      // The refresh publishes its ordered listing; the check still owns
+      // `isChecking` because its own health answer is still pending.
+      expect(runtime().models).toEqual(modelsA)
+      expect(runtime().isChecking).toBe(true)
+
+      transport.health[transport.health.length - 1].resolve(true)
+      await drain()
+      transport.list[transport.list.length - 1].resolve(modelsA)
+      await checking
+
+      expect(runtime().isChecking).toBe(false)
+    })
+
     it('does not publish the error of a retired pull', async () => {
       await connect(HOST_A, modelsA)
 

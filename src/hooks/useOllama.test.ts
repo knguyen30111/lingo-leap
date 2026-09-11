@@ -5,6 +5,7 @@ import { useSettingsStore } from '../stores/settingsStore'
 import {
   resetOllamaRuntime,
   setOllamaLifecycleClientFactory,
+  useOllamaStore,
   type OllamaLifecycleClient,
   type OllamaLifecycleClientFactory,
 } from '../stores/ollamaStore'
@@ -388,6 +389,33 @@ describe('useOllama application ownership', () => {
 
     await waitFor(() => expect(main.result.current.isConnected).toBe(true))
     expect(useSettingsStore.getState().ollamaInstalled).toBe(true)
+  })
+
+  it('retires owned lifecycle work when the application owner unmounts', async () => {
+    const healthSignals: (AbortSignal | undefined)[] = []
+    let resolveHealth!: (value: boolean) => void
+    transport.checkHealth.mockImplementation(
+      (signal?: AbortSignal) =>
+        new Promise<boolean>(resolve => {
+          healthSignals.push(signal)
+          resolveHealth = resolve
+        })
+    )
+    transport.listModels.mockResolvedValue(models)
+
+    const main = renderApp()
+    await waitFor(() => expect(transport.checkHealth).toHaveBeenCalledTimes(1))
+
+    main.unmount()
+    expect(healthSignals[0]?.aborted).toBe(true)
+
+    await act(async () => {
+      resolveHealth(true)
+    })
+
+    expect(transport.listModels).not.toHaveBeenCalled()
+    expect(useOllamaStore.getState().isConnected).toBe(false)
+    expect(useSettingsStore.getState().ollamaInstalled).toBe(false)
   })
 
   it('forwards a request signal to the health and model calls', async () => {
