@@ -22,9 +22,6 @@ coverage/
 *.log
 npm-debug.log*
 
-# Tauri
-src-tauri/Cargo.lock
-
 # Debug
 debug/
 *.pdb

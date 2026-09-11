@@ -3,7 +3,7 @@ import { OllamaClient, ollamaClient } from './ollama-client'
 
 // Mock fetch globally
 const mockFetch = vi.fn()
-global.fetch = mockFetch
+globalThis.fetch = mockFetch as unknown as typeof fetch
 
 describe('OllamaClient', () => {
   let client: OllamaClient
