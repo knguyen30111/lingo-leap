@@ -326,3 +326,189 @@ describe('useTranslation', () => {
     expect(translatedResult).toBe('Xin chào thế giới')
   })
 })
+
+describe('useTranslation cancellation and races', () => {
+  beforeEach(() => {
+    mockTranslate.mockReset().mockResolvedValue({ translated: 'Xin chào thế giới' })
+    mockTranslateStream.mockReset()
+    mockDetectSourceLanguage.mockReset().mockReturnValue('en')
+
+    useAppStore.setState({
+      inputText: 'Hello world',
+      outputText: '',
+      sourceLang: 'en',
+      targetLang: 'vi',
+      isLoading: false,
+      error: null,
+    })
+    useSettingsStore.setState({
+      translationModel: 'gemma3:4b',
+      ollamaHost: 'http://localhost:11434',
+      useStreaming: false,
+    })
+    vi.mocked(translationCache.get).mockReset()
+    vi.mocked(translationCache.set).mockReset()
+  })
+
+  afterEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('forwards a request signal to the translation service', async () => {
+    const { result } = renderHook(() => useTranslation())
+
+    await act(async () => {
+      await result.current.translate()
+    })
+
+    expect(mockTranslate.mock.calls[0][3]).toBeInstanceOf(AbortSignal)
+    expect((mockTranslate.mock.calls[0][3] as AbortSignal).aborted).toBe(false)
+  })
+
+  it('forwards a request signal to the streaming service call', async () => {
+    useSettingsStore.setState({ useStreaming: true })
+    async function* stream() {
+      yield 'Xin chào'
+    }
+    mockTranslateStream.mockReturnValue(stream())
+
+    const { result } = renderHook(() => useTranslation())
+
+    await act(async () => {
+      await result.current.translate()
+    })
+
+    expect(mockTranslateStream.mock.calls[0][3]).toBeInstanceOf(AbortSignal)
+  })
+
+  it('does not publish or cache a cancelled translation', async () => {
+    let resolveTranslate: (value: { translated: string }) => void
+    mockTranslate.mockReturnValue(new Promise(resolve => { resolveTranslate = resolve }))
+
+    const { result } = renderHook(() => useTranslation())
+
+    act(() => {
+      result.current.translate()
+    })
+    await waitFor(() => expect(useAppStore.getState().isLoading).toBe(true))
+
+    act(() => {
+      result.current.cancel()
+    })
+
+    await act(async () => {
+      resolveTranslate!({ translated: 'Late result' })
+    })
+
+    expect(useAppStore.getState().outputText).toBe('')
+    expect(translationCache.set).not.toHaveBeenCalled()
+    expect(useAppStore.getState().isLoading).toBe(false)
+  })
+
+  it('lets only the newest overlapping request publish and cache', async () => {
+    const resolvers: ((value: { translated: string }) => void)[] = []
+    mockTranslate.mockImplementation(
+      () => new Promise(resolve => { resolvers.push(resolve) })
+    )
+
+    const { result } = renderHook(() => useTranslation())
+
+    act(() => {
+      result.current.translate('first')
+    })
+    act(() => {
+      result.current.translate('second')
+    })
+
+    await act(async () => {
+      resolvers[1]({ translated: 'SECOND' })
+    })
+    await act(async () => {
+      resolvers[0]({ translated: 'FIRST' })
+    })
+
+    expect(useAppStore.getState().outputText).toBe('SECOND')
+    expect(translationCache.set).toHaveBeenCalledTimes(1)
+    expect(translationCache.set).toHaveBeenCalledWith(expect.stringContaining('second'), 'SECOND')
+  })
+
+  it('keeps the newer request loading when an older one completes', async () => {
+    const resolvers: ((value: { translated: string }) => void)[] = []
+    mockTranslate.mockImplementation(
+      () => new Promise(resolve => { resolvers.push(resolve) })
+    )
+
+    const { result } = renderHook(() => useTranslation())
+
+    act(() => {
+      result.current.translate('first')
+    })
+    act(() => {
+      result.current.translate('second')
+    })
+
+    await act(async () => {
+      resolvers[0]({ translated: 'FIRST' })
+    })
+
+    expect(useAppStore.getState().isLoading).toBe(true)
+    expect(useAppStore.getState().outputText).toBe('')
+  })
+
+  it('ignores stream chunks from a superseded request', async () => {
+    useSettingsStore.setState({ useStreaming: true })
+
+    let releaseFirst: () => void
+    const gate = new Promise<void>(resolve => { releaseFirst = resolve })
+
+    async function* firstStream() {
+      yield 'first-a'
+      await gate
+      yield 'first-b'
+    }
+    async function* secondStream() {
+      yield 'second'
+    }
+    mockTranslateStream.mockReturnValueOnce(firstStream()).mockReturnValueOnce(secondStream())
+
+    const { result } = renderHook(() => useTranslation())
+
+    await act(async () => {
+      result.current.translate('first')
+    })
+    expect(useAppStore.getState().outputText).toBe('first-a')
+
+    await act(async () => {
+      await result.current.translate('second')
+    })
+    expect(useAppStore.getState().outputText).toBe('second')
+
+    await act(async () => {
+      releaseFirst!()
+    })
+
+    expect(useAppStore.getState().outputText).toBe('second')
+    expect(translationCache.set).toHaveBeenCalledTimes(1)
+    expect(translationCache.set).toHaveBeenCalledWith(expect.any(String), 'second')
+  })
+
+  it('does not report an error for a request cancelled by unmount', async () => {
+    let rejectTranslate: (reason: unknown) => void
+    mockTranslate.mockReturnValue(new Promise((_resolve, reject) => { rejectTranslate = reject }))
+
+    const { result, unmount } = renderHook(() => useTranslation())
+
+    act(() => {
+      result.current.translate()
+    })
+    await waitFor(() => expect(useAppStore.getState().isLoading).toBe(true))
+
+    unmount()
+
+    await act(async () => {
+      rejectTranslate!(new Error('Network error'))
+    })
+
+    expect(useAppStore.getState().error).toBeNull()
+  })
+})

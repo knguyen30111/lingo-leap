@@ -1,17 +1,16 @@
-import { TranslationResult, ServiceOptions } from '../types'
-import { ollamaClient } from '../lib/ollama-client'
+import { AiProvider, TranslationResult, ServiceOptions } from '../types'
+import { OllamaClient } from '../lib/ollama-client'
 import { buildTranslationPrompt } from '../lib/prompt-builder'
 import { getModelType, cleanModelOutput } from '../lib/model'
 import { detectLanguage } from '../lib/language'
 
 export class TranslationService {
   private modelName: string
-  private ollamaHost: string
+  private provider: AiProvider
 
   constructor(options: ServiceOptions) {
     this.modelName = options.modelName
-    this.ollamaHost = options.ollamaHost || 'http://localhost:11434'
-    ollamaClient.setBaseUrl(this.ollamaHost)
+    this.provider = options.provider ?? new OllamaClient(options.ollamaHost || 'http://localhost:11434')
   }
 
   // === Configuration ===
@@ -21,8 +20,7 @@ export class TranslationService {
   }
 
   setHost(host: string): void {
-    this.ollamaHost = host
-    ollamaClient.setBaseUrl(host)
+    this.provider = new OllamaClient(host)
   }
 
   // === Core Methods ===
@@ -30,12 +28,13 @@ export class TranslationService {
   async translate(
     text: string,
     sourceLang: string,
-    targetLang: string
+    targetLang: string,
+    signal?: AbortSignal
   ): Promise<TranslationResult> {
     const detectedSource = sourceLang === 'auto' ? detectLanguage(text) : sourceLang
     const prompt = buildTranslationPrompt(text, detectedSource, targetLang, this.modelName)
 
-    const response = await ollamaClient.generateFromPrompt(prompt, this.modelName)
+    const response = await this.provider.generateFromPrompt(prompt, this.modelName, {}, signal)
     const modelType = getModelType(this.modelName)
     const translated = cleanModelOutput(response, modelType)
 
@@ -50,14 +49,15 @@ export class TranslationService {
   async *translateStream(
     text: string,
     sourceLang: string,
-    targetLang: string
+    targetLang: string,
+    signal?: AbortSignal
   ): AsyncGenerator<string> {
     const detectedSource = sourceLang === 'auto' ? detectLanguage(text) : sourceLang
     const prompt = buildTranslationPrompt(text, detectedSource, targetLang, this.modelName)
     const modelType = getModelType(this.modelName)
 
     let accumulated = ''
-    for await (const chunk of ollamaClient.streamFromPrompt(prompt, this.modelName)) {
+    for await (const chunk of this.provider.streamFromPrompt(prompt, this.modelName, {}, signal)) {
       accumulated += chunk
       yield cleanModelOutput(accumulated, modelType)
     }

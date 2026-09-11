@@ -3,15 +3,23 @@ import { renderHook, act, waitFor } from '@testing-library/react'
 import { useCorrection } from './useCorrection'
 import { useAppStore } from '../stores/appStore'
 import { useSettingsStore } from '../stores/settingsStore'
-import { ollamaClient } from '../lib/ollama-client'
 import { translationCache } from '../lib/cache'
 
-// Mock dependencies
+// Mock the transport class: the hook owns a client for one configured host.
+const transport = vi.hoisted(() => ({
+  constructedHosts: [] as string[],
+  generate: vi.fn(),
+  generateStream: vi.fn(),
+}))
+
 vi.mock('../lib/ollama-client', () => ({
-  ollamaClient: {
-    setBaseUrl: vi.fn(),
-    generate: vi.fn(),
-    generateStream: vi.fn(),
+  OllamaClient: class MockOllamaClient {
+    generate = transport.generate
+    generateStream = transport.generateStream
+
+    constructor(baseUrl: string) {
+      transport.constructedHosts.push(baseUrl)
+    }
   },
 }))
 
@@ -53,10 +61,11 @@ describe('useCorrection', () => {
     })
 
     // Reset mocks with default return values
-    // ollamaClient.generate is used both for main correction AND for extracting changes
+    // generate is used both for main correction AND for extracting changes
     // Always return a Promise to prevent .then() errors
-    vi.mocked(ollamaClient.generate).mockReset().mockResolvedValue('Hello world')
-    vi.mocked(ollamaClient.generateStream).mockReset()
+    transport.constructedHosts.length = 0
+    transport.generate.mockReset().mockResolvedValue('Hello world')
+    transport.generateStream.mockReset()
     vi.mocked(translationCache.get).mockReset()
     vi.mocked(translationCache.set).mockReset()
   })
@@ -74,7 +83,7 @@ describe('useCorrection', () => {
   })
 
   it('corrects text with non-streaming mode', async () => {
-    vi.mocked(ollamaClient.generate).mockResolvedValue('Hello world')
+    transport.generate.mockResolvedValue('Hello world')
 
     const { result } = renderHook(() => useCorrection())
 
@@ -93,7 +102,7 @@ describe('useCorrection', () => {
       yield 'Hello'
       yield ' world'
     }
-    vi.mocked(ollamaClient.generateStream).mockReturnValue(mockStream())
+    transport.generateStream.mockReturnValue(mockStream())
 
     const { result } = renderHook(() => useCorrection())
 
@@ -122,7 +131,7 @@ describe('useCorrection', () => {
 
   it('skips cache when skipCache option is true', async () => {
     vi.mocked(translationCache.get).mockReturnValue('Cached result')
-    vi.mocked(ollamaClient.generate).mockResolvedValue('Fresh result')
+    transport.generate.mockResolvedValue('Fresh result')
 
     const { result } = renderHook(() => useCorrection())
 
@@ -130,7 +139,7 @@ describe('useCorrection', () => {
       await result.current.correct(undefined, undefined, { skipCache: true })
     })
 
-    expect(ollamaClient.generate).toHaveBeenCalled()
+    expect(transport.generate).toHaveBeenCalled()
     expect(useAppStore.getState().outputText).toBe('Fresh result')
   })
 
@@ -143,7 +152,7 @@ describe('useCorrection', () => {
       await result.current.correct()
     })
 
-    expect(ollamaClient.generate).not.toHaveBeenCalled()
+    expect(transport.generate).not.toHaveBeenCalled()
   })
 
   it('does nothing for whitespace-only input', async () => {
@@ -155,11 +164,11 @@ describe('useCorrection', () => {
       await result.current.correct()
     })
 
-    expect(ollamaClient.generate).not.toHaveBeenCalled()
+    expect(transport.generate).not.toHaveBeenCalled()
   })
 
   it('handles error during correction', async () => {
-    vi.mocked(ollamaClient.generate).mockRejectedValue(new Error('Server error'))
+    transport.generate.mockRejectedValue(new Error('Server error'))
 
     const { result } = renderHook(() => useCorrection())
 
@@ -172,7 +181,7 @@ describe('useCorrection', () => {
   })
 
   it('handles non-Error thrown', async () => {
-    vi.mocked(ollamaClient.generate).mockRejectedValue('string error')
+    transport.generate.mockRejectedValue('string error')
 
     const { result } = renderHook(() => useCorrection())
 
@@ -184,7 +193,7 @@ describe('useCorrection', () => {
   })
 
   it('caches result after correction', async () => {
-    vi.mocked(ollamaClient.generate).mockResolvedValue('Hello world')
+    transport.generate.mockResolvedValue('Hello world')
 
     const { result } = renderHook(() => useCorrection())
 
@@ -208,7 +217,7 @@ describe('useCorrection', () => {
   it('cancel stops ongoing correction', async () => {
     // Create a correction that won't resolve immediately
     let resolveGenerate: (value: string) => void
-    vi.mocked(ollamaClient.generate).mockReturnValue(
+    transport.generate.mockReturnValue(
       new Promise((resolve) => {
         resolveGenerate = resolve
       })
@@ -237,7 +246,7 @@ describe('useCorrection', () => {
   })
 
   it('corrects with custom text parameter', async () => {
-    vi.mocked(ollamaClient.generate).mockResolvedValue('Custom corrected')
+    transport.generate.mockResolvedValue('Custom corrected')
 
     const { result } = renderHook(() => useCorrection())
 
@@ -249,7 +258,7 @@ describe('useCorrection', () => {
   })
 
   it('corrects with custom level parameter', async () => {
-    vi.mocked(ollamaClient.generate).mockResolvedValue('Heavy corrected')
+    transport.generate.mockResolvedValue('Heavy corrected')
 
     const { result } = renderHook(() => useCorrection())
 
@@ -257,11 +266,11 @@ describe('useCorrection', () => {
       await result.current.correct(undefined, 'rewrite')
     })
 
-    expect(ollamaClient.generate).toHaveBeenCalled()
+    expect(transport.generate).toHaveBeenCalled()
   })
 
   it('cleans model output artifacts', async () => {
-    vi.mocked(ollamaClient.generate).mockResolvedValue('Hello world<|im_end|>')
+    transport.generate.mockResolvedValue('Hello world<|im_end|>')
 
     const { result } = renderHook(() => useCorrection())
 
@@ -272,8 +281,8 @@ describe('useCorrection', () => {
     expect(useAppStore.getState().outputText).toBe('Hello world')
   })
 
-  it('sets base URL before request', async () => {
-    vi.mocked(ollamaClient.generate).mockResolvedValue('Hello')
+  it('constructs a client bound to the configured host', async () => {
+    transport.generate.mockResolvedValue('Hello')
 
     const { result } = renderHook(() => useCorrection())
 
@@ -281,12 +290,12 @@ describe('useCorrection', () => {
       await result.current.correct()
     })
 
-    expect(ollamaClient.setBaseUrl).toHaveBeenCalledWith('http://localhost:11434')
+    expect(transport.constructedHosts).toEqual(['http://localhost:11434'])
   })
 
   it('sets loading state during correction', async () => {
     let resolveGenerate: (value: string) => void
-    vi.mocked(ollamaClient.generate).mockReturnValue(
+    transport.generate.mockReturnValue(
       new Promise((resolve) => {
         resolveGenerate = resolve
       })
@@ -312,7 +321,7 @@ describe('useCorrection', () => {
   describe('Changes extraction', () => {
     it('extracts changes when text is modified', async () => {
       // First call is for correction, second is for changes extraction
-      vi.mocked(ollamaClient.generate)
+      transport.generate
         .mockResolvedValueOnce('Hello world')
         .mockResolvedValueOnce('[{"from": "wrold", "to": "world", "reason": "Typo"}]')
 
@@ -329,7 +338,7 @@ describe('useCorrection', () => {
     })
 
     it('uses fallback when JSON parsing fails', async () => {
-      vi.mocked(ollamaClient.generate)
+      transport.generate
         .mockResolvedValueOnce('Hello world')
         .mockResolvedValueOnce('Invalid JSON response')
 
@@ -346,7 +355,7 @@ describe('useCorrection', () => {
 
     it('extracts changes from cached result', async () => {
       vi.mocked(translationCache.get).mockReturnValue('Cached result')
-      vi.mocked(ollamaClient.generate).mockResolvedValue('[{"from": "wrold", "to": "world", "reason": "Typo"}]')
+      transport.generate.mockResolvedValue('[{"from": "wrold", "to": "world", "reason": "Typo"}]')
 
       useAppStore.setState({ inputText: 'Hello wrold' })
       const { result } = renderHook(() => useCorrection())
@@ -359,7 +368,7 @@ describe('useCorrection', () => {
     })
 
     it('does not extract changes when result equals input', async () => {
-      vi.mocked(ollamaClient.generate).mockResolvedValueOnce('Hello wrold')
+      transport.generate.mockResolvedValueOnce('Hello wrold')
 
       useAppStore.setState({ inputText: 'Hello wrold' })
       const { result } = renderHook(() => useCorrection())
@@ -369,7 +378,7 @@ describe('useCorrection', () => {
       })
 
       // Generate should only be called once (for correction, not for changes)
-      expect(ollamaClient.generate).toHaveBeenCalledTimes(1)
+      expect(transport.generate).toHaveBeenCalledTimes(1)
     })
   })
 
@@ -382,7 +391,7 @@ describe('useCorrection', () => {
         yield ' world'
         yield '<|im_end|>'
       }
-      vi.mocked(ollamaClient.generateStream).mockReturnValue(mockStream())
+      transport.generateStream.mockReturnValue(mockStream())
 
       const { result } = renderHook(() => useCorrection())
 
@@ -398,7 +407,7 @@ describe('useCorrection', () => {
     it('ignores AbortError during correction', async () => {
       const abortError = new Error('Aborted')
       abortError.name = 'AbortError'
-      vi.mocked(ollamaClient.generate).mockRejectedValue(abortError)
+      transport.generate.mockRejectedValue(abortError)
 
       const { result } = renderHook(() => useCorrection())
 
@@ -414,7 +423,7 @@ describe('useCorrection', () => {
   describe('Explanation language', () => {
     it('uses detected language when explanationLang is auto', async () => {
       useSettingsStore.setState({ explanationLang: 'auto' })
-      vi.mocked(ollamaClient.generate).mockResolvedValue('Hello world')
+      transport.generate.mockResolvedValue('Hello world')
 
       const { result } = renderHook(() => useCorrection())
 
@@ -422,12 +431,12 @@ describe('useCorrection', () => {
         await result.current.correct()
       })
 
-      expect(ollamaClient.generate).toHaveBeenCalled()
+      expect(transport.generate).toHaveBeenCalled()
     })
 
     it('uses specified language when explanationLang is set', async () => {
       useSettingsStore.setState({ explanationLang: 'ja' })
-      vi.mocked(ollamaClient.generate).mockResolvedValue('Hello world')
+      transport.generate.mockResolvedValue('Hello world')
 
       const { result } = renderHook(() => useCorrection())
 
@@ -435,7 +444,285 @@ describe('useCorrection', () => {
         await result.current.correct()
       })
 
-      expect(ollamaClient.generate).toHaveBeenCalled()
+      expect(transport.generate).toHaveBeenCalled()
     })
+  })
+})
+
+describe('useCorrection cancellation and races', () => {
+  beforeEach(() => {
+    useAppStore.setState({
+      inputText: 'Hello wrold',
+      outputText: '',
+      correctionLevel: 'fix',
+      isLoading: false,
+      error: null,
+      changes: [],
+      isChangesLoading: false,
+    })
+    useSettingsStore.setState({
+      correctionModel: 'gemma3:4b',
+      ollamaHost: 'http://localhost:11434',
+      useStreaming: false,
+      explanationLang: 'auto',
+    })
+    transport.constructedHosts.length = 0
+    transport.generate.mockReset().mockResolvedValue('Hello world')
+    transport.generateStream.mockReset()
+    vi.mocked(translationCache.get).mockReset()
+    vi.mocked(translationCache.set).mockReset()
+  })
+
+  afterEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('forwards a request signal to the correction and extraction calls', async () => {
+    transport.generate
+      .mockResolvedValueOnce('Hello world')
+      .mockResolvedValueOnce('[{"from": "wrold", "to": "world", "reason": "Typo"}]')
+
+    const { result } = renderHook(() => useCorrection())
+
+    await act(async () => {
+      await result.current.correct()
+    })
+    await waitFor(() => expect(transport.generate).toHaveBeenCalledTimes(2))
+
+    expect(transport.generate.mock.calls[0][1]).toBeInstanceOf(AbortSignal)
+    expect(transport.generate.mock.calls[1][1]).toBeInstanceOf(AbortSignal)
+  })
+
+  it('forwards a request signal to the streaming correction call', async () => {
+    useSettingsStore.setState({ useStreaming: true })
+    async function* stream() {
+      yield 'Hello world'
+    }
+    transport.generateStream.mockReturnValue(stream())
+
+    const { result } = renderHook(() => useCorrection())
+
+    await act(async () => {
+      await result.current.correct()
+    })
+
+    expect(transport.generateStream.mock.calls[0][1]).toBeInstanceOf(AbortSignal)
+  })
+
+  it('does not publish or cache a cancelled correction', async () => {
+    let resolveGenerate: (value: string) => void
+    transport.generate.mockReturnValue(new Promise(resolve => { resolveGenerate = resolve }))
+
+    const { result } = renderHook(() => useCorrection())
+
+    act(() => {
+      result.current.correct()
+    })
+    await waitFor(() => expect(useAppStore.getState().isLoading).toBe(true))
+
+    act(() => {
+      result.current.cancel()
+    })
+
+    await act(async () => {
+      resolveGenerate!('Late correction')
+    })
+
+    expect(useAppStore.getState().outputText).toBe('')
+    expect(translationCache.set).not.toHaveBeenCalled()
+    expect(useAppStore.getState().isLoading).toBe(false)
+    expect(useAppStore.getState().isChangesLoading).toBe(false)
+  })
+
+  it('lets only the newest overlapping correction publish and cache', async () => {
+    const resolvers: ((value: string) => void)[] = []
+    transport.generate.mockImplementation(
+      () => new Promise(resolve => { resolvers.push(resolve) })
+    )
+
+    const { result } = renderHook(() => useCorrection())
+
+    act(() => {
+      result.current.correct('first text')
+    })
+    act(() => {
+      result.current.correct('second text')
+    })
+
+    await act(async () => {
+      resolvers[1]('SECOND')
+    })
+    await act(async () => {
+      resolvers[0]('FIRST')
+    })
+
+    expect(useAppStore.getState().outputText).toBe('SECOND')
+    expect(translationCache.set).toHaveBeenCalledTimes(1)
+    expect(translationCache.set).toHaveBeenCalledWith(expect.stringContaining('second text'), 'SECOND')
+  })
+
+  it('ignores stream chunks from a superseded correction', async () => {
+    useSettingsStore.setState({ useStreaming: true })
+
+    let releaseFirst: () => void
+    const gate = new Promise<void>(resolve => { releaseFirst = resolve })
+
+    async function* firstStream() {
+      yield 'first-a'
+      await gate
+      yield 'first-b'
+    }
+    async function* secondStream() {
+      yield 'second'
+    }
+    transport.generateStream.mockReturnValueOnce(firstStream()).mockReturnValueOnce(secondStream())
+
+    const { result } = renderHook(() => useCorrection())
+
+    await act(async () => {
+      result.current.correct('first text')
+    })
+    expect(useAppStore.getState().outputText).toBe('first-a')
+
+    await act(async () => {
+      await result.current.correct('second text')
+    })
+    expect(useAppStore.getState().outputText).toBe('second')
+
+    await act(async () => {
+      releaseFirst!()
+    })
+
+    expect(useAppStore.getState().outputText).toBe('second')
+    expect(translationCache.set).toHaveBeenCalledTimes(1)
+    expect(translationCache.set).toHaveBeenCalledWith(expect.any(String), 'second')
+  })
+
+  it('ignores a superseded background change extraction', async () => {
+    const resolvers: ((value: string) => void)[] = []
+    transport.generate.mockImplementation(
+      () => new Promise(resolve => { resolvers.push(resolve) })
+    )
+
+    const { result } = renderHook(() => useCorrection())
+
+    act(() => {
+      result.current.correct('first text')
+    })
+    await waitFor(() => expect(resolvers.length).toBe(1))
+
+    // Correction one completes and starts its background extraction.
+    await act(async () => {
+      resolvers[0]('First corrected')
+    })
+    await waitFor(() => expect(resolvers.length).toBe(2))
+
+    // A second correction supersedes the pending extraction.
+    act(() => {
+      result.current.correct('second text')
+    })
+    await waitFor(() => expect(resolvers.length).toBe(3))
+
+    await act(async () => {
+      resolvers[1]('[{"from": "stale", "to": "stale", "reason": "stale"}]')
+    })
+
+    expect(useAppStore.getState().changes).toEqual([])
+  })
+
+  it('does not publish a fallback diff for a superseded extraction', async () => {
+    const resolvers: ((value: string) => void)[] = []
+    transport.generate.mockImplementation(
+      () => new Promise(resolve => { resolvers.push(resolve) })
+    )
+
+    const { result } = renderHook(() => useCorrection())
+
+    act(() => {
+      result.current.correct('first text')
+    })
+    await waitFor(() => expect(resolvers.length).toBe(1))
+
+    await act(async () => {
+      resolvers[0]('First corrected')
+    })
+    await waitFor(() => expect(resolvers.length).toBe(2))
+
+    act(() => {
+      result.current.correct('second text')
+    })
+    await waitFor(() => expect(resolvers.length).toBe(3))
+
+    // The superseded extraction answers with unparseable text.
+    await act(async () => {
+      resolvers[1]('no json here')
+    })
+
+    expect(useAppStore.getState().changes).toEqual([])
+  })
+
+  it('falls back to a diff when the current extraction request fails', async () => {
+    transport.generate
+      .mockResolvedValueOnce('Hello world')
+      .mockRejectedValueOnce(new Error('extraction failed'))
+
+    const { result } = renderHook(() => useCorrection())
+
+    await act(async () => {
+      await result.current.correct()
+    })
+
+    await waitFor(() => {
+      expect(useAppStore.getState().changes).toEqual([
+        { from: 'Hello wrold', to: 'Hello world', reason: 'Text was corrected/improved' },
+      ])
+    })
+    expect(useAppStore.getState().isChangesLoading).toBe(false)
+  })
+
+  it('does not fall back to a stale diff when extraction fails after cancel', async () => {
+    const rejecters: ((reason: unknown) => void)[] = []
+    transport.generate
+      .mockResolvedValueOnce('Hello world')
+      .mockImplementation(() => new Promise((_resolve, reject) => { rejecters.push(reject) }))
+
+    const { result } = renderHook(() => useCorrection())
+
+    await act(async () => {
+      await result.current.correct()
+    })
+    await waitFor(() => expect(rejecters.length).toBe(1))
+    expect(useAppStore.getState().isChangesLoading).toBe(true)
+
+    act(() => {
+      result.current.cancel()
+    })
+
+    await act(async () => {
+      rejecters[0](new Error('extraction failed'))
+    })
+
+    expect(useAppStore.getState().changes).toEqual([])
+    expect(useAppStore.getState().isChangesLoading).toBe(false)
+  })
+
+  it('does not report an error for a correction cancelled by unmount', async () => {
+    let rejectGenerate: (reason: unknown) => void
+    transport.generate.mockReturnValue(new Promise((_resolve, reject) => { rejectGenerate = reject }))
+
+    const { result, unmount } = renderHook(() => useCorrection())
+
+    act(() => {
+      result.current.correct()
+    })
+    await waitFor(() => expect(useAppStore.getState().isLoading).toBe(true))
+
+    unmount()
+
+    await act(async () => {
+      rejectGenerate!(new Error('Server error'))
+    })
+
+    expect(useAppStore.getState().error).toBeNull()
   })
 })

@@ -1,5 +1,6 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { OllamaClient, ollamaClient } from './ollama-client'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { OllamaClient } from './ollama-client'
+import type { AiProvider } from '../types'
 
 // Mock fetch globally
 const mockFetch = vi.fn()
@@ -23,9 +24,40 @@ describe('OllamaClient', () => {
       expect(customClient.getBaseUrl()).toBe('http://custom:1234')
     })
 
-    it('setBaseUrl updates the URL', () => {
-      client.setBaseUrl('http://new-url:5678')
-      expect(client.getBaseUrl()).toBe('http://new-url:5678')
+    it('exposes no mutable host setter', () => {
+      expect((client as unknown as Record<string, unknown>).setBaseUrl).toBeUndefined()
+    })
+
+    it('satisfies the AiProvider contract', () => {
+      const provider: AiProvider = client
+      expect(typeof provider.checkHealth).toBe('function')
+      expect(typeof provider.listModels).toBe('function')
+      expect(typeof provider.generate).toBe('function')
+      expect(typeof provider.generateStream).toBe('function')
+      expect(typeof provider.generateFromPrompt).toBe('function')
+      expect(typeof provider.streamFromPrompt).toBe('function')
+      expect(typeof provider.generateJSON).toBe('function')
+    })
+
+    it('keeps hosts independent across interleaved clients', async () => {
+      const a = new OllamaClient('http://a:1111')
+      const b = new OllamaClient('http://b:2222')
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ response: 'ok' }),
+      })
+
+      await Promise.all([
+        a.generate({ model: 'm', prompt: 'p' }),
+        b.generate({ model: 'm', prompt: 'p' }),
+        a.generate({ model: 'm', prompt: 'p' }),
+      ])
+
+      expect(mockFetch.mock.calls.map(call => call[0])).toEqual([
+        'http://a:1111/api/generate',
+        'http://b:2222/api/generate',
+        'http://a:1111/api/generate',
+      ])
     })
   })
 
@@ -643,12 +675,265 @@ describe('OllamaClient', () => {
   })
 })
 
-describe('ollamaClient singleton', () => {
-  it('is an OllamaClient instance', () => {
-    expect(ollamaClient).toBeInstanceOf(OllamaClient)
+describe('OllamaClient cancellation and stream completion', () => {
+  let client: OllamaClient
+
+  beforeEach(() => {
+    client = new OllamaClient()
+    mockFetch.mockReset()
   })
 
-  it('uses default URL', () => {
-    expect(ollamaClient.getBaseUrl()).toBe('http://localhost:11434')
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  function streamingResponse(lines: string[]) {
+    const encoder = new TextEncoder()
+    let readIndex = 0
+    return {
+      ok: true,
+      body: {
+        getReader: () => ({
+          read: async () => {
+            if (readIndex < lines.length) {
+              return { done: false, value: encoder.encode(lines[readIndex++]) }
+            }
+            return { done: true, value: undefined }
+          },
+        }),
+      },
+    }
+  }
+
+  describe('checkHealth signal composition', () => {
+    it('aborts the request after five seconds when the caller stays active', async () => {
+      vi.useFakeTimers()
+      let requestSignal: AbortSignal | undefined
+      mockFetch.mockImplementation((_url: string, init: RequestInit) => {
+        requestSignal = init.signal as AbortSignal
+        return new Promise((_resolve, reject) => {
+          requestSignal!.addEventListener('abort', () => {
+            const err = new Error('Aborted')
+            err.name = 'AbortError'
+            reject(err)
+          })
+        })
+      })
+
+      const caller = new AbortController()
+      const pending = client.checkHealth(caller.signal)
+
+      expect(requestSignal?.aborted).toBe(false)
+      await vi.advanceTimersByTimeAsync(5000)
+      expect(requestSignal?.aborted).toBe(true)
+      expect(caller.signal.aborted).toBe(false)
+
+      await expect(pending).resolves.toBe(false)
+    })
+
+    it('aborts the request immediately when the caller cancels', async () => {
+      let requestSignal: AbortSignal | undefined
+      mockFetch.mockImplementation((_url: string, init: RequestInit) => {
+        requestSignal = init.signal as AbortSignal
+        return new Promise((_resolve, reject) => {
+          ;(init.signal as AbortSignal).addEventListener('abort', () => {
+            const err = new Error('Aborted')
+            err.name = 'AbortError'
+            reject(err)
+          })
+        })
+      })
+
+      const caller = new AbortController()
+      const pending = client.checkHealth(caller.signal)
+      caller.abort()
+
+      expect(requestSignal?.aborted).toBe(true)
+      await expect(pending).resolves.toBe(false)
+    })
+
+    it('does not issue a request when the caller signal is already aborted', async () => {
+      let requestSignal: AbortSignal | undefined
+      mockFetch.mockImplementation((_url: string, init: RequestInit) => {
+        requestSignal = init.signal as AbortSignal
+        const err = new Error('Aborted')
+        err.name = 'AbortError'
+        return Promise.reject(err)
+      })
+
+      const caller = new AbortController()
+      caller.abort()
+
+      await expect(client.checkHealth(caller.signal)).resolves.toBe(false)
+      expect(requestSignal?.aborted).toBe(true)
+    })
+
+    it('works without a caller signal', async () => {
+      mockFetch.mockResolvedValueOnce({ ok: true })
+      await expect(client.checkHealth()).resolves.toBe(true)
+    })
+  })
+
+  describe('caller signal forwarding', () => {
+    it('forwards the signal to listModels', async () => {
+      const controller = new AbortController()
+      mockFetch.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ models: [] }) })
+
+      await client.listModels(controller.signal)
+
+      expect(mockFetch.mock.calls[0][1].signal).toBe(controller.signal)
+    })
+
+    it('forwards the signal to generate', async () => {
+      const controller = new AbortController()
+      mockFetch.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ response: 'x' }) })
+
+      await client.generate({ model: 'm', prompt: 'p' }, controller.signal)
+
+      expect(mockFetch.mock.calls[0][1].signal).toBe(controller.signal)
+    })
+
+    it('forwards the signal to generateFromPrompt', async () => {
+      const controller = new AbortController()
+      mockFetch.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ response: 'x' }) })
+
+      await client.generateFromPrompt({ prompt: 'p' }, 'm', {}, controller.signal)
+
+      expect(mockFetch.mock.calls[0][1].signal).toBe(controller.signal)
+    })
+
+    it('forwards the signal to generateStream', async () => {
+      const controller = new AbortController()
+      mockFetch.mockResolvedValueOnce(streamingResponse([JSON.stringify({ response: 'x' }) + '\n']))
+
+      for await (const _chunk of client.generateStream({ model: 'm', prompt: 'p' }, controller.signal)) {
+        // drain
+      }
+
+      expect(mockFetch.mock.calls[0][1].signal).toBe(controller.signal)
+    })
+
+    it('forwards the signal to streamFromPrompt', async () => {
+      const controller = new AbortController()
+      mockFetch.mockResolvedValueOnce(streamingResponse([JSON.stringify({ response: 'x' }) + '\n']))
+
+      for await (const _chunk of client.streamFromPrompt({ prompt: 'p' }, 'm', {}, controller.signal)) {
+        // drain
+      }
+
+      expect(mockFetch.mock.calls[0][1].signal).toBe(controller.signal)
+    })
+
+    it('forwards the signal to generateJSON', async () => {
+      const controller = new AbortController()
+      mockFetch.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ response: '[]' }) })
+
+      await client.generateJSON({ prompt: 'p' }, 'm', 2, controller.signal)
+
+      expect(mockFetch.mock.calls[0][1].signal).toBe(controller.signal)
+    })
+
+    it('forwards the signal to pullModel', async () => {
+      const controller = new AbortController()
+      mockFetch.mockResolvedValueOnce(streamingResponse([JSON.stringify({ status: 'done' }) + '\n']))
+
+      await client.pullModel('m', undefined, controller.signal)
+
+      expect(mockFetch.mock.calls[0][1].signal).toBe(controller.signal)
+    })
+  })
+
+  describe('generateJSON abort handling', () => {
+    it('does not retry when the request is aborted', async () => {
+      const abortError = new Error('Aborted')
+      abortError.name = 'AbortError'
+      mockFetch.mockRejectedValue(abortError)
+
+      await expect(client.generateJSON({ prompt: 'p' }, 'm', 2)).rejects.toThrow('Aborted')
+      expect(mockFetch).toHaveBeenCalledTimes(1)
+    })
+
+    it('does not retry a parse failure once the caller signal is aborted', async () => {
+      const controller = new AbortController()
+      mockFetch.mockImplementation(() => {
+        controller.abort()
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ response: 'not json' }) })
+      })
+
+      await expect(
+        client.generateJSON({ prompt: 'p' }, 'm', 2, controller.signal)
+      ).rejects.toThrow()
+      expect(mockFetch).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  describe('final stream fragments', () => {
+    it('emits a final generation record without a trailing newline', async () => {
+      mockFetch.mockResolvedValueOnce(
+        streamingResponse([
+          JSON.stringify({ response: 'first' }) + '\n',
+          JSON.stringify({ response: 'last' }),
+        ])
+      )
+
+      const results: string[] = []
+      for await (const chunk of client.generateStream({ model: 'm', prompt: 'p' })) {
+        results.push(chunk)
+      }
+
+      expect(results).toEqual(['first', 'last'])
+    })
+
+    it('emits a final generation record split across reads', async () => {
+      const record = JSON.stringify({ response: 'split' })
+      mockFetch.mockResolvedValueOnce(
+        streamingResponse([record.slice(0, 8), record.slice(8)])
+      )
+
+      const results: string[] = []
+      for await (const chunk of client.generateStream({ model: 'm', prompt: 'p' })) {
+        results.push(chunk)
+      }
+
+      expect(results).toEqual(['split'])
+    })
+
+    it('ignores an invalid final generation fragment', async () => {
+      mockFetch.mockResolvedValueOnce(
+        streamingResponse([JSON.stringify({ response: 'only' }) + '\n', 'not json'])
+      )
+
+      const results: string[] = []
+      for await (const chunk of client.generateStream({ model: 'm', prompt: 'p' })) {
+        results.push(chunk)
+      }
+
+      expect(results).toEqual(['only'])
+    })
+
+    it('emits a final pull status without a trailing newline', async () => {
+      mockFetch.mockResolvedValueOnce(
+        streamingResponse([
+          JSON.stringify({ status: 'first' }) + '\n',
+          JSON.stringify({ status: 'last' }),
+        ])
+      )
+
+      const statuses: string[] = []
+      await client.pullModel('m', status => statuses.push(status))
+
+      expect(statuses).toEqual(['first', 'last'])
+    })
+
+    it('ignores an invalid final pull fragment', async () => {
+      mockFetch.mockResolvedValueOnce(
+        streamingResponse([JSON.stringify({ status: 'only' }) + '\n', 'not json'])
+      )
+
+      const statuses: string[] = []
+      await client.pullModel('m', status => statuses.push(status))
+
+      expect(statuses).toEqual(['only'])
+    })
   })
 })

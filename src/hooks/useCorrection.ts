@@ -1,7 +1,7 @@
-import { useCallback, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef } from 'react'
 import { useAppStore, CorrectionLevel } from '../stores/appStore'
 import { useSettingsStore } from '../stores/settingsStore'
-import { ollamaClient } from '../lib/ollama-client'
+import { OllamaClient } from '../lib/ollama-client'
 import { detectLanguage } from '../lib/language'
 import { getCorrectionPrompt, getChangesExtractionPrompt } from '../lib/prompts'
 import { translationCache, createCorrectionKey } from '../lib/cache'
@@ -10,6 +10,15 @@ interface Change {
   from: string
   to: string
   reason: string
+}
+
+/**
+ * One correction attempt plus the background extraction it starts. Anything
+ * asynchronous must re-check `isCurrent` before touching state or the cache.
+ */
+interface RequestContext {
+  signal: AbortSignal
+  isCurrent: () => boolean
 }
 
 // Clean model output artifacts
@@ -35,8 +44,20 @@ export function useCorrection() {
   } = useAppStore()
 
   const { correctionModel, ollamaHost, useStreaming, explanationLang } = useSettingsStore()
+
+  // One provider per configured host; it never changes endpoint mid-flight.
+  const provider = useMemo(() => new OllamaClient(ollamaHost), [ollamaHost])
   const abortRef = useRef<AbortController | null>(null)
-  const changesAbortRef = useRef<AbortController | null>(null)
+  const requestIdRef = useRef(0)
+
+  // A host change or an unmount retires whatever is still in flight.
+  useEffect(() => {
+    return () => {
+      requestIdRef.current += 1
+      abortRef.current?.abort()
+      abortRef.current = null
+    }
+  }, [provider])
 
   // Create fallback change when JSON parsing fails
   const createFallbackChange = useCallback((original: string, corrected: string): Change[] => {
@@ -55,30 +76,25 @@ export function useCorrection() {
     original: string,
     corrected: string,
     textLang: string,
-    explainLang: string
+    explainLang: string,
+    request: RequestContext
   ) => {
-    // Cancel any ongoing changes extraction
-    if (changesAbortRef.current) {
-      changesAbortRef.current.abort()
-    }
-    changesAbortRef.current = new AbortController()
-    const currentAbort = changesAbortRef.current
+    if (!request.isCurrent()) return
 
     console.log('[Changes] Extracting changes...')
     setChangesLoading(true)
     const changesPrompt = getChangesExtractionPrompt(original, corrected, textLang, explainLang)
 
-    ollamaClient.setBaseUrl(ollamaHost)
-    ollamaClient.generate({
+    provider.generate({
       model: correctionModel,
       prompt: changesPrompt,
       options: {
         temperature: 0.1,
         num_ctx: 2048,
       },
-    }).then(response => {
-      // Check if aborted
-      if (currentAbort.signal.aborted) {
+    }, request.signal).then(response => {
+      // Check if superseded or aborted
+      if (!request.isCurrent()) {
         console.log('[Changes] Extraction aborted')
         return
       }
@@ -133,8 +149,8 @@ export function useCorrection() {
         }
       }
 
-      // Check if aborted before fallback
-      if (currentAbort.signal.aborted) {
+      // Check if superseded before fallback
+      if (!request.isCurrent()) {
         console.log('[Changes] Extraction aborted before fallback')
         return
       }
@@ -147,8 +163,8 @@ export function useCorrection() {
       }
       setChangesLoading(false)
     }).catch(err => {
-      // Check if aborted
-      if (currentAbort.signal.aborted) {
+      // Check if superseded or aborted
+      if (!request.isCurrent()) {
         console.log('[Changes] Extraction aborted (in catch)')
         return
       }
@@ -160,7 +176,7 @@ export function useCorrection() {
       }
       setChangesLoading(false)
     })
-  }, [correctionModel, ollamaHost, setChanges, setChangesLoading, createFallbackChange])
+  }, [correctionModel, provider, setChanges, setChangesLoading, createFallbackChange])
 
   const correct = useCallback(async (
     text?: string,
@@ -173,16 +189,18 @@ export function useCorrection() {
 
     if (!textToProcess.trim()) return
 
-    // Cancel any ongoing request
+    // Cancel any ongoing request, including its background change extraction
     if (abortRef.current) {
       abortRef.current.abort()
     }
-    abortRef.current = new AbortController()
-
-    // Cancel any ongoing changes extraction
-    if (changesAbortRef.current) {
-      changesAbortRef.current.abort()
+    const controller = new AbortController()
+    abortRef.current = controller
+    const requestId = ++requestIdRef.current
+    const request: RequestContext = {
+      signal: controller.signal,
+      isCurrent: () => requestIdRef.current === requestId && !controller.signal.aborted,
     }
+
     setChangesLoading(false)
 
     setLoading(true)
@@ -191,8 +209,6 @@ export function useCorrection() {
     setChanges([])
 
     try {
-      ollamaClient.setBaseUrl(ollamaHost)
-
       // ALWAYS auto-detect language from input text
       const detectedLang = detectLanguage(textToProcess)
       console.log('[Correction] Detected language:', detectedLang)
@@ -210,7 +226,7 @@ export function useCorrection() {
           setLoading(false)
           // Extract changes in background
           if (cached !== textToProcess) {
-            extractChangesFromModel(textToProcess, cached, detectedLang, explainLang)
+            extractChangesFromModel(textToProcess, cached, detectedLang, explainLang, request)
           }
           return cached
         }
@@ -222,31 +238,36 @@ export function useCorrection() {
 
       let result = ''
       if (useStreaming) {
-        for await (const chunk of ollamaClient.generateStream({
+        for await (const chunk of provider.generateStream({
           model: correctionModel,
           prompt,
           options: {
             temperature: 0.3,
             num_ctx: 2048,
           },
-        })) {
+        }, request.signal)) {
+          if (!request.isCurrent()) return
           result += chunk
           const cleaned = cleanModelOutput(result)
           setOutputText(cleaned)
         }
         result = cleanModelOutput(result)
       } else {
-        const response = await ollamaClient.generate({
+        const response = await provider.generate({
           model: correctionModel,
           prompt,
           options: {
             temperature: 0.3,
             num_ctx: 2048,
           },
-        })
+        }, request.signal)
+        if (!request.isCurrent()) return
         result = cleanModelOutput(response)
         setOutputText(result)
       }
+
+      // Only the current request may publish its result
+      if (!request.isCurrent()) return
 
       // Cache result
       translationCache.set(cacheKey, result)
@@ -254,7 +275,7 @@ export function useCorrection() {
       // Extract changes if text was modified (async, non-blocking)
       if (result.trim() !== textToProcess.trim()) {
         console.log('[Changes] Text was modified, extracting changes...')
-        extractChangesFromModel(textToProcess, result, detectedLang, explainLang)
+        extractChangesFromModel(textToProcess, result, detectedLang, explainLang, request)
       } else {
         console.log('[Changes] No changes detected (result === input)')
       }
@@ -262,6 +283,7 @@ export function useCorrection() {
       setLoading(false)
       return result
     } catch (err) {
+      if (!request.isCurrent()) return
       if (err instanceof Error && err.name === 'AbortError') {
         return
       }
@@ -274,23 +296,26 @@ export function useCorrection() {
     inputText,
     correctionLevel,
     correctionModel,
-    ollamaHost,
+    provider,
     useStreaming,
     explanationLang,
     setOutputText,
     setLoading,
     setError,
     setChanges,
+    setChangesLoading,
     extractChangesFromModel,
   ])
 
   const cancel = useCallback(() => {
     if (abortRef.current) {
+      requestIdRef.current += 1
       abortRef.current.abort()
       abortRef.current = null
       setLoading(false)
+      setChangesLoading(false)
     }
-  }, [setLoading])
+  }, [setLoading, setChangesLoading])
 
   const setLevel = useCallback((level: CorrectionLevel) => {
     setCorrectionLevel(level)

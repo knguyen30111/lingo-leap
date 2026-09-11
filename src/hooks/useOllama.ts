@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from 'react'
-import { ollamaClient } from '../lib/ollama-client'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { OllamaClient } from '../lib/ollama-client'
 import { OllamaModelInfo } from '../types'
 import { useSettingsStore } from '../stores/settingsStore'
 
@@ -20,15 +20,30 @@ export function useOllama() {
     error: null,
   })
 
+  // One provider per configured host; it never changes endpoint mid-flight.
+  const provider = useMemo(() => new OllamaClient(ollamaHost), [ollamaHost])
+  const abortRef = useRef<AbortController | null>(null)
+  const requestIdRef = useRef(0)
+
   const checkConnection = useCallback(async () => {
+    if (abortRef.current) {
+      abortRef.current.abort()
+    }
+    const controller = new AbortController()
+    abortRef.current = controller
+    const requestId = ++requestIdRef.current
+    const isCurrent = () => requestIdRef.current === requestId && !controller.signal.aborted
+
     setState(prev => ({ ...prev, isChecking: true, error: null }))
 
     try {
-      ollamaClient.setBaseUrl(ollamaHost)
-      const isHealthy = await ollamaClient.checkHealth()
+      const isHealthy = await provider.checkHealth(controller.signal)
+      if (!isCurrent()) return
 
       if (isHealthy) {
-        const models = await ollamaClient.listModels()
+        const models = await provider.listModels(controller.signal)
+        if (!isCurrent()) return
+
         setState({
           isConnected: true,
           isChecking: false,
@@ -52,6 +67,7 @@ export function useOllama() {
         setOllamaInstalled(false)
       }
     } catch (err) {
+      if (!isCurrent()) return
       setState({
         isConnected: false,
         isChecking: false,
@@ -60,10 +76,17 @@ export function useOllama() {
       })
       setOllamaInstalled(false)
     }
-  }, [ollamaHost, setOllamaInstalled, setModelsInstalled, translationModel, correctionModel])
+  }, [provider, setOllamaInstalled, setModelsInstalled, translationModel, correctionModel])
 
   useEffect(() => {
     checkConnection()
+
+    // A host change or an unmount retires the check that is still in flight.
+    return () => {
+      requestIdRef.current += 1
+      abortRef.current?.abort()
+      abortRef.current = null
+    }
   }, [checkConnection])
 
   const hasModel = useCallback((modelName: string): boolean => {
