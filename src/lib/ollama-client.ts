@@ -7,7 +7,7 @@ import {
   OllamaModelInfo,
 } from '../types'
 
-const HEALTH_TIMEOUT_MS = 5000
+const TAGS_REQUEST_TIMEOUT_MS = 5000
 
 interface StreamReader {
   read(): Promise<{ done: boolean; value?: Uint8Array }>
@@ -15,6 +15,68 @@ interface StreamReader {
 
 function isAbortError(err: unknown): boolean {
   return err instanceof Error && err.name === 'AbortError'
+}
+
+function abortWith(controller: AbortController, reason: unknown): void {
+  if (reason === undefined) controller.abort()
+  else controller.abort(reason)
+}
+
+function tagsTimeoutReason(): unknown {
+  const message = 'Ollama /api/tags request timed out'
+  return typeof DOMException === 'function'
+    ? new DOMException(message, 'TimeoutError')
+    : new Error(message)
+}
+
+function abortReasonOf(signal: AbortSignal): unknown {
+  return 'reason' in signal ? signal.reason : undefined
+}
+
+/**
+ * Mirrors a caller abort onto the request controller, keeping the caller's own
+ * reason where the runtime exposes one, and never aborting the caller signal
+ * itself. Returns the listener release so the composed request can settle
+ * without leaving a subscription behind.
+ */
+function forwardCallerAbort(
+  callerSignal: AbortSignal | undefined,
+  controller: AbortController
+): () => void {
+  if (!callerSignal) return () => {}
+  if (callerSignal.aborted) {
+    abortWith(controller, abortReasonOf(callerSignal))
+    return () => {}
+  }
+  const forward = () => abortWith(controller, abortReasonOf(callerSignal))
+  callerSignal.addEventListener('abort', forward)
+  return () => callerSignal.removeEventListener('abort', forward)
+}
+
+/**
+ * Runs one complete `/api/tags` operation under a request-local signal that
+ * composes the optional caller abort with the transport's own deadline. The
+ * deadline covers everything `run` awaits, the response body included, so a
+ * stalled local server can never keep a lifecycle check pending; the timer and
+ * the forwarding listener are released as soon as the operation settles.
+ */
+async function withTagsRequestSignal<T>(
+  callerSignal: AbortSignal | undefined,
+  run: (signal: AbortSignal) => Promise<T>
+): Promise<T> {
+  const controller = new AbortController()
+  const timer = setTimeout(
+    () => abortWith(controller, tagsTimeoutReason()),
+    TAGS_REQUEST_TIMEOUT_MS
+  )
+  const stopForwarding = forwardCallerAbort(callerSignal, controller)
+
+  try {
+    return await run(controller.signal)
+  } finally {
+    clearTimeout(timer)
+    stopForwarding()
+  }
 }
 
 function parseRecord(line: string): Record<string, unknown> | null {
@@ -66,23 +128,13 @@ export class OllamaClient implements AiProvider {
   // === Health Check ===
 
   async checkHealth(signal?: AbortSignal): Promise<boolean> {
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), HEALTH_TIMEOUT_MS)
-    const forwardAbort = () => controller.abort()
-
-    if (signal?.aborted) controller.abort()
-    else signal?.addEventListener('abort', forwardAbort)
-
     try {
-      const response = await fetch(`${this.baseUrl}/api/tags`, {
-        signal: controller.signal,
+      return await withTagsRequestSignal(signal, async requestSignal => {
+        const response = await fetch(`${this.baseUrl}/api/tags`, { signal: requestSignal })
+        return response.ok
       })
-      return response.ok
     } catch {
       return false
-    } finally {
-      clearTimeout(timer)
-      signal?.removeEventListener('abort', forwardAbort)
     }
   }
 
@@ -90,10 +142,12 @@ export class OllamaClient implements AiProvider {
 
   async listModels(signal?: AbortSignal): Promise<OllamaModelInfo[]> {
     try {
-      const response = await fetch(`${this.baseUrl}/api/tags`, { signal })
-      if (!response.ok) return []
-      const data = await response.json()
-      return data.models || []
+      return await withTagsRequestSignal(signal, async requestSignal => {
+        const response = await fetch(`${this.baseUrl}/api/tags`, { signal: requestSignal })
+        if (!response.ok) return []
+        const data = await response.json()
+        return data.models || []
+      })
     } catch {
       return []
     }
