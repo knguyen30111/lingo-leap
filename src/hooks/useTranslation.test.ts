@@ -1096,6 +1096,7 @@ describe('useTranslation request retirement', () => {
   const settingsChanges = [
     ['the translation model', { translationModel: 'other-model:1b' }],
     ['the Ollama host', { ollamaHost: 'http://other-host:11434' }],
+    ['the streaming setting', { useStreaming: true }],
   ] as const
 
   it.each(settingsChanges)(
@@ -1130,6 +1131,70 @@ describe('useTranslation request retirement', () => {
       expect(useAppStore.getState().isLoading).toBe(false)
     }
   )
+
+  it('retires a resumed translation stream when the streaming setting changes', async () => {
+    useSettingsStore.setState({ useStreaming: true })
+    mockDetectSourceLanguage.mockReturnValue('fr')
+
+    let releaseStream: () => void
+    const gate = new Promise<void>(resolve => { releaseStream = resolve })
+
+    async function* gatedStream() {
+      yield 'first-a'
+      await gate
+      yield 'first-b'
+    }
+    mockTranslateStream.mockReturnValue(gatedStream())
+
+    const { result } = renderHook(() => useTranslation())
+
+    let pending!: Promise<string | undefined>
+    await act(async () => {
+      pending = result.current.translate()
+    })
+    expect(useAppStore.getState().outputText).toBe('first-a')
+
+    act(() => {
+      useSettingsStore.setState({ useStreaming: false })
+    })
+
+    expect(mockTranslateStream.mock.calls[0][3].aborted).toBe(true)
+    expect(useAppStore.getState().isLoading).toBe(false)
+
+    await act(async () => {
+      releaseStream!()
+      await pending
+    })
+
+    expect(useAppStore.getState().outputText).toBe('first-a')
+    expect(translationCache.set).not.toHaveBeenCalled()
+    expect(useAppStore.getState().latestDetectedSourceLang).toBeNull()
+    expect(useAppStore.getState().isLoading).toBe(false)
+  })
+
+  it('lets a request started after a streaming toggle publish its own result', async () => {
+    mockDetectSourceLanguage.mockReturnValue('fr')
+    async function* stream() {
+      yield 'Xin'
+      yield 'Xin chào'
+    }
+    mockTranslateStream.mockReturnValue(stream())
+
+    const { result } = renderHook(() => useTranslation())
+
+    act(() => {
+      useSettingsStore.setState({ useStreaming: true })
+    })
+
+    await act(async () => {
+      await result.current.translate()
+    })
+
+    expect(mockTranslate).not.toHaveBeenCalled()
+    expect(useAppStore.getState().outputText).toBe('Xin chào')
+    expect(useAppStore.getState().latestDetectedSourceLang).toBe('fr')
+    expect(useAppStore.getState().isLoading).toBe(false)
+  })
 
   it('clears a detected language that a direct input mutation invalidates', async () => {
     mockDetectSourceLanguage.mockReturnValue('fr')

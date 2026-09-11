@@ -801,6 +801,7 @@ describe('useCorrection settings invalidation', () => {
     ['the correction model', { correctionModel: 'other-model:1b' }],
     ['the explanation language', { explanationLang: 'ja' }],
     ['the Ollama host', { ollamaHost: 'http://other-host:11434' }],
+    ['the streaming setting', { useStreaming: true }],
   ] as const
 
   beforeEach(resetEnvironment)
@@ -833,6 +834,7 @@ describe('useCorrection settings invalidation', () => {
 
       expect(useAppStore.getState().outputText).toBe('')
       expect(translationCache.set).not.toHaveBeenCalled()
+      expect(useAppStore.getState().latestDetectedSourceLang).toBeNull()
       expect(useAppStore.getState().changes).toEqual([])
       expect(useAppStore.getState().isLoading).toBe(false)
       expect(useAppStore.getState().isChangesLoading).toBe(false)
@@ -1234,6 +1236,67 @@ describe('useCorrection request retirement', () => {
     expect(useAppStore.getState().outputText).toBe('first-a')
     expect(translationCache.set).not.toHaveBeenCalled()
     expect(useAppStore.getState().latestDetectedSourceLang).toBeNull()
+    expect(useAppStore.getState().isLoading).toBe(false)
+  })
+
+  it('retires a resumed correction stream when the streaming setting changes', async () => {
+    useSettingsStore.setState({ useStreaming: true })
+    grammar.detectSourceLanguage.mockReturnValue('fr')
+
+    let releaseStream: () => void
+    const gate = new Promise<void>(resolve => { releaseStream = resolve })
+
+    async function* gatedStream() {
+      yield 'first-a'
+      await gate
+      yield 'first-b'
+    }
+    grammar.correctTextStream.mockReturnValue(gatedStream())
+
+    const { result } = renderHook(() => useCorrection())
+
+    let pending!: Promise<string | undefined>
+    await act(async () => {
+      pending = result.current.correct()
+    })
+    expect(useAppStore.getState().outputText).toBe('first-a')
+
+    act(() => {
+      useSettingsStore.setState({ useStreaming: false })
+    })
+
+    expect(grammar.correctTextStream.mock.calls[0][3].aborted).toBe(true)
+    expect(useAppStore.getState().isLoading).toBe(false)
+
+    await act(async () => {
+      releaseStream!()
+      await pending
+    })
+
+    expect(useAppStore.getState().outputText).toBe('first-a')
+    expect(translationCache.set).not.toHaveBeenCalled()
+    expect(useAppStore.getState().latestDetectedSourceLang).toBeNull()
+    expect(grammar.extractChanges).not.toHaveBeenCalled()
+    expect(useAppStore.getState().isChangesLoading).toBe(false)
+  })
+
+  it('lets a correction started after a streaming toggle publish its own result', async () => {
+    grammar.detectSourceLanguage.mockReturnValue('fr')
+    grammar.correctTextStream.mockReturnValue(streamOf('Hello', 'Hello world'))
+
+    const { result } = renderHook(() => useCorrection())
+
+    act(() => {
+      useSettingsStore.setState({ useStreaming: true })
+    })
+
+    await act(async () => {
+      await result.current.correct()
+    })
+
+    expect(grammar.correctText).not.toHaveBeenCalled()
+    expect(useAppStore.getState().outputText).toBe('Hello world')
+    expect(useAppStore.getState().latestDetectedSourceLang).toBe('fr')
     expect(useAppStore.getState().isLoading).toBe(false)
   })
 
