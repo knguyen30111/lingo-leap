@@ -120,9 +120,10 @@ npm run tauri build
 ## Quality gates
 
 Every pull request and every push to `main` or an `epic/**` branch runs the `CI` workflow
-(`.github/workflows/ci.yml`). Pull requests targeting `epic/refactor-tech-debt` are protected:
-both jobs must pass before GitHub permits the merge. On other branches the same checks report
-their result but are not enforced by this epic's ruleset.
+(`.github/workflows/ci.yml`). Both jobs must pass before a pull request into
+`epic/refactor-tech-debt` is merged; that expectation is mechanically enforced once the epic's
+branch ruleset lists `frontend` and `rust` as required checks. Until then, and on every other
+branch, the checks report their result without blocking the merge button.
 
 | Check      | What it runs                                                           | Run it locally                                              |
 | ---------- | ---------------------------------------------------------------------- | ----------------------------------------------------------- |
