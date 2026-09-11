@@ -14,6 +14,17 @@ import type {
   PromptResult,
 } from '../types'
 
+// Spy on the canonical prompt API while keeping its real output, so a second
+// prompt implementation cannot creep back in behind an equal-looking string.
+vi.mock('../lib/prompt-builder', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../lib/prompt-builder')>()
+  return {
+    ...actual,
+    buildCorrectionPrompt: vi.fn(actual.buildCorrectionPrompt),
+    buildChangesExtractionPrompt: vi.fn(actual.buildChangesExtractionPrompt),
+  }
+})
+
 const mockFetch = vi.fn()
 globalThis.fetch = mockFetch as unknown as typeof fetch
 
@@ -343,6 +354,30 @@ describe('GrammarService', () => {
     it('builds a service on the default host', () => {
       expect(createGrammarService('gemma3:4b')).toBeInstanceOf(GrammarService)
     })
+  })
+})
+
+describe('prompt ownership', () => {
+  it('builds every correction prompt through the canonical prompt builder', async () => {
+    const provider = createFakeProvider()
+    provider.generateJSON.mockResolvedValue([{ from: 'wrold', to: 'world', reason: 'Typo' }])
+    const service = new GrammarService({ modelName: 'qwen2.5:7b', provider })
+
+    await service.correctText('Hello wrold', 'en', 'fix')
+    for await (const _chunk of service.correctTextStream('Hello wrold', 'auto', 'improve')) {
+      // drain
+    }
+    await service.extractChanges('Hello wrold', 'Hello world', 'en', 'ja')
+
+    expect(vi.mocked(buildCorrectionPrompt)).toHaveBeenCalledWith('Hello wrold', 'en', 'fix', 'qwen2.5:7b')
+    expect(vi.mocked(buildCorrectionPrompt)).toHaveBeenCalledWith('Hello wrold', 'en', 'improve', 'qwen2.5:7b')
+    expect(vi.mocked(buildChangesExtractionPrompt)).toHaveBeenCalledWith(
+      'Hello wrold',
+      'Hello world',
+      'en',
+      'ja',
+      'qwen2.5:7b'
+    )
   })
 })
 

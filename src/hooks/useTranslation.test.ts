@@ -1,6 +1,8 @@
+/// <reference types="vite/client" />
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { renderHook, act, waitFor } from '@testing-library/react'
 import { useTranslation } from './useTranslation'
+import translationHookSource from './useTranslation.ts?raw'
 import { useAppStore } from '../stores/appStore'
 import { useSettingsStore } from '../stores/settingsStore'
 import { translationCache } from '../lib/cache'
@@ -18,6 +20,7 @@ vi.mock('../lib/cache', () => ({
 const mockTranslate = vi.fn()
 const mockTranslateStream = vi.fn()
 const mockDetectSourceLanguage = vi.fn()
+const serviceConstructorOptions: Array<{ modelName: string; ollamaHost?: string }> = []
 
 vi.mock('../services/translation-service', () => {
   return {
@@ -25,6 +28,10 @@ vi.mock('../services/translation-service', () => {
       translate = mockTranslate
       translateStream = mockTranslateStream
       detectSourceLanguage = mockDetectSourceLanguage
+
+      constructor(options: { modelName: string; ollamaHost?: string }) {
+        serviceConstructorOptions.push(options)
+      }
     },
   }
 })
@@ -53,6 +60,7 @@ describe('useTranslation', () => {
     })
 
     // Reset cache mocks
+    serviceConstructorOptions.length = 0
     vi.mocked(translationCache.get).mockReset()
     vi.mocked(translationCache.set).mockReset()
   })
@@ -510,5 +518,111 @@ describe('useTranslation cancellation and races', () => {
     })
 
     expect(useAppStore.getState().error).toBeNull()
+  })
+})
+
+describe('useTranslation service composition', () => {
+  beforeEach(() => {
+    mockTranslate.mockReset().mockResolvedValue({ translated: 'Xin chào thế giới' })
+    mockTranslateStream.mockReset()
+    mockDetectSourceLanguage.mockReset().mockReturnValue('en')
+
+    useAppStore.setState({
+      inputText: 'Hello world',
+      outputText: '',
+      sourceLang: 'en',
+      targetLang: 'vi',
+      isLoading: false,
+      error: null,
+    })
+    useSettingsStore.setState({
+      translationModel: 'gemma3:4b',
+      ollamaHost: 'http://localhost:11434',
+      useStreaming: false,
+    })
+
+    serviceConstructorOptions.length = 0
+    vi.mocked(translationCache.get).mockReset()
+    vi.mocked(translationCache.set).mockReset()
+  })
+
+  afterEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('builds the translation service from the configured model and host', async () => {
+    const { result } = renderHook(() => useTranslation())
+
+    await act(async () => {
+      await result.current.translate()
+    })
+
+    expect(serviceConstructorOptions).toEqual([
+      { modelName: 'gemma3:4b', ollamaHost: 'http://localhost:11434' },
+    ])
+  })
+
+  it('runs the non-streaming translation through the injected task service', async () => {
+    const { result } = renderHook(() => useTranslation())
+
+    await act(async () => {
+      await result.current.translate()
+    })
+
+    expect(mockTranslate.mock.calls[0].slice(0, 3)).toEqual(['Hello world', 'en', 'vi'])
+    expect(mockTranslateStream).not.toHaveBeenCalled()
+  })
+
+  it('runs the streaming translation through the injected task service', async () => {
+    useSettingsStore.setState({ useStreaming: true })
+    async function* stream() {
+      yield 'Xin'
+      yield 'Xin chào'
+    }
+    mockTranslateStream.mockReturnValue(stream())
+
+    const { result } = renderHook(() => useTranslation())
+
+    await act(async () => {
+      await result.current.translate()
+    })
+
+    expect(mockTranslateStream.mock.calls[0].slice(0, 3)).toEqual(['Hello world', 'en', 'vi'])
+    expect(mockTranslate).not.toHaveBeenCalled()
+    expect(useAppStore.getState().outputText).toBe('Xin chào')
+  })
+
+  it('keys the cache and the store on the language the service detected', async () => {
+    useAppStore.setState({ sourceLang: 'auto' })
+    mockDetectSourceLanguage.mockReturnValue('fr')
+
+    const { result } = renderHook(() => useTranslation())
+
+    await act(async () => {
+      await result.current.translate()
+    })
+
+    expect(useAppStore.getState().sourceLang).toBe('fr')
+    expect(translationCache.get).toHaveBeenCalledWith('Hello world-fr-vi-gemma3:4b')
+    expect(translationCache.set).toHaveBeenCalledWith(
+      'Hello world-fr-vi-gemma3:4b',
+      'Xin chào thế giới'
+    )
+    expect(mockTranslate.mock.calls[0][1]).toBe('fr')
+  })
+
+  it('keeps transport and prompt code out of the hook', () => {
+    const forbidden = [
+      /OllamaClient/,
+      /lib\/prompts/,
+      /getTranslationPrompt/,
+      /buildTranslationPrompt/,
+      /detectLanguage/,
+      /cleanModelOutput/,
+    ]
+
+    const violations = forbidden.filter(pattern => pattern.test(translationHookSource))
+
+    expect(violations).toEqual([])
   })
 })
