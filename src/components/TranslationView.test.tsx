@@ -73,6 +73,8 @@ vi.mock('../lib/language', () => ({
     { code: 'vi', name: 'Vietnamese', nativeName: 'Tiếng Việt' },
     { code: 'ja', name: 'Japanese', nativeName: '日本語' },
   ],
+  getLanguageNativeName: (code: string) =>
+    ({ auto: 'Auto-detect', en: 'English', vi: 'Tiếng Việt', ja: '日本語' })[code] ?? code,
 }))
 
 // Mock child components
@@ -120,6 +122,7 @@ describe('TranslationView', () => {
       inputText: '',
       outputText: '',
       sourceLang: 'auto',
+      latestDetectedSourceLang: null,
       targetLang: 'vi',
       isLoading: false,
       error: null,
@@ -491,5 +494,62 @@ describe('TranslationView', () => {
 
       expect(capturedLang).toBe('ja')
     })
+  })
+})
+
+describe('TranslationView detected source language', () => {
+  beforeEach(() => {
+    useAppStore.setState({
+      inputText: 'こんにちは',
+      outputText: '',
+      sourceLang: 'auto',
+      latestDetectedSourceLang: null,
+      targetLang: 'vi',
+      isLoading: false,
+      error: null,
+    })
+    useSettingsStore.setState({ speechLang: 'en' })
+  })
+
+  afterEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('keeps auto selected while naming the detected language', () => {
+    useAppStore.setState({ latestDetectedSourceLang: 'ja' })
+
+    render(<TranslationView />)
+
+    const sourceSelect = screen.getAllByRole('combobox')[0] as HTMLSelectElement
+    expect(sourceSelect.value).toBe('auto')
+    expect(screen.getByRole('option', { name: 'Auto-detect (日本語)' })).toBeInTheDocument()
+  })
+
+  it('shows the plain auto label before anything is detected', () => {
+    render(<TranslationView />)
+
+    expect(screen.getByRole('option', { name: 'Auto-detect' })).toBeInTheDocument()
+  })
+
+  it('does not name a detected language for a manual source selection', () => {
+    useAppStore.setState({ sourceLang: 'en', latestDetectedSourceLang: 'ja' })
+
+    render(<TranslationView />)
+
+    const sourceSelect = screen.getAllByRole('combobox')[0] as HTMLSelectElement
+    expect(sourceSelect.value).toBe('en')
+    expect(screen.getByRole('option', { name: 'Auto-detect' })).toBeInTheDocument()
+  })
+
+  it('leaves the selected source language unchanged when detection updates', () => {
+    const { rerender } = render(<TranslationView />)
+
+    act(() => {
+      useAppStore.setState({ latestDetectedSourceLang: 'ja' })
+    })
+    rerender(<TranslationView />)
+
+    expect(useAppStore.getState().sourceLang).toBe('auto')
+    expect(screen.getByRole('option', { name: 'Auto-detect (日本語)' })).toBeInTheDocument()
   })
 })

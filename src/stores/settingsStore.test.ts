@@ -170,5 +170,20 @@ describe('settingsStore', () => {
       expect(useSettingsStore.persist).toBeDefined()
       expect(useSettingsStore.persist.getOptions().name).toBe('tran-app-settings')
     })
+
+    it('keeps the detected source language out of the persisted payload', () => {
+      useSettingsStore.getState().setDefaultTargetLang('ko')
+      useSettingsStore.getState().setExplanationLang('ja')
+
+      const payload = localStorage.getItem('tran-app-settings')
+
+      expect(payload).toContain('defaultTargetLang')
+      expect(payload).not.toContain('latestDetectedSourceLang')
+    })
+
+    it('does not own a detected source language field', () => {
+      expect(useSettingsStore.getState()).not.toHaveProperty('latestDetectedSourceLang')
+      expect(useSettingsStore.getState()).not.toHaveProperty('setLatestDetectedSourceLang')
+    })
   })
 })

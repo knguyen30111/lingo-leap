@@ -5,7 +5,7 @@ import { useAppStore } from '../stores/appStore'
 import { useSettingsStore } from '../stores/settingsStore'
 import { useTranslation as useTranslationHook } from '../hooks/useTranslation'
 import { useSpeechToText } from '../hooks/useSpeechToText'
-import { SUPPORTED_LANGUAGES } from '../lib/language'
+import { SUPPORTED_LANGUAGES, getLanguageNativeName } from '../lib/language'
 import { LanguageSelector } from './LanguageSelector'
 import { MicButton } from './MicButton'
 import { SpeechPreview } from './SpeechPreview'
@@ -26,6 +26,7 @@ export function TranslationView() {
     outputText, setOutputText,
     isLoading, error, setError,
     sourceLang, setSourceLang,
+    latestDetectedSourceLang,
     targetLang, setTargetLang
   } = useAppStore()
   const { speechLang, setSpeechLang } = useSettingsStore()
@@ -75,6 +76,12 @@ export function TranslationView() {
     setError(null)
   }
 
+  // Auto stays the selected value; the detected language is only named in the
+  // label, and only while auto is what the user actually asked for.
+  const autoSourceLabel = sourceLang === 'auto' && latestDetectedSourceLang
+    ? `${t('autoDetect')} (${getLanguageNativeName(latestDetectedSourceLang)})`
+    : t('autoDetect')
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     // Cmd+Enter (Mac) or Ctrl+Enter (Windows/Linux) to translate
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
@@ -98,7 +105,7 @@ export function TranslationView() {
             >
               {SUPPORTED_LANGUAGES.map((lang) => (
                 <option key={lang.code} value={lang.code}>
-                  {lang.code === 'auto' ? t('autoDetect') : lang.nativeName}
+                  {lang.code === 'auto' ? autoSourceLabel : lang.nativeName}
                 </option>
               ))}
             </select>

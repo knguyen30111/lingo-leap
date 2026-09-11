@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAppStore } from '../stores/appStore'
 import { useSettingsStore } from '../stores/settingsStore'
-import { SUPPORTED_LANGUAGES } from '../lib/language'
+import { SUPPORTED_LANGUAGES, getLanguageNativeName } from '../lib/language'
 
 export function LanguageSelector() {
   const { t } = useTranslation('common')
@@ -11,6 +11,7 @@ export function LanguageSelector() {
     targetLang, setTargetLang,
     inputText, setInputText,
     outputText, setOutputText,
+    latestDetectedSourceLang,
     mode
   } = useAppStore()
   const { explanationLang, setExplanationLang } = useSettingsStore()
@@ -39,6 +40,12 @@ export function LanguageSelector() {
   // For correction mode, show explanation language selector
   // Input language is always auto-detected
   if (mode === 'correct') {
+    // The selected value stays auto; naming the detected language only tells
+    // the user which input language "same as input" currently means.
+    const sameAsInputLabel = explanationLang === 'auto' && latestDetectedSourceLang
+      ? `${t('sameAsInput')} (${getLanguageNativeName(latestDetectedSourceLang)})`
+      : t('sameAsInput')
+
     return (
       <div className="flex items-center gap-2">
         <span className="text-xs text-[var(--text-secondary)]">{t('explainIn')}</span>
@@ -47,7 +54,7 @@ export function LanguageSelector() {
           onChange={(e) => setExplanationLang(e.target.value)}
           className="select-glass"
         >
-          <option value="auto">{t('sameAsInput')}</option>
+          <option value="auto">{sameAsInputLabel}</option>
           {SUPPORTED_LANGUAGES.filter(l => l.code !== 'auto').map((lang) => (
             <option key={lang.code} value={lang.code}>
               {lang.nativeName}

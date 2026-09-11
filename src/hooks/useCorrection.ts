@@ -13,12 +13,17 @@ interface RequestContext {
   isCurrent: () => boolean
 }
 
+/** The request that currently owns the output, the cache write, and loading. */
+interface ActiveRequest {
+  id: number
+  controller: AbortController
+}
+
 export function useCorrection() {
   const {
-    inputText,
     setOutputText,
-    correctionLevel,
     setCorrectionLevel,
+    setLatestDetectedSourceLang,
     setLoading,
     setError,
     setChanges,
@@ -33,24 +38,45 @@ export function useCorrection() {
     () => new GrammarService({ modelName: correctionModel, ollamaHost }),
     [correctionModel, ollamaHost]
   )
-  const abortRef = useRef<AbortController | null>(null)
+  const activeRef = useRef<ActiveRequest | null>(null)
   const requestIdRef = useRef(0)
 
   // Retire whatever is still in flight so it can no longer publish anything.
+  // The snapshot keeps a request that starts later in this same tick alive.
   const retireInFlight = useCallback(() => {
-    if (!abortRef.current) return
+    const retired = activeRef.current
+    if (!retired) return
     requestIdRef.current += 1
-    abortRef.current.abort()
-    abortRef.current = null
-    setLoading(false)
-    setChangesLoading(false)
+    retired.controller.abort()
+    if (activeRef.current === retired) {
+      activeRef.current = null
+      setLoading(false)
+      setChangesLoading(false)
+    }
   }, [setLoading, setChangesLoading])
 
-  // Any setting a request captured — host, model, explanation language — or an
-  // unmount retires that request and its background change extraction.
+  // Any setting a request captured — host, model, explanation language,
+  // streaming — or an unmount retires that request and its background change
+  // extraction.
   useEffect(() => {
     return retireInFlight
-  }, [service, explanationLang, retireInFlight])
+  }, [service, explanationLang, useStreaming, retireInFlight])
+
+  // A later edit to any selection the request captured retires it before the
+  // mutating setter returns, so no stale correction can answer new input.
+  useEffect(() => {
+    return useAppStore.subscribe((next, prev) => {
+      const inputChanged =
+        next.inputText !== prev.inputText || next.mode !== prev.mode
+      if (!inputChanged && next.correctionLevel === prev.correctionLevel) return
+
+      // A detected language describes the text it was detected from.
+      if (inputChanged && next.latestDetectedSourceLang !== null) {
+        setLatestDetectedSourceLang(null)
+      }
+      retireInFlight()
+    })
+  }, [retireInFlight, setLatestDetectedSourceLang])
 
   // Explanations are never awaited by `correct`: they publish later, and only
   // while the request that started them is still the current one.
@@ -87,6 +113,7 @@ export function useCorrection() {
     level?: CorrectionLevel,
     options?: { skipCache?: boolean }
   ) => {
+    const { inputText, correctionLevel } = useAppStore.getState()
     const textToProcess = text || inputText
     const levelToUse = level || correctionLevel
     const skipCache = options?.skipCache ?? false
@@ -94,15 +121,23 @@ export function useCorrection() {
     if (!textToProcess.trim()) return
 
     // Cancel any ongoing request, including its background change extraction
-    if (abortRef.current) {
-      abortRef.current.abort()
-    }
+    retireInFlight()
+
     const controller = new AbortController()
-    abortRef.current = controller
     const requestId = ++requestIdRef.current
+    const active: ActiveRequest = { id: requestId, controller }
+    activeRef.current = active
     const request: RequestContext = {
       signal: controller.signal,
       isCurrent: () => requestIdRef.current === requestId && !controller.signal.aborted,
+    }
+    // Only the request that still owns loading may settle it. The request
+    // keeps its controller so a later retirement still reaches the background
+    // extraction it started.
+    const settle = () => {
+      if (activeRef.current === active) {
+        setLoading(false)
+      }
     }
 
     setChangesLoading(false)
@@ -124,8 +159,10 @@ export function useCorrection() {
       if (!skipCache) {
         const cached = translationCache.get(cacheKey)
         if (cached) {
+          if (!request.isCurrent()) return
           setOutputText(cached)
-          setLoading(false)
+          setLatestDetectedSourceLang(detectedLang)
+          settle()
           // Extract changes in background
           if (cached !== textToProcess) {
             extractChangesInBackground(textToProcess, cached, detectedLang, explainLang, request)
@@ -162,13 +199,14 @@ export function useCorrection() {
 
       // Cache result
       translationCache.set(cacheKey, result)
+      setLatestDetectedSourceLang(detectedLang)
 
       // Extract changes if text was modified (async, non-blocking)
       if (result.trim() !== textToProcess.trim()) {
         extractChangesInBackground(textToProcess, result, detectedLang, explainLang, request)
       }
 
-      setLoading(false)
+      settle()
       return result
     } catch (err) {
       if (!request.isCurrent()) return
@@ -177,17 +215,17 @@ export function useCorrection() {
       }
       const errorMsg = err instanceof Error ? err.message : 'Correction failed'
       setError(errorMsg)
-      setLoading(false)
+      settle()
       throw err
     }
   }, [
-    inputText,
-    correctionLevel,
     correctionModel,
     service,
     useStreaming,
     explanationLang,
+    retireInFlight,
     setOutputText,
+    setLatestDetectedSourceLang,
     setLoading,
     setError,
     setChanges,

@@ -4,20 +4,23 @@ import { useSettingsStore } from '../stores/settingsStore'
 import { TranslationService } from '../services/translation-service'
 import { translationCache, createTranslationKey } from '../lib/cache'
 
+/** The request that currently owns the output, the cache write, and loading. */
+interface ActiveRequest {
+  id: number
+  controller: AbortController
+}
+
 export function useTranslation() {
   const {
-    inputText,
     setInputText,
     setOutputText,
-    sourceLang,
-    targetLang,
-    setSourceLang,
+    setLatestDetectedSourceLang,
     setLoading,
     setError,
   } = useAppStore()
 
   const { translationModel, ollamaHost, useStreaming } = useSettingsStore()
-  const abortRef = useRef<AbortController | null>(null)
+  const activeRef = useRef<ActiveRequest | null>(null)
   const requestIdRef = useRef(0)
 
   // Create service instance (memoized)
@@ -26,29 +29,65 @@ export function useTranslation() {
     [translationModel, ollamaHost]
   )
 
-  // A host/model change or an unmount retires whatever is still in flight.
-  useEffect(() => {
-    return () => {
-      requestIdRef.current += 1
-      abortRef.current?.abort()
-      abortRef.current = null
+  // Retire whatever is in flight so it can no longer publish anything. The
+  // snapshot keeps a request that starts later in this same tick alive.
+  const retireInFlight = useCallback(() => {
+    const retired = activeRef.current
+    if (!retired) return
+    requestIdRef.current += 1
+    retired.controller.abort()
+    if (activeRef.current === retired) {
+      activeRef.current = null
+      setLoading(false)
     }
-  }, [service])
+  }, [setLoading])
+
+  // Any setting a request captured — host, model, streaming — or an unmount
+  // retires whatever is still in flight.
+  useEffect(() => {
+    return retireInFlight
+  }, [service, useStreaming, retireInFlight])
+
+  // A later edit to any selection the request captured retires it, and it must
+  // happen while the mutating setter runs: `translateText` updates the input
+  // first and starts its own translation immediately afterwards.
+  useEffect(() => {
+    return useAppStore.subscribe((next, prev) => {
+      const selectionChanged =
+        next.inputText !== prev.inputText ||
+        next.sourceLang !== prev.sourceLang ||
+        next.mode !== prev.mode
+      if (!selectionChanged && next.targetLang === prev.targetLang) return
+
+      // A detected language describes one input under one selected source.
+      if (selectionChanged && next.latestDetectedSourceLang !== null) {
+        setLatestDetectedSourceLang(null)
+      }
+      retireInFlight()
+    })
+  }, [retireInFlight, setLatestDetectedSourceLang])
 
   const translate = useCallback(async (text?: string, options?: { skipCache?: boolean }) => {
+    const { inputText, sourceLang, targetLang } = useAppStore.getState()
     const textToProcess = text || inputText
     const skipCache = options?.skipCache ?? false
 
     if (!textToProcess.trim()) return
 
     // Cancel any ongoing request
-    if (abortRef.current) {
-      abortRef.current.abort()
-    }
+    retireInFlight()
+
     const controller = new AbortController()
-    abortRef.current = controller
     const requestId = ++requestIdRef.current
+    const request: ActiveRequest = { id: requestId, controller }
+    activeRef.current = request
     const isCurrent = () => requestIdRef.current === requestId && !controller.signal.aborted
+    // Only the request that still owns loading may settle it.
+    const settle = () => {
+      if (activeRef.current === request) {
+        setLoading(false)
+      }
+    }
 
     setLoading(true)
     setError(null)
@@ -56,21 +95,33 @@ export function useTranslation() {
 
     try {
       // Detect source language if auto
-      const detectedSource = sourceLang === 'auto'
+      const isAutomatic = sourceLang === 'auto'
+      const resolvedSourceLang = isAutomatic
         ? service.detectSourceLanguage(textToProcess)
         : sourceLang
 
-      if (sourceLang === 'auto') {
-        setSourceLang(detectedSource)
+      // A manual source answers the question the detected language answers,
+      // so no earlier detection may keep describing this request.
+      if (!isAutomatic) {
+        setLatestDetectedSourceLang(null)
+      }
+
+      // A detected language is published with the result it belongs to.
+      const publishResolvedSourceLang = () => {
+        if (isAutomatic) {
+          setLatestDetectedSourceLang(resolvedSourceLang)
+        }
       }
 
       // Check cache (skip if regenerating)
-      const cacheKey = createTranslationKey(textToProcess, detectedSource, targetLang, translationModel)
+      const cacheKey = createTranslationKey(textToProcess, resolvedSourceLang, targetLang, translationModel)
       if (!skipCache) {
         const cached = translationCache.get(cacheKey)
         if (cached) {
+          if (!isCurrent()) return
           setOutputText(cached)
-          setLoading(false)
+          publishResolvedSourceLang()
+          settle()
           return cached
         }
       }
@@ -80,7 +131,7 @@ export function useTranslation() {
       if (useStreaming) {
         for await (const chunk of service.translateStream(
           textToProcess,
-          detectedSource,
+          resolvedSourceLang,
           targetLang,
           controller.signal
         )) {
@@ -91,7 +142,7 @@ export function useTranslation() {
       } else {
         const response = await service.translate(
           textToProcess,
-          detectedSource,
+          resolvedSourceLang,
           targetLang,
           controller.signal
         )
@@ -105,38 +156,32 @@ export function useTranslation() {
 
       // Cache result
       translationCache.set(cacheKey, result)
+      publishResolvedSourceLang()
 
-      setLoading(false)
+      settle()
       return result
     } catch (err) {
       if (!isCurrent()) return
       if (err instanceof Error && err.name === 'AbortError') return
       const errorMsg = err instanceof Error ? err.message : 'Translation failed'
       setError(errorMsg)
-      setLoading(false)
+      settle()
       throw err
     }
   }, [
-    inputText,
-    sourceLang,
-    targetLang,
     translationModel,
     useStreaming,
     service,
+    retireInFlight,
     setOutputText,
-    setSourceLang,
+    setLatestDetectedSourceLang,
     setLoading,
     setError,
   ])
 
   const cancel = useCallback(() => {
-    if (abortRef.current) {
-      requestIdRef.current += 1
-      abortRef.current.abort()
-      abortRef.current = null
-      setLoading(false)
-    }
-  }, [setLoading])
+    retireInFlight()
+  }, [retireInFlight])
 
   const translateText = useCallback(async (text: string) => {
     setInputText(text)

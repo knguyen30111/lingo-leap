@@ -10,6 +10,7 @@ describe('appStore', () => {
       inputText: '',
       outputText: '',
       sourceLang: 'auto',
+      latestDetectedSourceLang: null,
       targetLang: 'ja',
       isLoading: false,
       error: null,
@@ -27,6 +28,7 @@ describe('appStore', () => {
       expect(state.inputText).toBe('')
       expect(state.outputText).toBe('')
       expect(state.sourceLang).toBe('auto')
+      expect(state.latestDetectedSourceLang).toBeNull()
       expect(state.targetLang).toBe('ja')
       expect(state.isLoading).toBe(false)
       expect(state.error).toBeNull()
@@ -83,6 +85,12 @@ describe('appStore', () => {
       expect(useAppStore.getState().changes).toEqual([])
       expect(useAppStore.getState().error).toBeNull()
     })
+
+    it('clears the latest detected source language when mode changes', () => {
+      useAppStore.setState({ latestDetectedSourceLang: 'fr' })
+      useAppStore.getState().setMode('correct')
+      expect(useAppStore.getState().latestDetectedSourceLang).toBeNull()
+    })
   })
 
   describe('setCorrectionLevel', () => {
@@ -125,6 +133,12 @@ describe('appStore', () => {
       useAppStore.getState().setInputText('')
       expect(useAppStore.getState().inputText).toBe('')
     })
+
+    it('clears the latest detected source language, which described the old input', () => {
+      useAppStore.setState({ latestDetectedSourceLang: 'fr' })
+      useAppStore.getState().setInputText('Guten Tag')
+      expect(useAppStore.getState().latestDetectedSourceLang).toBeNull()
+    })
   })
 
   describe('setOutputText', () => {
@@ -142,6 +156,31 @@ describe('appStore', () => {
 
     it('sets to auto', () => {
       useAppStore.getState().setSourceLang('auto')
+      expect(useAppStore.getState().sourceLang).toBe('auto')
+    })
+
+    it('clears the latest detected source language when the user picks a source', () => {
+      useAppStore.setState({ latestDetectedSourceLang: 'fr' })
+      useAppStore.getState().setSourceLang('en')
+      expect(useAppStore.getState().latestDetectedSourceLang).toBeNull()
+    })
+  })
+
+  describe('setLatestDetectedSourceLang', () => {
+    it('stores the language the detector resolved', () => {
+      useAppStore.getState().setLatestDetectedSourceLang('fr')
+      expect(useAppStore.getState().latestDetectedSourceLang).toBe('fr')
+    })
+
+    it('clears the stored language with null', () => {
+      useAppStore.setState({ latestDetectedSourceLang: 'fr' })
+      useAppStore.getState().setLatestDetectedSourceLang(null)
+      expect(useAppStore.getState().latestDetectedSourceLang).toBeNull()
+    })
+
+    it('leaves the selected source language untouched', () => {
+      useAppStore.setState({ sourceLang: 'auto' })
+      useAppStore.getState().setLatestDetectedSourceLang('ja')
       expect(useAppStore.getState().sourceLang).toBe('auto')
     })
   })
@@ -218,6 +257,7 @@ describe('appStore', () => {
         inputText: 'some input',
         outputText: 'some output',
         sourceLang: 'en',
+        latestDetectedSourceLang: 'fr',
         targetLang: 'ko',
         isLoading: true,
         error: 'some error',
@@ -234,6 +274,7 @@ describe('appStore', () => {
       expect(state.inputText).toBe('')
       expect(state.outputText).toBe('')
       expect(state.sourceLang).toBe('auto')
+      expect(state.latestDetectedSourceLang).toBeNull()
       expect(state.targetLang).toBe('ja')
       expect(state.isLoading).toBe(false)
       expect(state.error).toBeNull()

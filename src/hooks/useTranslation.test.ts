@@ -48,6 +48,7 @@ describe('useTranslation', () => {
       inputText: 'Hello world',
       outputText: '',
       sourceLang: 'en',
+      latestDetectedSourceLang: null,
       targetLang: 'vi',
       isLoading: false,
       error: null,
@@ -256,7 +257,8 @@ describe('useTranslation', () => {
     })
 
     expect(mockDetectSourceLanguage).toHaveBeenCalled()
-    expect(useAppStore.getState().sourceLang).toBe('fr')
+    expect(useAppStore.getState().sourceLang).toBe('auto')
+    expect(useAppStore.getState().latestDetectedSourceLang).toBe('fr')
   })
 
   it('does not detect when source language is specified', async () => {
@@ -345,6 +347,7 @@ describe('useTranslation cancellation and races', () => {
       inputText: 'Hello world',
       outputText: '',
       sourceLang: 'en',
+      latestDetectedSourceLang: null,
       targetLang: 'vi',
       isLoading: false,
       error: null,
@@ -531,6 +534,7 @@ describe('useTranslation service composition', () => {
       inputText: 'Hello world',
       outputText: '',
       sourceLang: 'en',
+      latestDetectedSourceLang: null,
       targetLang: 'vi',
       isLoading: false,
       error: null,
@@ -592,7 +596,7 @@ describe('useTranslation service composition', () => {
     expect(useAppStore.getState().outputText).toBe('Xin chào')
   })
 
-  it('keys the cache and the store on the language the service detected', async () => {
+  it('keys the cache and the detected state on the language the service detected', async () => {
     useAppStore.setState({ sourceLang: 'auto' })
     mockDetectSourceLanguage.mockReturnValue('fr')
 
@@ -602,7 +606,8 @@ describe('useTranslation service composition', () => {
       await result.current.translate()
     })
 
-    expect(useAppStore.getState().sourceLang).toBe('fr')
+    expect(useAppStore.getState().sourceLang).toBe('auto')
+    expect(useAppStore.getState().latestDetectedSourceLang).toBe('fr')
     expect(translationCache.get).toHaveBeenCalledWith('Hello world-fr-vi-gemma3:4b')
     expect(translationCache.set).toHaveBeenCalledWith(
       'Hello world-fr-vi-gemma3:4b',
@@ -624,5 +629,606 @@ describe('useTranslation service composition', () => {
     const violations = forbidden.filter(pattern => pattern.test(translationHookSource))
 
     expect(violations).toEqual([])
+  })
+})
+
+function resetTranslationEnvironment() {
+  mockTranslate.mockReset().mockResolvedValue({ translated: 'Xin chào thế giới' })
+  mockTranslateStream.mockReset()
+  mockDetectSourceLanguage.mockReset().mockReturnValue('en')
+
+  useAppStore.setState({
+    mode: 'translate',
+    inputText: 'Hello world',
+    outputText: '',
+    sourceLang: 'auto',
+    latestDetectedSourceLang: null,
+    targetLang: 'vi',
+    isLoading: false,
+    error: null,
+  })
+  useSettingsStore.setState({
+    translationModel: 'gemma3:4b',
+    ollamaHost: 'http://localhost:11434',
+    useStreaming: false,
+  })
+
+  serviceConstructorOptions.length = 0
+  vi.mocked(translationCache.get).mockReset()
+  vi.mocked(translationCache.set).mockReset()
+}
+
+describe('useTranslation automatic source language', () => {
+  beforeEach(resetTranslationEnvironment)
+  afterEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('keeps auto selected and reports the detected language separately', async () => {
+    mockDetectSourceLanguage.mockReturnValue('fr')
+
+    const { result } = renderHook(() => useTranslation())
+
+    await act(async () => {
+      await result.current.translate()
+    })
+
+    expect(useAppStore.getState().sourceLang).toBe('auto')
+    expect(useAppStore.getState().latestDetectedSourceLang).toBe('fr')
+  })
+
+  it('detects each new input instead of reusing the first detected language', async () => {
+    mockDetectSourceLanguage.mockReturnValueOnce('fr').mockReturnValueOnce('ja')
+
+    const { result } = renderHook(() => useTranslation())
+
+    await act(async () => {
+      await result.current.translate('Bonjour')
+    })
+    await act(async () => {
+      await result.current.translate('こんにちは')
+    })
+
+    expect(mockDetectSourceLanguage.mock.calls.map(call => call[0])).toEqual([
+      'Bonjour',
+      'こんにちは',
+    ])
+    expect(mockTranslate.mock.calls[0][1]).toBe('fr')
+    expect(mockTranslate.mock.calls[1][1]).toBe('ja')
+    expect(translationCache.set).toHaveBeenCalledWith(
+      'Bonjour-fr-vi-gemma3:4b',
+      'Xin chào thế giới'
+    )
+    expect(translationCache.set).toHaveBeenCalledWith(
+      'こんにちは-ja-vi-gemma3:4b',
+      'Xin chào thế giới'
+    )
+    expect(useAppStore.getState().sourceLang).toBe('auto')
+    expect(useAppStore.getState().latestDetectedSourceLang).toBe('ja')
+  })
+
+  it('reports the detected language of a cached automatic translation', async () => {
+    mockDetectSourceLanguage.mockReturnValue('fr')
+    vi.mocked(translationCache.get).mockReturnValue('Cached translation')
+
+    const { result } = renderHook(() => useTranslation())
+
+    await act(async () => {
+      await result.current.translate()
+    })
+
+    expect(translationCache.get).toHaveBeenCalledWith('Hello world-fr-vi-gemma3:4b')
+    expect(useAppStore.getState().outputText).toBe('Cached translation')
+    expect(useAppStore.getState().latestDetectedSourceLang).toBe('fr')
+    expect(useAppStore.getState().sourceLang).toBe('auto')
+  })
+
+  it('reports the detected language of a streamed automatic translation', async () => {
+    useSettingsStore.setState({ useStreaming: true })
+    mockDetectSourceLanguage.mockReturnValue('fr')
+    async function* stream() {
+      yield 'Xin'
+      yield 'Xin chào'
+    }
+    mockTranslateStream.mockReturnValue(stream())
+
+    const { result } = renderHook(() => useTranslation())
+
+    await act(async () => {
+      await result.current.translate()
+    })
+
+    expect(mockTranslateStream.mock.calls[0][1]).toBe('fr')
+    expect(useAppStore.getState().outputText).toBe('Xin chào')
+    expect(useAppStore.getState().latestDetectedSourceLang).toBe('fr')
+    expect(useAppStore.getState().sourceLang).toBe('auto')
+  })
+
+  it('never overwrites a manual source selection with a detected language', async () => {
+    useAppStore.setState({ sourceLang: 'en', latestDetectedSourceLang: 'fr' })
+    mockDetectSourceLanguage.mockReturnValue('de')
+
+    const { result } = renderHook(() => useTranslation())
+
+    await act(async () => {
+      await result.current.translate()
+    })
+
+    expect(mockDetectSourceLanguage).not.toHaveBeenCalled()
+    expect(mockTranslate.mock.calls[0][1]).toBe('en')
+    expect(translationCache.get).toHaveBeenCalledWith('Hello world-en-vi-gemma3:4b')
+    expect(useAppStore.getState().sourceLang).toBe('en')
+    expect(useAppStore.getState().latestDetectedSourceLang).toBeNull()
+  })
+
+  it('keeps a manual cached translation from reviving a stale detected language', async () => {
+    useAppStore.setState({ sourceLang: 'en', latestDetectedSourceLang: 'fr' })
+    mockDetectSourceLanguage.mockReturnValue('de')
+    vi.mocked(translationCache.get).mockReturnValue('Cached translation')
+
+    const { result } = renderHook(() => useTranslation())
+
+    await act(async () => {
+      await result.current.translate()
+    })
+
+    expect(useAppStore.getState().outputText).toBe('Cached translation')
+    expect(useAppStore.getState().latestDetectedSourceLang).toBeNull()
+  })
+
+  it('keeps a manual streamed translation from reviving a stale detected language', async () => {
+    useSettingsStore.setState({ useStreaming: true })
+    useAppStore.setState({ sourceLang: 'en', latestDetectedSourceLang: 'fr' })
+    mockDetectSourceLanguage.mockReturnValue('de')
+    async function* stream() {
+      yield 'Xin chào'
+    }
+    mockTranslateStream.mockReturnValue(stream())
+
+    const { result } = renderHook(() => useTranslation())
+
+    await act(async () => {
+      await result.current.translate()
+    })
+
+    expect(mockTranslateStream.mock.calls[0][1]).toBe('en')
+    expect(useAppStore.getState().outputText).toBe('Xin chào')
+    expect(useAppStore.getState().latestDetectedSourceLang).toBeNull()
+  })
+
+  it('does not report a detected language for a cancelled translation', async () => {
+    mockDetectSourceLanguage.mockReturnValue('fr')
+    let resolveTranslate: (value: { translated: string }) => void
+    mockTranslate.mockReturnValue(new Promise(resolve => { resolveTranslate = resolve }))
+
+    const { result } = renderHook(() => useTranslation())
+
+    let translatePromise!: Promise<string | undefined>
+    act(() => {
+      translatePromise = result.current.translate()
+    })
+    await waitFor(() => expect(useAppStore.getState().isLoading).toBe(true))
+
+    act(() => {
+      result.current.cancel()
+    })
+
+    await act(async () => {
+      resolveTranslate!({ translated: 'Late result' })
+      await translatePromise
+    })
+
+    expect(useAppStore.getState().latestDetectedSourceLang).toBeNull()
+    expect(useAppStore.getState().isLoading).toBe(false)
+  })
+
+  it('lets only the newest request report its detected language', async () => {
+    mockDetectSourceLanguage.mockReturnValueOnce('fr').mockReturnValueOnce('ja')
+    const resolvers: ((value: { translated: string }) => void)[] = []
+    mockTranslate.mockImplementation(
+      () => new Promise(resolve => { resolvers.push(resolve) })
+    )
+
+    const { result } = renderHook(() => useTranslation())
+
+    let first!: Promise<string | undefined>
+    let second!: Promise<string | undefined>
+    act(() => {
+      first = result.current.translate('Bonjour')
+    })
+    act(() => {
+      second = result.current.translate('こんにちは')
+    })
+
+    await act(async () => {
+      resolvers[1]({ translated: 'SECOND' })
+      await second
+    })
+    await act(async () => {
+      resolvers[0]({ translated: 'FIRST' })
+      await first
+    })
+
+    expect(useAppStore.getState().outputText).toBe('SECOND')
+    expect(useAppStore.getState().latestDetectedSourceLang).toBe('ja')
+  })
+
+  it('ignores a resumed stream chunk from a superseded detection', async () => {
+    useSettingsStore.setState({ useStreaming: true })
+    mockDetectSourceLanguage.mockReturnValueOnce('fr').mockReturnValueOnce('ja')
+
+    let releaseFirst: () => void
+    const gate = new Promise<void>(resolve => { releaseFirst = resolve })
+
+    async function* firstStream() {
+      yield 'first-a'
+      await gate
+      yield 'first-b'
+    }
+    async function* secondStream() {
+      yield 'second'
+    }
+    mockTranslateStream.mockReturnValueOnce(firstStream()).mockReturnValueOnce(secondStream())
+
+    const { result } = renderHook(() => useTranslation())
+
+    await act(async () => {
+      result.current.translate('Bonjour')
+    })
+    await act(async () => {
+      await result.current.translate('こんにちは')
+    })
+
+    expect(useAppStore.getState().latestDetectedSourceLang).toBe('ja')
+
+    await act(async () => {
+      releaseFirst!()
+    })
+
+    expect(useAppStore.getState().outputText).toBe('second')
+    expect(useAppStore.getState().latestDetectedSourceLang).toBe('ja')
+    expect(translationCache.set).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('useTranslation request retirement', () => {
+  beforeEach(resetTranslationEnvironment)
+  afterEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('publishes an explicit text that differs from the stored input', async () => {
+    useAppStore.setState({ inputText: 'Stored input' })
+    mockDetectSourceLanguage.mockReturnValue('fr')
+
+    const { result } = renderHook(() => useTranslation())
+
+    await act(async () => {
+      await result.current.translate('Custom text')
+    })
+
+    expect(mockDetectSourceLanguage).toHaveBeenCalledWith('Custom text')
+    expect(mockTranslate.mock.calls[0][0]).toBe('Custom text')
+    expect(translationCache.get).toHaveBeenCalledWith('Custom text-fr-vi-gemma3:4b')
+    expect(translationCache.set).toHaveBeenCalledWith(
+      'Custom text-fr-vi-gemma3:4b',
+      'Xin chào thế giới'
+    )
+    expect(useAppStore.getState().outputText).toBe('Xin chào thế giới')
+    expect(useAppStore.getState().latestDetectedSourceLang).toBe('fr')
+  })
+
+  it('retires the older request while translateText stores its own input', async () => {
+    mockDetectSourceLanguage.mockReturnValue('fr')
+    const resolvers: ((value: { translated: string }) => void)[] = []
+    mockTranslate.mockImplementation(
+      () => new Promise(resolve => { resolvers.push(resolve) })
+    )
+
+    const { result } = renderHook(() => useTranslation())
+
+    let older!: Promise<string | undefined>
+    act(() => {
+      older = result.current.translate('Old input')
+    })
+    await waitFor(() => expect(useAppStore.getState().isLoading).toBe(true))
+
+    let newer!: Promise<string | undefined>
+    await act(async () => {
+      newer = result.current.translateText('Custom text')
+    })
+
+    expect(useAppStore.getState().inputText).toBe('Custom text')
+    expect(mockTranslate.mock.calls[0][3].aborted).toBe(true)
+    expect(mockTranslate.mock.calls[1][3].aborted).toBe(false)
+    expect(useAppStore.getState().isLoading).toBe(true)
+
+    await act(async () => {
+      resolvers[0]({ translated: 'OLD' })
+      await older
+    })
+
+    expect(useAppStore.getState().outputText).toBe('')
+
+    await act(async () => {
+      resolvers[1]({ translated: 'NEW' })
+      await newer
+    })
+
+    expect(useAppStore.getState().outputText).toBe('NEW')
+    expect(useAppStore.getState().latestDetectedSourceLang).toBe('fr')
+    expect(useAppStore.getState().isLoading).toBe(false)
+    expect(translationCache.set).toHaveBeenCalledTimes(1)
+    expect(translationCache.set).toHaveBeenCalledWith('Custom text-fr-vi-gemma3:4b', 'NEW')
+  })
+
+  it('retires a translateText request once the input changes again', async () => {
+    mockDetectSourceLanguage.mockReturnValue('fr')
+    const resolvers: ((value: { translated: string }) => void)[] = []
+    mockTranslate.mockImplementation(
+      () => new Promise(resolve => { resolvers.push(resolve) })
+    )
+
+    const { result } = renderHook(() => useTranslation())
+
+    let pending!: Promise<string | undefined>
+    await act(async () => {
+      pending = result.current.translateText('Custom text')
+    })
+    await waitFor(() => expect(useAppStore.getState().isLoading).toBe(true))
+
+    act(() => {
+      useAppStore.getState().setInputText('Later text')
+    })
+
+    expect(mockTranslate.mock.calls[0][3].aborted).toBe(true)
+    expect(useAppStore.getState().isLoading).toBe(false)
+
+    await act(async () => {
+      resolvers[0]({ translated: 'STALE' })
+      await pending
+    })
+
+    expect(useAppStore.getState().outputText).toBe('')
+    expect(useAppStore.getState().latestDetectedSourceLang).toBeNull()
+    expect(translationCache.set).not.toHaveBeenCalled()
+    expect(useAppStore.getState().isLoading).toBe(false)
+  })
+
+  const storeChanges = [
+    ['the input text', () => useAppStore.getState().setInputText('Later text')],
+    ['the selected source language', () => useAppStore.getState().setSourceLang('de')],
+    ['the target language', () => useAppStore.getState().setTargetLang('ko')],
+    ['the mode', () => useAppStore.getState().setMode('correct')],
+  ] as const
+
+  it.each(storeChanges)(
+    'aborts and retires an in-flight translation when %s changes',
+    async (_label, mutate) => {
+      mockDetectSourceLanguage.mockReturnValue('fr')
+      let resolveTranslate: (value: { translated: string }) => void
+      mockTranslate.mockReturnValue(new Promise(resolve => { resolveTranslate = resolve }))
+
+      const { result } = renderHook(() => useTranslation())
+
+      let pending!: Promise<string | undefined>
+      act(() => {
+        pending = result.current.translate()
+      })
+      await waitFor(() => expect(useAppStore.getState().isLoading).toBe(true))
+
+      act(() => {
+        mutate()
+      })
+
+      expect(mockTranslate.mock.calls[0][3].aborted).toBe(true)
+      expect(useAppStore.getState().isLoading).toBe(false)
+
+      await act(async () => {
+        resolveTranslate!({ translated: 'Stale translation' })
+        await pending
+      })
+
+      expect(useAppStore.getState().outputText).toBe('')
+      expect(translationCache.set).not.toHaveBeenCalled()
+      expect(useAppStore.getState().latestDetectedSourceLang).toBeNull()
+      expect(useAppStore.getState().isLoading).toBe(false)
+    }
+  )
+
+  it.each(storeChanges)(
+    'does not report an error from a translation retired by %s',
+    async (_label, mutate) => {
+      let rejectTranslate: (reason: unknown) => void
+      mockTranslate.mockReturnValue(new Promise((_resolve, reject) => { rejectTranslate = reject }))
+
+      const { result } = renderHook(() => useTranslation())
+
+      let pending!: Promise<string | undefined>
+      act(() => {
+        pending = result.current.translate()
+      })
+      await waitFor(() => expect(useAppStore.getState().isLoading).toBe(true))
+
+      act(() => {
+        mutate()
+      })
+
+      await act(async () => {
+        rejectTranslate!(new Error('Server error'))
+        await pending
+      })
+
+      expect(useAppStore.getState().error).toBeNull()
+      expect(useAppStore.getState().outputText).toBe('')
+    }
+  )
+
+  it('leaves the detected language alone when only the detected state changes', async () => {
+    mockDetectSourceLanguage.mockReturnValue('fr')
+    let resolveTranslate: (value: { translated: string }) => void
+    mockTranslate.mockReturnValue(new Promise(resolve => { resolveTranslate = resolve }))
+
+    const { result } = renderHook(() => useTranslation())
+
+    let pending!: Promise<string | undefined>
+    act(() => {
+      pending = result.current.translate()
+    })
+    await waitFor(() => expect(useAppStore.getState().isLoading).toBe(true))
+
+    act(() => {
+      useAppStore.getState().setLatestDetectedSourceLang('ja')
+    })
+
+    expect(mockTranslate.mock.calls[0][3].aborted).toBe(false)
+    expect(useAppStore.getState().isLoading).toBe(true)
+
+    await act(async () => {
+      resolveTranslate!({ translated: 'Xin chào' })
+      await pending
+    })
+
+    expect(useAppStore.getState().outputText).toBe('Xin chào')
+    expect(useAppStore.getState().latestDetectedSourceLang).toBe('fr')
+  })
+
+  const settingsChanges = [
+    ['the translation model', { translationModel: 'other-model:1b' }],
+    ['the Ollama host', { ollamaHost: 'http://other-host:11434' }],
+    ['the streaming setting', { useStreaming: true }],
+  ] as const
+
+  it.each(settingsChanges)(
+    'aborts and retires an in-flight translation when %s changes',
+    async (_label, change) => {
+      mockDetectSourceLanguage.mockReturnValue('fr')
+      let resolveTranslate: (value: { translated: string }) => void
+      mockTranslate.mockReturnValue(new Promise(resolve => { resolveTranslate = resolve }))
+
+      const { result } = renderHook(() => useTranslation())
+
+      let pending!: Promise<string | undefined>
+      act(() => {
+        pending = result.current.translate()
+      })
+      await waitFor(() => expect(useAppStore.getState().isLoading).toBe(true))
+
+      act(() => {
+        useSettingsStore.setState(change)
+      })
+
+      expect(mockTranslate.mock.calls[0][3].aborted).toBe(true)
+
+      await act(async () => {
+        resolveTranslate!({ translated: 'Stale translation' })
+        await pending
+      })
+
+      expect(useAppStore.getState().outputText).toBe('')
+      expect(translationCache.set).not.toHaveBeenCalled()
+      expect(useAppStore.getState().latestDetectedSourceLang).toBeNull()
+      expect(useAppStore.getState().isLoading).toBe(false)
+    }
+  )
+
+  it('retires a resumed translation stream when the streaming setting changes', async () => {
+    useSettingsStore.setState({ useStreaming: true })
+    mockDetectSourceLanguage.mockReturnValue('fr')
+
+    let releaseStream: () => void
+    const gate = new Promise<void>(resolve => { releaseStream = resolve })
+
+    async function* gatedStream() {
+      yield 'first-a'
+      await gate
+      yield 'first-b'
+    }
+    mockTranslateStream.mockReturnValue(gatedStream())
+
+    const { result } = renderHook(() => useTranslation())
+
+    let pending!: Promise<string | undefined>
+    await act(async () => {
+      pending = result.current.translate()
+    })
+    expect(useAppStore.getState().outputText).toBe('first-a')
+
+    act(() => {
+      useSettingsStore.setState({ useStreaming: false })
+    })
+
+    expect(mockTranslateStream.mock.calls[0][3].aborted).toBe(true)
+    expect(useAppStore.getState().isLoading).toBe(false)
+
+    await act(async () => {
+      releaseStream!()
+      await pending
+    })
+
+    expect(useAppStore.getState().outputText).toBe('first-a')
+    expect(translationCache.set).not.toHaveBeenCalled()
+    expect(useAppStore.getState().latestDetectedSourceLang).toBeNull()
+    expect(useAppStore.getState().isLoading).toBe(false)
+  })
+
+  it('lets a request started after a streaming toggle publish its own result', async () => {
+    mockDetectSourceLanguage.mockReturnValue('fr')
+    async function* stream() {
+      yield 'Xin'
+      yield 'Xin chào'
+    }
+    mockTranslateStream.mockReturnValue(stream())
+
+    const { result } = renderHook(() => useTranslation())
+
+    act(() => {
+      useSettingsStore.setState({ useStreaming: true })
+    })
+
+    await act(async () => {
+      await result.current.translate()
+    })
+
+    expect(mockTranslate).not.toHaveBeenCalled()
+    expect(useAppStore.getState().outputText).toBe('Xin chào')
+    expect(useAppStore.getState().latestDetectedSourceLang).toBe('fr')
+    expect(useAppStore.getState().isLoading).toBe(false)
+  })
+
+  it('clears a detected language that a direct input mutation invalidates', async () => {
+    mockDetectSourceLanguage.mockReturnValue('fr')
+
+    const { result } = renderHook(() => useTranslation())
+
+    await act(async () => {
+      await result.current.translate()
+    })
+    expect(useAppStore.getState().latestDetectedSourceLang).toBe('fr')
+
+    act(() => {
+      useAppStore.setState({ inputText: 'Later text' })
+    })
+
+    expect(useAppStore.getState().latestDetectedSourceLang).toBeNull()
+  })
+
+  it('stops listening to the store after unmount', async () => {
+    mockDetectSourceLanguage.mockReturnValue('fr')
+
+    const { result, unmount } = renderHook(() => useTranslation())
+
+    await act(async () => {
+      await result.current.translate()
+    })
+
+    unmount()
+
+    act(() => {
+      useAppStore.getState().setTargetLang('ko')
+    })
+
+    expect(useAppStore.getState().targetLang).toBe('ko')
+    expect(useAppStore.getState().isLoading).toBe(false)
   })
 })

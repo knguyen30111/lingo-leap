@@ -27,6 +27,8 @@ vi.mock('../lib/language', () => ({
     { code: 'vi', name: 'Vietnamese', nativeName: 'Tiếng Việt' },
     { code: 'ja', name: 'Japanese', nativeName: '日本語' },
   ],
+  getLanguageNativeName: (code: string) =>
+    ({ auto: 'Auto-detect', en: 'English', vi: 'Tiếng Việt', ja: '日本語' })[code] ?? code,
 }))
 
 describe('LanguageSelector', () => {
@@ -34,6 +36,7 @@ describe('LanguageSelector', () => {
     useAppStore.setState({
       mode: 'translate',
       sourceLang: 'en',
+      latestDetectedSourceLang: null,
       targetLang: 'vi',
       inputText: 'Hello',
       outputText: 'Xin chào',
@@ -177,5 +180,49 @@ describe('LanguageSelector', () => {
 
       expect(screen.queryByTitle('Swap languages')).not.toBeInTheDocument()
     })
+  })
+})
+
+describe('LanguageSelector detected source language', () => {
+  beforeEach(() => {
+    useAppStore.setState({
+      mode: 'correct',
+      sourceLang: 'auto',
+      latestDetectedSourceLang: null,
+      targetLang: 'vi',
+      inputText: 'Hello wrold',
+      outputText: '',
+    })
+    useSettingsStore.setState({ explanationLang: 'auto' })
+  })
+
+  afterEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('names the detected language next to the same-as-input option', () => {
+    useAppStore.setState({ latestDetectedSourceLang: 'ja' })
+
+    render(<LanguageSelector />)
+
+    const select = screen.getByRole('combobox') as HTMLSelectElement
+    expect(select.value).toBe('auto')
+    expect(useSettingsStore.getState().explanationLang).toBe('auto')
+    expect(screen.getByRole('option', { name: 'Same as input (日本語)' })).toBeInTheDocument()
+  })
+
+  it('shows the plain same-as-input label before anything is detected', () => {
+    render(<LanguageSelector />)
+
+    expect(screen.getByRole('option', { name: 'Same as input' })).toBeInTheDocument()
+  })
+
+  it('does not name a detected language for an explicit explanation language', () => {
+    useAppStore.setState({ latestDetectedSourceLang: 'ja' })
+    useSettingsStore.setState({ explanationLang: 'en' })
+
+    render(<LanguageSelector />)
+
+    expect(screen.getByRole('option', { name: 'Same as input' })).toBeInTheDocument()
   })
 })

@@ -5,7 +5,6 @@ import {
   getLanguageName,
   getLanguageNativeName,
   isSameLanguage,
-  shouldUseCorrection,
 } from './language'
 
 describe('SUPPORTED_LANGUAGES', () => {
@@ -123,17 +122,5 @@ describe('isSameLanguage', () => {
   it('returns false when source is auto', () => {
     expect(isSameLanguage('auto', 'auto')).toBe(false)
     expect(isSameLanguage('auto', 'en')).toBe(false)
-  })
-})
-
-describe('shouldUseCorrection', () => {
-  it('returns true when detected language matches target', () => {
-    expect(shouldUseCorrection('Hello world', 'en')).toBe(true)
-    expect(shouldUseCorrection('こんにちは', 'ja')).toBe(true)
-  })
-
-  it('returns false when detected language differs from target', () => {
-    expect(shouldUseCorrection('Hello world', 'ja')).toBe(false)
-    expect(shouldUseCorrection('こんにちは', 'en')).toBe(false)
   })
 })
