@@ -130,12 +130,18 @@ Required check names do not make their workflow definitions immutable: a pull re
 manual trust boundary is required while the repository has a single maintainer and cannot require
 an independent GitHub approval without making owner-authored pull requests unmergeable.
 
-| Check      | What it runs                                                           | Run it locally                                              |
-| ---------- | ---------------------------------------------------------------------- | ----------------------------------------------------------- |
-| `frontend` | locked install, TypeScript, Vite build, unit tests, coverage thresholds | `npm ci && npm run build && npm run test:coverage`           |
-| `rust`     | locked Rust check of the Tauri crate                                    | `cargo check --locked --manifest-path src-tauri/Cargo.toml`  |
+| Check      | What it runs                                                                              | Run it locally                                                                         |
+| ---------- | ----------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `frontend` | locked install, dependency audit, TypeScript, Vite build, unit tests, coverage thresholds | `npm ci && npm audit --audit-level=moderate && npm run build && npm run test:coverage` |
+| `rust`     | locked Rust check of the Tauri crate                                                      | `cargo check --locked --manifest-path src-tauri/Cargo.toml`                            |
 
 Node is pinned by `.nvmrc`; run `nvm use` before the commands above so local results match CI.
+
+The audit step covers the whole installed tree, including development and build tooling, because
+those packages execute on developer and CI machines. A moderate or higher advisory fails the job.
+The fix is a supported dependency upgrade, never a lower `--audit-level`, an `--omit=dev` scope, or
+a skipped step.
+
 Coverage thresholds live in `vitest.config.ts` and are enforced by `npm run test:coverage`.
 A coverage failure is fixed by adding a test, never by lowering a threshold.
 
