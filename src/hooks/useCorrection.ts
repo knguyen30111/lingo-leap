@@ -1,11 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react'
 import { useAppStore, CorrectionLevel } from '../stores/appStore'
 import { useSettingsStore } from '../stores/settingsStore'
-import { OllamaClient } from '../lib/ollama-client'
-import { detectLanguage } from '../lib/language'
-import { getCorrectionPrompt, getChangesExtractionPrompt } from '../lib/prompts'
+import { GrammarService } from '../services/grammar-service'
 import { translationCache, createCorrectionKey } from '../lib/cache'
-import type { Change } from '../types'
 
 /**
  * One correction attempt plus the background extraction it starts. Anything
@@ -14,16 +11,6 @@ import type { Change } from '../types'
 interface RequestContext {
   signal: AbortSignal
   isCurrent: () => boolean
-}
-
-// Clean model output artifacts
-function cleanModelOutput(text: string): string {
-  return text
-    .replace(/<\|im_end\|>/g, '')
-    .replace(/<\|end\|>/g, '')
-    .replace(/<\|assistant\|>/g, '')
-    .replace(/<\|im_start\|>assistant\n?/g, '')
-    .trim()
 }
 
 export function useCorrection() {
@@ -40,8 +27,12 @@ export function useCorrection() {
 
   const { correctionModel, ollamaHost, useStreaming, explanationLang } = useSettingsStore()
 
-  // One provider per configured host; it never changes endpoint mid-flight.
-  const provider = useMemo(() => new OllamaClient(ollamaHost), [ollamaHost])
+  // One task service per configured model and host; it never changes endpoint
+  // mid-flight, and it owns every prompt, transport, and parsing decision.
+  const service = useMemo(
+    () => new GrammarService({ modelName: correctionModel, ollamaHost }),
+    [correctionModel, ollamaHost]
+  )
   const abortRef = useRef<AbortController | null>(null)
   const requestIdRef = useRef(0)
 
@@ -59,22 +50,11 @@ export function useCorrection() {
   // unmount retires that request and its background change extraction.
   useEffect(() => {
     return retireInFlight
-  }, [provider, correctionModel, explanationLang, retireInFlight])
+  }, [service, explanationLang, retireInFlight])
 
-  // Create fallback change when JSON parsing fails
-  const createFallbackChange = useCallback((original: string, corrected: string): Change[] => {
-    if (original.trim() !== corrected.trim()) {
-      return [{
-        from: original.trim(),
-        to: corrected.trim(),
-        reason: 'Text was corrected/improved'
-      }]
-    }
-    return []
-  }, [])
-
-  // Extract changes in background with robust fallback
-  const extractChangesFromModel = useCallback((
+  // Explanations are never awaited by `correct`: they publish later, and only
+  // while the request that started them is still the current one.
+  const extractChangesInBackground = useCallback((
     original: string,
     corrected: string,
     textLang: string,
@@ -83,102 +63,24 @@ export function useCorrection() {
   ) => {
     if (!request.isCurrent()) return
 
-    console.log('[Changes] Extracting changes...')
     setChangesLoading(true)
-    const changesPrompt = getChangesExtractionPrompt(original, corrected, textLang, explainLang)
 
-    provider.generate({
-      model: correctionModel,
-      prompt: changesPrompt,
-      options: {
-        temperature: 0.1,
-        num_ctx: 2048,
-      },
-    }, request.signal).then(response => {
-      // Check if superseded or aborted
-      if (!request.isCurrent()) {
-        console.log('[Changes] Extraction aborted')
-        return
-      }
-      console.log('[Changes] Raw response:', response)
-
-      // Clean the response first
-      const cleaned = response
-        .replace(/<\|im_end\|>/g, '')
-        .replace(/<\|im_start\|>assistant\n?/g, '')
-        .trim()
-
-      // Try to match JSON array
-      const jsonMatch = cleaned.match(/\[[\s\S]*\]/)
-      if (jsonMatch) {
-        let jsonStr = jsonMatch[0]
-
-        // Try to fix common JSON issues (missing closing brackets)
-        if (!jsonStr.endsWith(']')) {
-          jsonStr = jsonStr + ']'
+    service.extractChanges(original, corrected, textLang, explainLang, request.signal)
+      .then(changes => {
+        if (!request.isCurrent()) return
+        if (changes.length > 0) {
+          setChanges(changes)
         }
-        // Fix missing closing brace before ]
-        if (jsonStr.match(/[^}\]]\s*\]$/)) {
-          jsonStr = jsonStr.replace(/\]$/, '}]')
-        }
-
-        try {
-          const parsed = JSON.parse(jsonStr)
-          console.log('[Changes] Parsed JSON:', parsed)
-
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            // Validate each change object
-            const validChanges = parsed.filter((c: unknown) =>
-              c && typeof c === 'object' &&
-              'from' in c && 'to' in c &&
-              typeof (c as Record<string, unknown>).from === 'string' &&
-              typeof (c as Record<string, unknown>).to === 'string'
-            ).map((c: Record<string, unknown>) => ({
-              from: String(c.from),
-              to: String(c.to),
-              reason: c.reason ? String(c.reason) : ''
-            }))
-
-            if (validChanges.length > 0) {
-              console.log('[Changes] Setting valid changes:', validChanges)
-              setChanges(validChanges)
-              setChangesLoading(false)
-              return
-            }
-          }
-        } catch (parseErr) {
-          console.error('[Changes] JSON parse error:', parseErr)
-        }
-      }
-
-      // Check if superseded before fallback
-      if (!request.isCurrent()) {
-        console.log('[Changes] Extraction aborted before fallback')
-        return
-      }
-
-      // Fallback: show simple diff
-      console.log('[Changes] Using fallback diff')
-      const fallback = createFallbackChange(original, corrected)
-      if (fallback.length > 0) {
-        setChanges(fallback)
-      }
-      setChangesLoading(false)
-    }).catch(err => {
-      // Check if superseded or aborted
-      if (!request.isCurrent()) {
-        console.log('[Changes] Extraction aborted (in catch)')
-        return
-      }
-      console.error('[Changes] Extraction failed:', err)
-      // Even on error, show the diff as fallback
-      const fallback = createFallbackChange(original, corrected)
-      if (fallback.length > 0) {
-        setChanges(fallback)
-      }
-      setChangesLoading(false)
-    })
-  }, [correctionModel, provider, setChanges, setChangesLoading, createFallbackChange])
+        setChangesLoading(false)
+      })
+      .catch(err => {
+        // The service answers an ordinary failure with its own fallback, so
+        // anything reaching here is a retired or cancelled request.
+        if (!request.isCurrent()) return
+        console.error('[Changes] Extraction failed:', err)
+        setChangesLoading(false)
+      })
+  }, [service, setChanges, setChangesLoading])
 
   const correct = useCallback(async (
     text?: string,
@@ -212,12 +114,10 @@ export function useCorrection() {
 
     try {
       // ALWAYS auto-detect language from input text
-      const detectedLang = detectLanguage(textToProcess)
-      console.log('[Correction] Detected language:', detectedLang)
+      const detectedLang = service.detectSourceLanguage(textToProcess)
 
       // Explanation language: use setting or fallback to detected
       const explainLang = explanationLang === 'auto' ? detectedLang : explanationLang
-      console.log('[Correction] Explanation language:', explainLang)
 
       // Check cache (skip if regenerating)
       const cacheKey = createCorrectionKey(textToProcess, detectedLang, levelToUse, correctionModel)
@@ -228,43 +128,32 @@ export function useCorrection() {
           setLoading(false)
           // Extract changes in background
           if (cached !== textToProcess) {
-            extractChangesFromModel(textToProcess, cached, detectedLang, explainLang, request)
+            extractChangesInBackground(textToProcess, cached, detectedLang, explainLang, request)
           }
           return cached
         }
       }
 
-      // Generate correction with the OLD working prompt format
-      const prompt = getCorrectionPrompt(textToProcess, detectedLang, levelToUse)
-      console.log('[Correction] Using prompt for', detectedLang, 'level:', levelToUse)
-
       let result = ''
       if (useStreaming) {
-        for await (const chunk of provider.generateStream({
-          model: correctionModel,
-          prompt,
-          options: {
-            temperature: 0.3,
-            num_ctx: 2048,
-          },
-        }, request.signal)) {
+        for await (const chunk of service.correctTextStream(
+          textToProcess,
+          detectedLang,
+          levelToUse,
+          request.signal
+        )) {
           if (!request.isCurrent()) return
-          result += chunk
-          const cleaned = cleanModelOutput(result)
-          setOutputText(cleaned)
+          result = chunk
+          setOutputText(result)
         }
-        result = cleanModelOutput(result)
       } else {
-        const response = await provider.generate({
-          model: correctionModel,
-          prompt,
-          options: {
-            temperature: 0.3,
-            num_ctx: 2048,
-          },
-        }, request.signal)
+        result = await service.correctText(
+          textToProcess,
+          detectedLang,
+          levelToUse,
+          request.signal
+        )
         if (!request.isCurrent()) return
-        result = cleanModelOutput(response)
         setOutputText(result)
       }
 
@@ -276,10 +165,7 @@ export function useCorrection() {
 
       // Extract changes if text was modified (async, non-blocking)
       if (result.trim() !== textToProcess.trim()) {
-        console.log('[Changes] Text was modified, extracting changes...')
-        extractChangesFromModel(textToProcess, result, detectedLang, explainLang, request)
-      } else {
-        console.log('[Changes] No changes detected (result === input)')
+        extractChangesInBackground(textToProcess, result, detectedLang, explainLang, request)
       }
 
       setLoading(false)
@@ -298,7 +184,7 @@ export function useCorrection() {
     inputText,
     correctionLevel,
     correctionModel,
-    provider,
+    service,
     useStreaming,
     explanationLang,
     setOutputText,
@@ -306,7 +192,7 @@ export function useCorrection() {
     setError,
     setChanges,
     setChangesLoading,
-    extractChangesFromModel,
+    extractChangesInBackground,
   ])
 
   const cancel = useCallback(() => {

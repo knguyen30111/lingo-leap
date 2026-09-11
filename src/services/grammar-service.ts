@@ -135,6 +135,12 @@ export class GrammarService {
     }
   }
 
+  // === Utilities ===
+
+  detectSourceLanguage(text: string): string {
+    return detectLanguage(text)
+  }
+
   async correctAndExplain(
     text: string,
     textLanguage: string,

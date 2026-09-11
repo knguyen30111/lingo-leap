@@ -1,24 +1,32 @@
+/// <reference types="vite/client" />
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { renderHook, act, waitFor } from '@testing-library/react'
 import { useCorrection } from './useCorrection'
+import correctionHookSource from './useCorrection.ts?raw'
 import { useAppStore } from '../stores/appStore'
 import { useSettingsStore } from '../stores/settingsStore'
 import { translationCache } from '../lib/cache'
 
-// Mock the transport class: the hook owns a client for one configured host.
-const transport = vi.hoisted(() => ({
-  constructedHosts: [] as string[],
-  generate: vi.fn(),
-  generateStream: vi.fn(),
+// Mock the grammar task service: the hook owns state, cache, and request
+// lifecycle only, so every prompt, transport, and parsing detail is the
+// service's and must be observable here as a plain service call.
+const grammar = vi.hoisted(() => ({
+  constructorOptions: [] as Array<{ modelName: string; ollamaHost?: string }>,
+  correctText: vi.fn(),
+  correctTextStream: vi.fn(),
+  extractChanges: vi.fn(),
+  detectSourceLanguage: vi.fn(),
 }))
 
-vi.mock('../lib/ollama-client', () => ({
-  OllamaClient: class MockOllamaClient {
-    generate = transport.generate
-    generateStream = transport.generateStream
+vi.mock('../services/grammar-service', () => ({
+  GrammarService: class MockGrammarService {
+    correctText = grammar.correctText
+    correctTextStream = grammar.correctTextStream
+    extractChanges = grammar.extractChanges
+    detectSourceLanguage = grammar.detectSourceLanguage
 
-    constructor(baseUrl: string) {
-      transport.constructedHosts.push(baseUrl)
+    constructor(options: { modelName: string; ollamaHost?: string }) {
+      grammar.constructorOptions.push(options)
     }
   },
 }))
@@ -31,45 +39,39 @@ vi.mock('../lib/cache', () => ({
   createCorrectionKey: vi.fn((text, lang, level, model) => `${text}-${lang}-${level}-${model}`),
 }))
 
-vi.mock('../lib/language', () => ({
-  detectLanguage: vi.fn(() => 'en'),
-}))
-
-vi.mock('../lib/prompts', () => ({
-  getCorrectionPrompt: vi.fn(() => 'correction prompt'),
-  getChangesExtractionPrompt: vi.fn(() => 'changes prompt'),
-}))
-
-describe('useCorrection', () => {
-  beforeEach(() => {
-    // Reset stores
-    useAppStore.setState({
-      inputText: 'Hello wrold',
-      outputText: '',
-      correctionLevel: 'fix',
-      isLoading: false,
-      error: null,
-      changes: [],
-      isChangesLoading: false,
-    })
-
-    useSettingsStore.setState({
-      correctionModel: 'gemma3:4b',
-      ollamaHost: 'http://localhost:11434',
-      useStreaming: false,
-      explanationLang: 'auto',
-    })
-
-    // Reset mocks with default return values
-    // generate is used both for main correction AND for extracting changes
-    // Always return a Promise to prevent .then() errors
-    transport.constructedHosts.length = 0
-    transport.generate.mockReset().mockResolvedValue('Hello world')
-    transport.generateStream.mockReset()
-    vi.mocked(translationCache.get).mockReset()
-    vi.mocked(translationCache.set).mockReset()
+function resetEnvironment() {
+  useAppStore.setState({
+    inputText: 'Hello wrold',
+    outputText: '',
+    correctionLevel: 'fix',
+    isLoading: false,
+    error: null,
+    changes: [],
+    isChangesLoading: false,
   })
 
+  useSettingsStore.setState({
+    correctionModel: 'gemma3:4b',
+    ollamaHost: 'http://localhost:11434',
+    useStreaming: false,
+    explanationLang: 'auto',
+  })
+
+  grammar.constructorOptions.length = 0
+  grammar.correctText.mockReset().mockResolvedValue('Hello world')
+  grammar.correctTextStream.mockReset()
+  grammar.extractChanges.mockReset().mockResolvedValue([])
+  grammar.detectSourceLanguage.mockReset().mockReturnValue('en')
+  vi.mocked(translationCache.get).mockReset()
+  vi.mocked(translationCache.set).mockReset()
+}
+
+async function* streamOf(...chunks: string[]): AsyncGenerator<string> {
+  for (const chunk of chunks) yield chunk
+}
+
+describe('useCorrection', () => {
+  beforeEach(resetEnvironment)
   afterEach(() => {
     vi.clearAllMocks()
   })
@@ -83,7 +85,7 @@ describe('useCorrection', () => {
   })
 
   it('corrects text with non-streaming mode', async () => {
-    transport.generate.mockResolvedValue('Hello world')
+    grammar.correctText.mockResolvedValue('Hello world')
 
     const { result } = renderHook(() => useCorrection())
 
@@ -97,12 +99,20 @@ describe('useCorrection', () => {
 
   it('corrects text with streaming mode', async () => {
     useSettingsStore.setState({ useStreaming: true })
+    grammar.correctTextStream.mockReturnValue(streamOf('Hello', 'Hello world'))
 
-    async function* mockStream() {
-      yield 'Hello'
-      yield ' world'
-    }
-    transport.generateStream.mockReturnValue(mockStream())
+    const { result } = renderHook(() => useCorrection())
+
+    await act(async () => {
+      await result.current.correct()
+    })
+
+    expect(useAppStore.getState().outputText).toBe('Hello world')
+    expect(grammar.correctText).not.toHaveBeenCalled()
+  })
+
+  it('publishes the service output without re-cleaning it', async () => {
+    grammar.correctText.mockResolvedValue('Hello world')
 
     const { result } = renderHook(() => useCorrection())
 
@@ -123,15 +133,14 @@ describe('useCorrection', () => {
       expect(res).toBe('Cached result')
     })
 
-    // Note: generate IS called for extracting changes (background task),
-    // but not for the main correction
     expect(useAppStore.getState().outputText).toBe('Cached result')
     expect(useAppStore.getState().isLoading).toBe(false)
+    expect(grammar.correctText).not.toHaveBeenCalled()
   })
 
   it('skips cache when skipCache option is true', async () => {
     vi.mocked(translationCache.get).mockReturnValue('Cached result')
-    transport.generate.mockResolvedValue('Fresh result')
+    grammar.correctText.mockResolvedValue('Fresh result')
 
     const { result } = renderHook(() => useCorrection())
 
@@ -139,7 +148,7 @@ describe('useCorrection', () => {
       await result.current.correct(undefined, undefined, { skipCache: true })
     })
 
-    expect(transport.generate).toHaveBeenCalled()
+    expect(grammar.correctText).toHaveBeenCalled()
     expect(useAppStore.getState().outputText).toBe('Fresh result')
   })
 
@@ -152,7 +161,7 @@ describe('useCorrection', () => {
       await result.current.correct()
     })
 
-    expect(transport.generate).not.toHaveBeenCalled()
+    expect(grammar.correctText).not.toHaveBeenCalled()
   })
 
   it('does nothing for whitespace-only input', async () => {
@@ -164,11 +173,11 @@ describe('useCorrection', () => {
       await result.current.correct()
     })
 
-    expect(transport.generate).not.toHaveBeenCalled()
+    expect(grammar.correctText).not.toHaveBeenCalled()
   })
 
   it('handles error during correction', async () => {
-    transport.generate.mockRejectedValue(new Error('Server error'))
+    grammar.correctText.mockRejectedValue(new Error('Server error'))
 
     const { result } = renderHook(() => useCorrection())
 
@@ -181,7 +190,7 @@ describe('useCorrection', () => {
   })
 
   it('handles non-Error thrown', async () => {
-    transport.generate.mockRejectedValue('string error')
+    grammar.correctText.mockRejectedValue('string error')
 
     const { result } = renderHook(() => useCorrection())
 
@@ -193,7 +202,7 @@ describe('useCorrection', () => {
   })
 
   it('caches result after correction', async () => {
-    transport.generate.mockResolvedValue('Hello world')
+    grammar.correctText.mockResolvedValue('Hello world')
 
     const { result } = renderHook(() => useCorrection())
 
@@ -201,7 +210,10 @@ describe('useCorrection', () => {
       await result.current.correct()
     })
 
-    expect(translationCache.set).toHaveBeenCalled()
+    expect(translationCache.set).toHaveBeenCalledWith(
+      'Hello wrold-en-fix-gemma3:4b',
+      'Hello world'
+    )
   })
 
   it('setLevel updates correction level', () => {
@@ -215,17 +227,15 @@ describe('useCorrection', () => {
   })
 
   it('cancel stops ongoing correction', async () => {
-    // Create a correction that won't resolve immediately
-    let resolveGenerate: (value: string) => void
-    transport.generate.mockReturnValue(
+    let resolveCorrect: (value: string) => void
+    grammar.correctText.mockReturnValue(
       new Promise((resolve) => {
-        resolveGenerate = resolve
+        resolveCorrect = resolve
       })
     )
 
     const { result } = renderHook(() => useCorrection())
 
-    // Start correction (don't await)
     act(() => {
       result.current.correct()
     })
@@ -234,19 +244,17 @@ describe('useCorrection', () => {
       expect(useAppStore.getState().isLoading).toBe(true)
     })
 
-    // Cancel the ongoing correction
     act(() => {
       result.current.cancel()
     })
 
     expect(useAppStore.getState().isLoading).toBe(false)
 
-    // Clean up - resolve the promise to avoid warning
-    resolveGenerate!('Cancelled')
+    resolveCorrect!('Cancelled')
   })
 
   it('corrects with custom text parameter', async () => {
-    transport.generate.mockResolvedValue('Custom corrected')
+    grammar.correctText.mockResolvedValue('Custom corrected')
 
     const { result } = renderHook(() => useCorrection())
 
@@ -254,11 +262,12 @@ describe('useCorrection', () => {
       await result.current.correct('Custom text')
     })
 
+    expect(grammar.correctText.mock.calls[0][0]).toBe('Custom text')
     expect(useAppStore.getState().outputText).toBe('Custom corrected')
   })
 
   it('corrects with custom level parameter', async () => {
-    transport.generate.mockResolvedValue('Heavy corrected')
+    grammar.correctText.mockResolvedValue('Heavy corrected')
 
     const { result } = renderHook(() => useCorrection())
 
@@ -266,38 +275,14 @@ describe('useCorrection', () => {
       await result.current.correct(undefined, 'rewrite')
     })
 
-    expect(transport.generate).toHaveBeenCalled()
-  })
-
-  it('cleans model output artifacts', async () => {
-    transport.generate.mockResolvedValue('Hello world<|im_end|>')
-
-    const { result } = renderHook(() => useCorrection())
-
-    await act(async () => {
-      await result.current.correct()
-    })
-
-    expect(useAppStore.getState().outputText).toBe('Hello world')
-  })
-
-  it('constructs a client bound to the configured host', async () => {
-    transport.generate.mockResolvedValue('Hello')
-
-    const { result } = renderHook(() => useCorrection())
-
-    await act(async () => {
-      await result.current.correct()
-    })
-
-    expect(transport.constructedHosts).toEqual(['http://localhost:11434'])
+    expect(grammar.correctText.mock.calls[0][2]).toBe('rewrite')
   })
 
   it('sets loading state during correction', async () => {
-    let resolveGenerate: (value: string) => void
-    transport.generate.mockReturnValue(
+    let resolveCorrect: (value: string) => void
+    grammar.correctText.mockReturnValue(
       new Promise((resolve) => {
-        resolveGenerate = resolve
+        resolveCorrect = resolve
       })
     )
 
@@ -312,193 +297,272 @@ describe('useCorrection', () => {
     })
 
     await act(async () => {
-      resolveGenerate!('Done')
+      resolveCorrect!('Done')
     })
 
     await correctPromise
   })
+})
 
-  describe('Changes extraction', () => {
-    it('extracts changes when text is modified', async () => {
-      // First call is for correction, second is for changes extraction
-      transport.generate
-        .mockResolvedValueOnce('Hello world')
-        .mockResolvedValueOnce('[{"from": "wrold", "to": "world", "reason": "Typo"}]')
+describe('useCorrection service composition', () => {
+  beforeEach(resetEnvironment)
+  afterEach(() => {
+    vi.clearAllMocks()
+  })
 
-      const { result } = renderHook(() => useCorrection())
+  it('builds the grammar service from the configured model and host', async () => {
+    const { result } = renderHook(() => useCorrection())
 
-      await act(async () => {
-        await result.current.correct()
-      })
-
-      // Wait for changes to be extracted (async background task)
-      await waitFor(() => {
-        expect(useAppStore.getState().changes.length).toBeGreaterThanOrEqual(0)
-      })
+    await act(async () => {
+      await result.current.correct()
     })
 
-    it('uses fallback when JSON parsing fails', async () => {
-      transport.generate
-        .mockResolvedValueOnce('Hello world')
-        .mockResolvedValueOnce('Invalid JSON response')
+    expect(grammar.constructorOptions).toEqual([
+      { modelName: 'gemma3:4b', ollamaHost: 'http://localhost:11434' },
+    ])
+  })
 
-      useAppStore.setState({ inputText: 'Hello wrold' })
-      const { result } = renderHook(() => useCorrection())
+  it('resolves the correction language through the service helper', async () => {
+    grammar.detectSourceLanguage.mockReturnValue('ja')
 
-      await act(async () => {
-        await result.current.correct()
-      })
+    const { result } = renderHook(() => useCorrection())
 
-      // Should still complete without error
-      expect(useAppStore.getState().outputText).toBe('Hello world')
+    await act(async () => {
+      await result.current.correct('テスト')
     })
 
-    it('extracts changes from cached result', async () => {
-      vi.mocked(translationCache.get).mockReturnValue('Cached result')
-      transport.generate.mockResolvedValue('[{"from": "wrold", "to": "world", "reason": "Typo"}]')
+    expect(grammar.detectSourceLanguage).toHaveBeenCalledWith('テスト')
+    expect(grammar.correctText.mock.calls[0][1]).toBe('ja')
+  })
 
-      useAppStore.setState({ inputText: 'Hello wrold' })
-      const { result } = renderHook(() => useCorrection())
+  it('calls the primary correction and the background extraction service methods', async () => {
+    grammar.correctText.mockResolvedValue('Hello world')
 
-      await act(async () => {
-        await result.current.correct()
-      })
+    const { result } = renderHook(() => useCorrection())
 
-      expect(useAppStore.getState().outputText).toBe('Cached result')
+    await act(async () => {
+      await result.current.correct()
     })
 
-    it('does not extract changes when result equals input', async () => {
-      transport.generate.mockResolvedValueOnce('Hello wrold')
+    expect(grammar.correctText.mock.calls[0].slice(0, 3)).toEqual(['Hello wrold', 'en', 'fix'])
+    await waitFor(() => expect(grammar.extractChanges).toHaveBeenCalled())
+    expect(grammar.extractChanges.mock.calls[0].slice(0, 4)).toEqual([
+      'Hello wrold',
+      'Hello world',
+      'en',
+      'en',
+    ])
+  })
 
-      useAppStore.setState({ inputText: 'Hello wrold' })
-      const { result } = renderHook(() => useCorrection())
+  it('keeps transport, prompt, detector, cleanup, and parser code out of the hook', () => {
+    const forbidden = [
+      /OllamaClient/,
+      /lib\/prompts/,
+      /getCorrectionPrompt/,
+      /getChangesExtractionPrompt/,
+      /buildCorrectionPrompt/,
+      /buildChangesExtractionPrompt/,
+      /detectLanguage/,
+      /cleanModelOutput/,
+      /JSON\.parse/,
+      /<\|im_end\|>/,
+    ]
 
-      await act(async () => {
-        await result.current.correct()
+    const violations = forbidden.filter(pattern => pattern.test(correctionHookSource))
+
+    expect(violations).toEqual([])
+  })
+})
+
+describe('useCorrection changes extraction', () => {
+  beforeEach(resetEnvironment)
+  afterEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('publishes extracted changes when text is modified', async () => {
+    grammar.correctText.mockResolvedValue('Hello world')
+    grammar.extractChanges.mockResolvedValue([{ from: 'wrold', to: 'world', reason: 'Typo' }])
+
+    const { result } = renderHook(() => useCorrection())
+
+    await act(async () => {
+      await result.current.correct()
+    })
+
+    await waitFor(() => {
+      expect(useAppStore.getState().changes).toEqual([
+        { from: 'wrold', to: 'world', reason: 'Typo' },
+      ])
+    })
+    expect(useAppStore.getState().isChangesLoading).toBe(false)
+  })
+
+  it('returns the correction before the background extraction completes', async () => {
+    let resolveExtraction: (changes: Array<{ from: string; to: string; reason: string }>) => void
+    grammar.correctText.mockResolvedValue('Hello world')
+    grammar.extractChanges.mockReturnValue(
+      new Promise((resolve) => {
+        resolveExtraction = resolve
       })
+    )
 
-      // Generate should only be called once (for correction, not for changes)
-      expect(transport.generate).toHaveBeenCalledTimes(1)
+    const { result } = renderHook(() => useCorrection())
+
+    await act(async () => {
+      await expect(result.current.correct()).resolves.toBe('Hello world')
+    })
+
+    // The primary correction is already published while extraction is pending.
+    expect(useAppStore.getState().outputText).toBe('Hello world')
+    expect(useAppStore.getState().isLoading).toBe(false)
+    expect(useAppStore.getState().isChangesLoading).toBe(true)
+    expect(useAppStore.getState().changes).toEqual([])
+
+    await act(async () => {
+      resolveExtraction!([{ from: 'wrold', to: 'world', reason: 'Typo' }])
+    })
+
+    expect(useAppStore.getState().changes).toEqual([
+      { from: 'wrold', to: 'world', reason: 'Typo' },
+    ])
+    expect(useAppStore.getState().isChangesLoading).toBe(false)
+  })
+
+  it('publishes the service fallback change with its exact reason', async () => {
+    grammar.correctText.mockResolvedValue('Hello world')
+    grammar.extractChanges.mockResolvedValue([
+      { from: 'Hello wrold', to: 'Hello world', reason: 'Text was corrected/improved' },
+    ])
+
+    const { result } = renderHook(() => useCorrection())
+
+    await act(async () => {
+      await result.current.correct()
+    })
+
+    await waitFor(() => {
+      expect(useAppStore.getState().changes).toEqual([
+        { from: 'Hello wrold', to: 'Hello world', reason: 'Text was corrected/improved' },
+      ])
     })
   })
 
-  describe('Streaming with cleaning', () => {
-    it('cleans model artifacts during streaming', async () => {
-      useSettingsStore.setState({ useStreaming: true })
+  it('extracts changes from a cached result', async () => {
+    vi.mocked(translationCache.get).mockReturnValue('Cached result')
+    grammar.extractChanges.mockResolvedValue([{ from: 'wrold', to: 'world', reason: 'Typo' }])
 
-      async function* mockStream() {
-        yield 'Hello'
-        yield ' world'
-        yield '<|im_end|>'
-      }
-      transport.generateStream.mockReturnValue(mockStream())
+    const { result } = renderHook(() => useCorrection())
 
-      const { result } = renderHook(() => useCorrection())
-
-      await act(async () => {
-        await result.current.correct()
-      })
-
-      expect(useAppStore.getState().outputText).toBe('Hello world')
+    await act(async () => {
+      await result.current.correct()
     })
+
+    expect(useAppStore.getState().outputText).toBe('Cached result')
+    await waitFor(() => expect(grammar.extractChanges).toHaveBeenCalled())
+    expect(grammar.extractChanges.mock.calls[0].slice(0, 2)).toEqual(['Hello wrold', 'Cached result'])
+    expect(translationCache.set).not.toHaveBeenCalled()
   })
 
-  describe('Abort handling', () => {
-    it('ignores AbortError during correction', async () => {
-      const abortError = new Error('Aborted')
-      abortError.name = 'AbortError'
-      transport.generate.mockRejectedValue(abortError)
+  it('does not extract changes when the cached result equals the input', async () => {
+    vi.mocked(translationCache.get).mockReturnValue('Hello wrold')
 
-      const { result } = renderHook(() => useCorrection())
+    const { result } = renderHook(() => useCorrection())
 
-      await act(async () => {
-        await result.current.correct()
-      })
-
-      // Should not set error for AbortError
-      expect(useAppStore.getState().error).toBeNull()
+    await act(async () => {
+      await result.current.correct()
     })
+
+    expect(grammar.extractChanges).not.toHaveBeenCalled()
   })
 
-  describe('Explanation language', () => {
-    it('uses detected language when explanationLang is auto', async () => {
-      useSettingsStore.setState({ explanationLang: 'auto' })
-      transport.generate.mockResolvedValue('Hello world')
+  it('does not extract changes when the result equals the input', async () => {
+    grammar.correctText.mockResolvedValue('Hello wrold')
 
-      const { result } = renderHook(() => useCorrection())
+    const { result } = renderHook(() => useCorrection())
 
-      await act(async () => {
-        await result.current.correct()
-      })
-
-      expect(transport.generate).toHaveBeenCalled()
+    await act(async () => {
+      await result.current.correct()
     })
 
-    it('uses specified language when explanationLang is set', async () => {
-      useSettingsStore.setState({ explanationLang: 'ja' })
-      transport.generate.mockResolvedValue('Hello world')
+    expect(grammar.extractChanges).not.toHaveBeenCalled()
+  })
 
-      const { result } = renderHook(() => useCorrection())
+  it('cleans nothing and publishes no change when the service returns none', async () => {
+    grammar.correctText.mockResolvedValue('Hello world')
+    grammar.extractChanges.mockResolvedValue([])
 
-      await act(async () => {
-        await result.current.correct()
-      })
+    const { result } = renderHook(() => useCorrection())
 
-      expect(transport.generate).toHaveBeenCalled()
+    await act(async () => {
+      await result.current.correct()
     })
+
+    await waitFor(() => expect(useAppStore.getState().isChangesLoading).toBe(false))
+    expect(useAppStore.getState().changes).toEqual([])
+  })
+})
+
+describe('useCorrection explanation language', () => {
+  beforeEach(resetEnvironment)
+  afterEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('uses the detected language when explanationLang is auto', async () => {
+    useSettingsStore.setState({ explanationLang: 'auto' })
+    grammar.detectSourceLanguage.mockReturnValue('vi')
+    grammar.correctText.mockResolvedValue('Hello world')
+
+    const { result } = renderHook(() => useCorrection())
+
+    await act(async () => {
+      await result.current.correct()
+    })
+
+    await waitFor(() => expect(grammar.extractChanges).toHaveBeenCalled())
+    expect(grammar.extractChanges.mock.calls[0][3]).toBe('vi')
+  })
+
+  it('uses the configured language when explanationLang is set', async () => {
+    useSettingsStore.setState({ explanationLang: 'ja' })
+    grammar.correctText.mockResolvedValue('Hello world')
+
+    const { result } = renderHook(() => useCorrection())
+
+    await act(async () => {
+      await result.current.correct()
+    })
+
+    await waitFor(() => expect(grammar.extractChanges).toHaveBeenCalled())
+    expect(grammar.extractChanges.mock.calls[0][3]).toBe('ja')
   })
 })
 
 describe('useCorrection cancellation and races', () => {
-  beforeEach(() => {
-    useAppStore.setState({
-      inputText: 'Hello wrold',
-      outputText: '',
-      correctionLevel: 'fix',
-      isLoading: false,
-      error: null,
-      changes: [],
-      isChangesLoading: false,
-    })
-    useSettingsStore.setState({
-      correctionModel: 'gemma3:4b',
-      ollamaHost: 'http://localhost:11434',
-      useStreaming: false,
-      explanationLang: 'auto',
-    })
-    transport.constructedHosts.length = 0
-    transport.generate.mockReset().mockResolvedValue('Hello world')
-    transport.generateStream.mockReset()
-    vi.mocked(translationCache.get).mockReset()
-    vi.mocked(translationCache.set).mockReset()
-  })
-
+  beforeEach(resetEnvironment)
   afterEach(() => {
     vi.clearAllMocks()
   })
 
   it('forwards a request signal to the correction and extraction calls', async () => {
-    transport.generate
-      .mockResolvedValueOnce('Hello world')
-      .mockResolvedValueOnce('[{"from": "wrold", "to": "world", "reason": "Typo"}]')
+    grammar.correctText.mockResolvedValue('Hello world')
 
     const { result } = renderHook(() => useCorrection())
 
     await act(async () => {
       await result.current.correct()
     })
-    await waitFor(() => expect(transport.generate).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(grammar.extractChanges).toHaveBeenCalled())
 
-    expect(transport.generate.mock.calls[0][1]).toBeInstanceOf(AbortSignal)
-    expect(transport.generate.mock.calls[1][1]).toBeInstanceOf(AbortSignal)
+    expect(grammar.correctText.mock.calls[0][3]).toBeInstanceOf(AbortSignal)
+    expect(grammar.extractChanges.mock.calls[0][4]).toBeInstanceOf(AbortSignal)
+    expect(grammar.extractChanges.mock.calls[0][4]).toBe(grammar.correctText.mock.calls[0][3])
   })
 
   it('forwards a request signal to the streaming correction call', async () => {
     useSettingsStore.setState({ useStreaming: true })
-    async function* stream() {
-      yield 'Hello world'
-    }
-    transport.generateStream.mockReturnValue(stream())
+    grammar.correctTextStream.mockReturnValue(streamOf('Hello world'))
 
     const { result } = renderHook(() => useCorrection())
 
@@ -506,12 +570,12 @@ describe('useCorrection cancellation and races', () => {
       await result.current.correct()
     })
 
-    expect(transport.generateStream.mock.calls[0][1]).toBeInstanceOf(AbortSignal)
+    expect(grammar.correctTextStream.mock.calls[0][3]).toBeInstanceOf(AbortSignal)
   })
 
   it('does not publish or cache a cancelled correction', async () => {
-    let resolveGenerate: (value: string) => void
-    transport.generate.mockReturnValue(new Promise(resolve => { resolveGenerate = resolve }))
+    let resolveCorrect: (value: string) => void
+    grammar.correctText.mockReturnValue(new Promise(resolve => { resolveCorrect = resolve }))
 
     const { result } = renderHook(() => useCorrection())
 
@@ -525,18 +589,19 @@ describe('useCorrection cancellation and races', () => {
     })
 
     await act(async () => {
-      resolveGenerate!('Late correction')
+      resolveCorrect!('Late correction')
     })
 
     expect(useAppStore.getState().outputText).toBe('')
     expect(translationCache.set).not.toHaveBeenCalled()
+    expect(grammar.extractChanges).not.toHaveBeenCalled()
     expect(useAppStore.getState().isLoading).toBe(false)
     expect(useAppStore.getState().isChangesLoading).toBe(false)
   })
 
   it('lets only the newest overlapping correction publish and cache', async () => {
     const resolvers: ((value: string) => void)[] = []
-    transport.generate.mockImplementation(
+    grammar.correctText.mockImplementation(
       () => new Promise(resolve => { resolvers.push(resolve) })
     )
 
@@ -572,10 +637,10 @@ describe('useCorrection cancellation and races', () => {
       await gate
       yield 'first-b'
     }
-    async function* secondStream() {
-      yield 'second'
-    }
-    transport.generateStream.mockReturnValueOnce(firstStream()).mockReturnValueOnce(secondStream())
+
+    grammar.correctTextStream
+      .mockReturnValueOnce(firstStream())
+      .mockReturnValueOnce(streamOf('second'))
 
     const { result } = renderHook(() => useCorrection())
 
@@ -599,92 +664,63 @@ describe('useCorrection cancellation and races', () => {
   })
 
   it('ignores a superseded background change extraction', async () => {
-    const resolvers: ((value: string) => void)[] = []
-    transport.generate.mockImplementation(
-      () => new Promise(resolve => { resolvers.push(resolve) })
+    const extractionResolvers: ((changes: unknown[]) => void)[] = []
+    grammar.correctText.mockResolvedValue('First corrected')
+    grammar.extractChanges.mockImplementation(
+      () => new Promise(resolve => { extractionResolvers.push(resolve) })
     )
 
     const { result } = renderHook(() => useCorrection())
 
-    act(() => {
-      result.current.correct('first text')
-    })
-    await waitFor(() => expect(resolvers.length).toBe(1))
-
-    // Correction one completes and starts its background extraction.
     await act(async () => {
-      resolvers[0]('First corrected')
+      await result.current.correct('first text')
     })
-    await waitFor(() => expect(resolvers.length).toBe(2))
+    await waitFor(() => expect(extractionResolvers.length).toBe(1))
 
-    // A second correction supersedes the pending extraction.
     act(() => {
       result.current.correct('second text')
     })
-    await waitFor(() => expect(resolvers.length).toBe(3))
 
     await act(async () => {
-      resolvers[1]('[{"from": "stale", "to": "stale", "reason": "stale"}]')
+      extractionResolvers[0]([{ from: 'stale', to: 'stale', reason: 'stale' }])
     })
 
     expect(useAppStore.getState().changes).toEqual([])
   })
 
-  it('does not publish a fallback diff for a superseded extraction', async () => {
-    const resolvers: ((value: string) => void)[] = []
-    transport.generate.mockImplementation(
-      () => new Promise(resolve => { resolvers.push(resolve) })
+  it('does not publish a service fallback from a superseded extraction', async () => {
+    const extractionResolvers: ((changes: unknown[]) => void)[] = []
+    grammar.correctText.mockResolvedValue('First corrected')
+    grammar.extractChanges.mockImplementation(
+      () => new Promise(resolve => { extractionResolvers.push(resolve) })
     )
 
     const { result } = renderHook(() => useCorrection())
 
-    act(() => {
-      result.current.correct('first text')
-    })
-    await waitFor(() => expect(resolvers.length).toBe(1))
-
     await act(async () => {
-      resolvers[0]('First corrected')
+      await result.current.correct('first text')
     })
-    await waitFor(() => expect(resolvers.length).toBe(2))
+    await waitFor(() => expect(extractionResolvers.length).toBe(1))
 
     act(() => {
       result.current.correct('second text')
     })
-    await waitFor(() => expect(resolvers.length).toBe(3))
-
-    // The superseded extraction answers with unparseable text.
-    await act(async () => {
-      resolvers[1]('no json here')
-    })
-
-    expect(useAppStore.getState().changes).toEqual([])
-  })
-
-  it('falls back to a diff when the current extraction request fails', async () => {
-    transport.generate
-      .mockResolvedValueOnce('Hello world')
-      .mockRejectedValueOnce(new Error('extraction failed'))
-
-    const { result } = renderHook(() => useCorrection())
 
     await act(async () => {
-      await result.current.correct()
-    })
-
-    await waitFor(() => {
-      expect(useAppStore.getState().changes).toEqual([
-        { from: 'Hello wrold', to: 'Hello world', reason: 'Text was corrected/improved' },
+      extractionResolvers[0]([
+        { from: 'first text', to: 'First corrected', reason: 'Text was corrected/improved' },
       ])
     })
-    expect(useAppStore.getState().isChangesLoading).toBe(false)
+
+    expect(useAppStore.getState().changes).toEqual([])
   })
 
-  it('does not fall back to a stale diff when extraction fails after cancel', async () => {
+  it('does not publish a retired extraction that rejects after cancel', async () => {
     const rejecters: ((reason: unknown) => void)[] = []
-    transport.generate
-      .mockResolvedValueOnce('Hello world')
-      .mockImplementation(() => new Promise((_resolve, reject) => { rejecters.push(reject) }))
+    grammar.correctText.mockResolvedValue('Hello world')
+    grammar.extractChanges.mockImplementation(
+      () => new Promise((_resolve, reject) => { rejecters.push(reject) })
+    )
 
     const { result } = renderHook(() => useCorrection())
 
@@ -698,17 +734,33 @@ describe('useCorrection cancellation and races', () => {
       result.current.cancel()
     })
 
+    const abortError = new Error('The operation was aborted')
+    abortError.name = 'AbortError'
     await act(async () => {
-      rejecters[0](new Error('extraction failed'))
+      rejecters[0](abortError)
     })
 
     expect(useAppStore.getState().changes).toEqual([])
     expect(useAppStore.getState().isChangesLoading).toBe(false)
   })
 
+  it('ignores AbortError during correction', async () => {
+    const abortError = new Error('Aborted')
+    abortError.name = 'AbortError'
+    grammar.correctText.mockRejectedValue(abortError)
+
+    const { result } = renderHook(() => useCorrection())
+
+    await act(async () => {
+      await result.current.correct()
+    })
+
+    expect(useAppStore.getState().error).toBeNull()
+  })
+
   it('does not report an error for a correction cancelled by unmount', async () => {
-    let rejectGenerate: (reason: unknown) => void
-    transport.generate.mockReturnValue(new Promise((_resolve, reject) => { rejectGenerate = reject }))
+    let rejectCorrect: (reason: unknown) => void
+    grammar.correctText.mockReturnValue(new Promise((_resolve, reject) => { rejectCorrect = reject }))
 
     const { result, unmount } = renderHook(() => useCorrection())
 
@@ -720,7 +772,7 @@ describe('useCorrection cancellation and races', () => {
     unmount()
 
     await act(async () => {
-      rejectGenerate!(new Error('Server error'))
+      rejectCorrect!(new Error('Server error'))
     })
 
     expect(useAppStore.getState().error).toBeNull()
@@ -731,31 +783,10 @@ describe('useCorrection settings invalidation', () => {
   const settingsChanges = [
     ['the correction model', { correctionModel: 'other-model:1b' }],
     ['the explanation language', { explanationLang: 'ja' }],
+    ['the Ollama host', { ollamaHost: 'http://other-host:11434' }],
   ] as const
 
-  beforeEach(() => {
-    useAppStore.setState({
-      inputText: 'Hello wrold',
-      outputText: '',
-      correctionLevel: 'fix',
-      isLoading: false,
-      error: null,
-      changes: [],
-      isChangesLoading: false,
-    })
-    useSettingsStore.setState({
-      correctionModel: 'gemma3:4b',
-      ollamaHost: 'http://localhost:11434',
-      useStreaming: false,
-      explanationLang: 'auto',
-    })
-    transport.constructedHosts.length = 0
-    transport.generate.mockReset().mockResolvedValue('Hello world')
-    transport.generateStream.mockReset()
-    vi.mocked(translationCache.get).mockReset()
-    vi.mocked(translationCache.set).mockReset()
-  })
-
+  beforeEach(resetEnvironment)
   afterEach(() => {
     vi.clearAllMocks()
   })
@@ -763,8 +794,8 @@ describe('useCorrection settings invalidation', () => {
   it.each(settingsChanges)(
     'aborts and retires an in-flight correction when %s changes',
     async (_label, change) => {
-      let resolveGenerate: (value: string) => void
-      transport.generate.mockReturnValue(new Promise(resolve => { resolveGenerate = resolve }))
+      let resolveCorrect: (value: string) => void
+      grammar.correctText.mockReturnValue(new Promise(resolve => { resolveCorrect = resolve }))
 
       const { result } = renderHook(() => useCorrection())
 
@@ -777,10 +808,10 @@ describe('useCorrection settings invalidation', () => {
         useSettingsStore.setState(change)
       })
 
-      expect(transport.generate.mock.calls[0][1].aborted).toBe(true)
+      expect(grammar.correctText.mock.calls[0][3].aborted).toBe(true)
 
       await act(async () => {
-        resolveGenerate!('Stale correction')
+        resolveCorrect!('Stale correction')
       })
 
       expect(useAppStore.getState().outputText).toBe('')
@@ -794,8 +825,8 @@ describe('useCorrection settings invalidation', () => {
   it.each(settingsChanges)(
     'does not report an error from a correction retired by a change to %s',
     async (_label, change) => {
-      let rejectGenerate: (reason: unknown) => void
-      transport.generate.mockReturnValue(new Promise((_resolve, reject) => { rejectGenerate = reject }))
+      let rejectCorrect: (reason: unknown) => void
+      grammar.correctText.mockReturnValue(new Promise((_resolve, reject) => { rejectCorrect = reject }))
 
       const { result } = renderHook(() => useCorrection())
 
@@ -809,7 +840,7 @@ describe('useCorrection settings invalidation', () => {
       })
 
       await act(async () => {
-        rejectGenerate!(new Error('Server error'))
+        rejectCorrect!(new Error('Server error'))
       })
 
       expect(useAppStore.getState().error).toBeNull()
@@ -820,67 +851,28 @@ describe('useCorrection settings invalidation', () => {
   it.each(settingsChanges)(
     'aborts and retires a background change extraction when %s changes',
     async (_label, change) => {
-      const resolvers: ((value: string) => void)[] = []
-      transport.generate.mockImplementation(
-        () => new Promise(resolve => { resolvers.push(resolve) })
+      const extractionResolvers: ((changes: unknown[]) => void)[] = []
+      grammar.correctText.mockResolvedValue('First corrected')
+      grammar.extractChanges.mockImplementation(
+        () => new Promise(resolve => { extractionResolvers.push(resolve) })
       )
 
       const { result } = renderHook(() => useCorrection())
 
-      act(() => {
-        result.current.correct('first text')
-      })
-      await waitFor(() => expect(resolvers.length).toBe(1))
-
-      // The correction publishes and starts its background extraction.
       await act(async () => {
-        resolvers[0]('First corrected')
+        await result.current.correct('first text')
       })
-      await waitFor(() => expect(resolvers.length).toBe(2))
+      await waitFor(() => expect(extractionResolvers.length).toBe(1))
       expect(useAppStore.getState().isChangesLoading).toBe(true)
 
       act(() => {
         useSettingsStore.setState(change)
       })
 
-      expect(transport.generate.mock.calls[1][1].aborted).toBe(true)
+      expect(grammar.extractChanges.mock.calls[0][4].aborted).toBe(true)
 
       await act(async () => {
-        resolvers[1]('[{"from": "stale", "to": "stale", "reason": "stale"}]')
-      })
-
-      expect(useAppStore.getState().changes).toEqual([])
-      expect(useAppStore.getState().isChangesLoading).toBe(false)
-    }
-  )
-
-  it.each(settingsChanges)(
-    'does not publish a fallback diff from an extraction retired by a change to %s',
-    async (_label, change) => {
-      const resolvers: ((value: string) => void)[] = []
-      transport.generate.mockImplementation(
-        () => new Promise(resolve => { resolvers.push(resolve) })
-      )
-
-      const { result } = renderHook(() => useCorrection())
-
-      act(() => {
-        result.current.correct('first text')
-      })
-      await waitFor(() => expect(resolvers.length).toBe(1))
-
-      await act(async () => {
-        resolvers[0]('First corrected')
-      })
-      await waitFor(() => expect(resolvers.length).toBe(2))
-
-      act(() => {
-        useSettingsStore.setState(change)
-      })
-
-      // The retired extraction answers with unparseable text.
-      await act(async () => {
-        resolvers[1]('no json here')
+        extractionResolvers[0]([{ from: 'stale', to: 'stale', reason: 'stale' }])
       })
 
       expect(useAppStore.getState().changes).toEqual([])

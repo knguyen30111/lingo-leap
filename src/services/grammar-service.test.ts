@@ -312,6 +312,13 @@ describe('GrammarService', () => {
       expect(mockFetch.mock.calls[0][0]).toBe('http://configured:1234/api/generate')
     })
 
+    it('detectSourceLanguage reports the detected language', () => {
+      const service = new GrammarService({ modelName: 'gemma3:4b', provider })
+
+      expect(service.detectSourceLanguage('Hello world')).toBe('en')
+      expect(service.detectSourceLanguage('こんにちは')).toBe('ja')
+    })
+
     it('defaults to the local Ollama host', async () => {
       const service = new GrammarService({ modelName: 'gemma3:4b' })
       mockFetch.mockResolvedValue({ ok: true, json: () => Promise.resolve({ response: 'Hello world' }) })
