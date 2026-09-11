@@ -744,6 +744,21 @@ describe('useCorrection cancellation and races', () => {
     expect(useAppStore.getState().isChangesLoading).toBe(false)
   })
 
+  it('stops the changes spinner if an extraction rejects while it is current', async () => {
+    grammar.correctText.mockResolvedValue('Hello world')
+    grammar.extractChanges.mockRejectedValue(new Error('extraction failed'))
+
+    const { result } = renderHook(() => useCorrection())
+
+    await act(async () => {
+      await result.current.correct()
+    })
+
+    await waitFor(() => expect(useAppStore.getState().isChangesLoading).toBe(false))
+    expect(useAppStore.getState().changes).toEqual([])
+    expect(useAppStore.getState().error).toBeNull()
+  })
+
   it('ignores AbortError during correction', async () => {
     const abortError = new Error('Aborted')
     abortError.name = 'AbortError'
