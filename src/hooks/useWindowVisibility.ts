@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { listen } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 
 export interface UseWindowVisibilityReturn {
@@ -37,9 +38,6 @@ export function useWindowVisibility(): UseWindowVisibilityReturn {
         setIsVisible(false)
       })
       register(unlistenClose)
-
-      // Listen for window show/hide via Tauri events
-      const { listen } = await import('@tauri-apps/api/event')
 
       // Window becomes visible (user clicks menu bar icon)
       const unlistenShow = await listen('tauri://window-created', () => {
