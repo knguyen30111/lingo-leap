@@ -164,7 +164,7 @@ describe('GrammarService', () => {
       expect(provider.generateJSON).toHaveBeenCalledWith(
         buildChangesExtractionPrompt('Hello wrold', 'Hello world', 'en', 'ja', 'qwen2.5:7b'),
         'qwen2.5:7b',
-        undefined,
+        0,
         undefined
       )
       expect(changes).toEqual([
@@ -180,6 +180,19 @@ describe('GrammarService', () => {
       await service.extractChanges('Hello wrold', 'Hello world', 'en', 'en', controller.signal)
 
       expect(provider.generateJSON.mock.calls[0][3]).toBe(controller.signal)
+    })
+
+    // The pre-refactor extraction spent exactly one model call on unusable
+    // JSON; the provider default of two retries would triple that cost before
+    // the whole-text fallback is ever shown.
+    it('asks the provider for a single attempt with no JSON retries', async () => {
+      provider.generateJSON.mockRejectedValue(new Error('bad json'))
+      const service = new GrammarService({ modelName: 'qwen2.5:7b', provider })
+
+      await service.extractChanges('Hello wrold', 'Hello world', 'en', 'en')
+
+      expect(provider.generateJSON).toHaveBeenCalledTimes(1)
+      expect(provider.generateJSON.mock.calls[0][2]).toBe(0)
     })
 
     it('falls back to a whole-text change when extraction fails', async () => {

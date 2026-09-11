@@ -20,6 +20,10 @@ function isAbortFailure(err: unknown, signal?: AbortSignal): boolean {
 // changed, so the wording is part of the user-visible contract.
 const FALLBACK_CHANGE_REASON = 'Text was corrected/improved'
 
+// Unusable JSON is answered with the whole-text fallback, so retrying the model
+// only multiplies the wait for the same panel content.
+const EXTRACTION_JSON_RETRIES = 0
+
 function wholeTextFallback(original: string, corrected: string): Change[] {
   return [{
     from: original.trim(),
@@ -108,7 +112,7 @@ export class GrammarService {
       const changes = await this.provider.generateJSON<Change[]>(
         prompt,
         this.modelName,
-        undefined,
+        EXTRACTION_JSON_RETRIES,
         signal
       )
       console.log('[GrammarService] Raw changes:', changes)
