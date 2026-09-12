@@ -250,6 +250,13 @@ export function mebibytes(bytes) {
   return `${Number.isInteger(value) ? value : value.toFixed(1)} MiB`
 }
 
+// The delimiters Markdown wraps a run of text in: a code span, emphasis, and
+// bold in either of its spellings. A formatted figure is the same figure, and
+// the delimiter opening the run stands between a denial and the figure it
+// denies, so the delimiter is read as part of the figure on both sides of it
+// rather than as part of what governs the floor.
+const MARKDOWN_DELIMITER = String.raw`(?:\*{1,2}|_{1,2}|\x60)`
+
 function escapeRegExp(text) {
   return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
@@ -270,7 +277,8 @@ function escapeRegExp(text) {
  * it.
  */
 export function statesFloor(text, artifactSource, figure) {
-  const size = String.raw`\*{0,2}${escapeRegExp(figure)}`
+  const size =
+    String.raw`${MARKDOWN_DELIMITER}?${escapeRegExp(figure)}${MARKDOWN_DELIMITER}?`
   const sizePattern = new RegExp(size, 'i')
   const artifactFirst = new RegExp(
     `${artifactSource}${FLOOR_GAP}\\b${FLOOR_WORDING}\\b${FLOOR_GAP}${size}`, 'i')
