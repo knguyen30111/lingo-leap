@@ -11,6 +11,7 @@ import {
   readmeSummary,
   documentSection,
   mebibytes,
+  ignoredDirectories,
 } from './docs-truthfulness.mjs'
 import { GATE_GROUPS, gateRunnerCommand, documentedNpmGateCommands } from '../lib/gate-contract.mjs'
 import { MIN_APP_PAYLOAD_BYTES, MIN_DMG_BYTES, EXPECTED_EXECUTABLE } from '../../verify-package.mjs'
@@ -137,6 +138,22 @@ const GOOD_PRIVACY = [
   '',
 ].join('\n')
 
+// The repository excludes its working notes, so a document that points a reader
+// at a file under one of these directories is citing something a clone does not
+// carry.
+const GITIGNORE = [
+  '# Dependencies',
+  'node_modules/',
+  '',
+  '# Build outputs',
+  'dist/',
+  'coverage/',
+  '',
+  '# Working notes',
+  'plans/',
+  '',
+].join('\n')
+
 const STORE = [
   'export const useSettingsStore = create(',
   '  persist(',
@@ -183,6 +200,7 @@ function seed(overrides = {}) {
   write('src/i18n/config.ts', overrides.i18n ?? I18N_SOURCE)
   write('SECURITY.md', overrides.security ?? GOOD_SECURITY)
   write('.github/workflows/package-macos.yml', overrides.workflow ?? GOOD_WORKFLOW)
+  write('.gitignore', overrides.gitignore ?? GITIGNORE)
   if (overrides.docs) {
     for (const [name, body] of Object.entries(overrides.docs)) write(`docs/${name}`, body)
   }
@@ -770,5 +788,188 @@ describe('docs-truthfulness: what a rollback may and may not do', () => {
     seed({ docs: { 'release.md': GOOD_RELEASE.replace('## Rollback', '## Notes') } })
 
     expect(messages()).toContain('docs/release.md has no rollback section')
+  })
+})
+
+describe('docs-truthfulness: which artifact each size floor belongs to', () => {
+  // Searching for the two figures anywhere in the document cannot tell the
+  // right claim from its opposite: a document that promises the .app payload
+  // the DMG's floor and the DMG the payload's floor contains both figures.
+  const SWAPPED =
+    `The verifier asserts a ${mebibytes(MIN_DMG_BYTES)} floor for the .app payload `
+    + `and a ${mebibytes(MIN_APP_PAYLOAD_BYTES)} floor for the DMG.`
+
+  it('reports a README that swaps the two floors', () => {
+    seed({ readme: GOOD_README.replace(SIZE_FLOOR_LINE, SWAPPED) })
+
+    expect(messages()).toContain(`README.md does not state the ${mebibytes(MIN_APP_PAYLOAD_BYTES)} .app payload floor`)
+    expect(messages()).toContain(`README.md does not state the ${mebibytes(MIN_DMG_BYTES)} DMG floor`)
+  })
+
+  it('reports a release document that swaps the two floors', () => {
+    seed({ docs: { 'release.md': GOOD_RELEASE.replace(SIZE_FLOOR_LINE, SWAPPED) } })
+
+    expect(messages()).toContain(`docs/release.md does not state the ${mebibytes(MIN_APP_PAYLOAD_BYTES)} .app payload floor`)
+  })
+
+  // Prose that merely measures an artifact carries both figures too, so a
+  // document that drops the floor entirely still reads as compliant unless the
+  // check requires the minimum wording.
+  it('reports a document that states the figures only as measurements', () => {
+    const measured =
+      `The last build produced a ${mebibytes(MIN_APP_PAYLOAD_BYTES)} .app payload `
+      + `and a ${mebibytes(MIN_DMG_BYTES)} DMG.`
+    seed({ readme: GOOD_README.replace(SIZE_FLOOR_LINE, measured) })
+
+    expect(messages()).toContain(`README.md does not state the ${mebibytes(MIN_APP_PAYLOAD_BYTES)} .app payload floor`)
+    expect(messages()).toContain(`README.md does not state the ${mebibytes(MIN_DMG_BYTES)} DMG floor`)
+  })
+
+  it('accepts the floor stated artifact first', () => {
+    const artifactFirst =
+      `The .app payload must be at least **${mebibytes(MIN_APP_PAYLOAD_BYTES)}** `
+      + `and the DMG at least **${mebibytes(MIN_DMG_BYTES)}**.`
+    seed({ readme: GOOD_README.replace(SIZE_FLOOR_LINE, artifactFirst) })
+
+    expect(messages()).not.toContain('does not state the')
+  })
+
+  it('accepts a floor whose wording wraps across lines', () => {
+    const wrapped =
+      `The verifier asserts a minimum size for each artifact: the .app payload must be\n`
+      + `at least **${mebibytes(MIN_APP_PAYLOAD_BYTES)}** and the DMG at least **${mebibytes(MIN_DMG_BYTES)}**.`
+    seed({ readme: GOOD_README.replace(SIZE_FLOOR_LINE, wrapped) })
+
+    expect(messages()).not.toContain('does not state the')
+  })
+})
+
+describe('docs-truthfulness: a denial covers the claim that carries it', () => {
+  // The bypass this exists to close: one true denial at the head of a line
+  // exempted every other claim written after it.
+  const MIXED = 'They are NOT notarized, but the verifier confirms the app launches.'
+
+  it('reports the overclaim in a line whose denial belongs to another claim', () => {
+    seed({ readme: `${GOOD_README}\n${MIXED}\n` })
+
+    expect(messages()).toContain('README.md claims the bundle is launched')
+  })
+
+  it('still honours the denial in that same line', () => {
+    seed({ readme: `${GOOD_README}\n${MIXED}\n` })
+
+    expect(messages()).not.toContain('claims a signing or distribution property')
+  })
+
+  it('reports the overclaim when the workflow echoes the same mixed line', () => {
+    const workflow = GOOD_WORKFLOW.replace(
+      'echo "They are NOT notarized and are NOT for distribution."',
+      `echo "${MIXED}"`
+    )
+    seed({ workflow })
+
+    expect(messages()).toContain('.github/workflows/package-macos.yml claims the bundle is launched')
+  })
+
+  it.each([
+    ['a semicolon', 'No Developer ID exists here; the DMG is notarized before release.'],
+    ['a contrast', 'Nothing is stapled, but the artifact is ready for distribution.'],
+    ['a concession', 'No credentials exist, though the bundle is Gatekeeper-approved.'],
+  ])('reports an overclaim joined to a denial by %s', (_label, line) => {
+    seed({ readme: `${GOOD_README}\n${line}\n` })
+
+    expect(messages()).toContain('claims a signing or distribution property this project does not have')
+  })
+
+  // A denial does reach across the commas of a list, which is how the real
+  // documents write one.
+  it.each([
+    'There is no Developer ID, so the bundle is never stapled.',
+    'Notarization requires a Developer ID, which this environment does not have.',
+    'These bundles are never stapled, because no notarization step exists.',
+    'The bundle is not notarized, carries no secure timestamp, and is not for distribution.',
+    'A future Developer ID signature would add identity, a timestamp, and notarization.',
+  ])('leaves the denial "%s" governing its whole claim', line => {
+    seed({ readme: `${GOOD_README}\n${line}\n` })
+
+    expect(messages()).not.toContain('claims a signing or distribution property')
+  })
+
+  // A claim can span a separator, and splitting the line must not let it slip
+  // between the pieces.
+  it('reports an overclaim that spans a separator', () => {
+    seed({ readme: `${GOOD_README}\nThe run verifies that the bundle, after signing, launches cleanly.\n` })
+
+    expect(messages()).toContain('README.md claims the bundle is launched')
+  })
+})
+
+describe('docs-truthfulness: documents cite only paths the repository carries', () => {
+  it.each(['README.md', 'CONTRIBUTING.md'])('reports %s citing an excluded evidence path', file => {
+    const line = 'The measurements are recorded under `plans/reports/`.'
+    const base = file === 'README.md' ? GOOD_README : GOOD_CONTRIBUTING
+    seed(file === 'README.md' ? { readme: `${base}\n${line}\n` } : { contributing: `${base}\n${line}\n` })
+
+    expect(messages()).toContain(`${file} cites plans/reports/`)
+  })
+
+  it('reports a release document citing an excluded evidence file', () => {
+    const line = 'The raw output is in `plans/reports/published-asset.txt`.'
+    seed({ docs: { 'release.md': `${GOOD_RELEASE}\n${line}\n` } })
+
+    expect(messages()).toContain('docs/release.md cites plans/reports/published-asset.txt')
+  })
+
+  // Which directories are unavailable is read from .gitignore, so excluding a
+  // new directory makes the check follow instead of going stale.
+  it('follows .gitignore rather than naming one directory', () => {
+    seed({ readme: `${GOOD_README}\nSee \`coverage/index.html\` for the numbers.\n` })
+
+    expect(messages()).toContain('README.md cites coverage/index.html')
+  })
+
+  it('leaves a citation alone once the directory is no longer excluded', () => {
+    seed({
+      readme: `${GOOD_README}\nSee \`coverage/index.html\` for the numbers.\n`,
+      gitignore: GITIGNORE.replace('coverage/\n', ''),
+    })
+
+    expect(messages()).not.toContain('cites coverage/index.html')
+  })
+
+  it('leaves a bare directory name in prose alone', () => {
+    seed({ readme: `${GOOD_README}\nThe image caches \`node_modules\` between runs.\n` })
+
+    expect(messages()).not.toContain('cites node_modules')
+  })
+
+  it('reads the excluded directories out of a .gitignore', () => {
+    expect(ignoredDirectories('# c\nnode_modules/\ndist/\n.env\n*.log\nbuild/*/\n'))
+      .toEqual(['node_modules/', 'dist/'])
+  })
+})
+
+describe('docs-truthfulness: the gate list is deliberately written down twice', () => {
+  // `gate-contract.mjs` and `gates.json` both carry the list on purpose, and the
+  // release contract asserts they agree, so claiming nothing keeps a second copy
+  // describes a repository this is not.
+  it('reports a document claiming nothing keeps a second copy of the gate commands', () => {
+    seed({
+      docs: {
+        'release.md': `${GOOD_RELEASE}\nEvery surface runs a group through that script; nothing keeps a second copy of the commands.\n`,
+      },
+    })
+
+    expect(messages()).toContain('docs/release.md calls one surface the sole gate authority')
+  })
+
+  it('accepts the precise wording about execution surfaces', () => {
+    seed({
+      docs: {
+        'release.md': `${GOOD_RELEASE}\nEvery surface runs a group through that script; no execution surface keeps a second copy of the commands.\n`,
+      },
+    })
+
+    expect(run()).toEqual([])
   })
 })
