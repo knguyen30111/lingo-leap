@@ -191,10 +191,29 @@ distribution. Build one locally with `CI=true npm run tauri:build` — the `CI=t
 lets the DMG step run without a GUI session.
 
 The workflow has **never run**, and it cannot be dispatched until its definition reaches the
-default branch. What is proven today is the assertion set, not the runner: the package verifier
-under `scripts/` is the same script the workflow invokes, and it runs locally against a real bundle
-to assert the architecture, signature mode, entitlements, DMG integrity, checksums, artifact names
-and sizes, and a controlled launch and termination. See [docs/release.md](docs/release.md).
+default branch — a `workflow_dispatch` workflow is only dispatchable from the default branch, so no
+packaging pass is being claimed here.
+
+What is proven today is the assertion set, not the runner. `npm run verify:package -- <bundle-root>`
+is the same command the workflow invokes, and it runs locally against a real bundle. It asserts:
+
+- exactly one `.app` and exactly one `.dmg` under the bundle root, so no stale artifact makes a
+  checksum ambiguous;
+- the executable exists at `Contents/MacOS/tran-app` — the crate name, not the product name — and is
+  executable;
+- `lipo -archs` reports exactly `arm64`, with no second slice;
+- `codesign --verify --deep --strict` passes;
+- `codesign -dv` reports `Signature=adhoc` **and** a `runtime` flag, so the Hardened Runtime is in
+  force;
+- the shipped entitlements are exactly `com.apple.security.device.audio-input`;
+- the bundled `Info.plist` identifier, versions, minimum system version, and both usage descriptions
+  match the manifests, which are read rather than hardcoded;
+- the configured CSP string is present in the executable;
+- `hdiutil verify` passes on the DMG and its filename carries the agreed version.
+
+The gate commands themselves live in `scripts/gates.json` and are executed by
+`node scripts/run-gates.mjs <group>`. CI, the packaging workflow, and a local run all call that one
+runner, so no surface can quietly fall behind another. See [docs/release.md](docs/release.md).
 
 ## Configuration
 

@@ -1,0 +1,33 @@
+version: 2
+
+# Dependabot is the one documented exception to the epic-branch rule. Its value
+# is durable maintenance of the branch the project ships from, and GitHub
+# resolves version updates against the default branch; an epic branch is
+# temporary and would take the updates with it when deleted.
+updates:
+  - package-ecosystem: github-actions
+    directory: "/"
+    target-branch: main
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: ci
+
+  - package-ecosystem: npm
+    directory: "/"
+    target-branch: main
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: chore
+
+  - package-ecosystem: cargo
+    directory: "/src-tauri"
+    target-branch: main
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: chore
