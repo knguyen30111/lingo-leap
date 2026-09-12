@@ -21,6 +21,14 @@ export const EXIT_USAGE = 2
 export const EXPECTED_ENTITLEMENTS = ['com.apple.security.device.audio-input']
 export const EXPECTED_EXECUTABLE = 'tran-app'
 
+// The bundled prompt strings are compared against the plist the repository
+// ships, so the text macOS shows a user cannot drift from the tracked source.
+export const EXPECTED_USAGE_DESCRIPTIONS = [
+  'NSMicrophoneUsageDescription',
+  'NSSpeechRecognitionUsageDescription',
+]
+const SOURCE_INFO_PLIST = ['src-tauri', 'Info.plist']
+
 // ---------------------------------------------------------------------------
 // Pure parsers. These are the parts that misparse in practice, so they are
 // exported and tested against recorded tool output rather than trusted.
@@ -46,17 +54,69 @@ export function parseSignatureMode(text) {
 }
 
 /**
- * Entitlement keys from `codesign -d --entitlements -`. Recent codesign prints
- * a bracketed dict ("[Key] name"); older versions print XML. Both are accepted,
+ * Entitlements from `codesign -d --entitlements -`, as a key-to-value map.
+ *
+ * Recent codesign prints a bracketed dict ("[Key] name" then "[Value]" then a
+ * typed leaf such as "[Bool] true"); older versions print XML. Both are read,
  * because a verifier that understood only one would silently find no keys on
  * the other and report an empty set as a pass.
+ *
+ * The VALUE is parsed, not just the key. `<key>…</key><false/>` grants
+ * nothing, and a key whose value leaf is missing or is not a boolean grants
+ * nothing either; all three have to be distinguishable from a real grant.
+ * Booleans come back as booleans, other leaves as their text, and a key with
+ * no readable value as null.
  */
+export function parseEntitlements(text) {
+  const entitlements = {}
+
+  // XML: the first tag after a <key> is that key's value.
+  const xmlPattern = /<key>([^<]+)<\/key>\s*(?:<(true|false)\s*\/>|<(\w+)>([\s\S]*?)<\/\3>|<(\w+)\s*\/>)/g
+  for (const match of text.matchAll(xmlPattern)) {
+    const key = match[1].trim()
+    if (match[2] !== undefined) entitlements[key] = match[2] === 'true'
+    else if (match[3] !== undefined) entitlements[key] = match[4]
+    else entitlements[key] = match[5]
+  }
+  // An XML key with no following value tag at all still has to be visible.
+  for (const match of text.matchAll(/<key>([^<]+)<\/key>/g)) {
+    const key = match[1].trim()
+    if (!(key in entitlements)) entitlements[key] = null
+  }
+
+  // Bracketed: read forward from each [Key] to the first typed leaf before the
+  // next [Key].
+  const lines = text.split('\n')
+  lines.forEach((line, index) => {
+    const keyMatch = line.match(/^\s*\[Key\]\s+(.+?)\s*$/)
+    if (!keyMatch) return
+    const key = keyMatch[1].trim()
+    let value = null
+    for (let i = index + 1; i < lines.length; i += 1) {
+      if (/^\s*\[Key\]\s+/.test(lines[i])) break
+      const leaf = lines[i].match(/^\s*\[(\w+)\]\s*(.*?)\s*$/)
+      if (!leaf || leaf[1] === 'Value') continue
+      value = leaf[1] === 'Bool' ? leaf[2] === 'true' : leaf[2]
+      break
+    }
+    entitlements[key] = value
+  })
+
+  return entitlements
+}
+
+/** The entitlement keys alone, sorted. */
 export function parseEntitlementKeys(text) {
-  const keys = [
-    ...[...text.matchAll(/<key>([^<]+)<\/key>/g)].map(m => m[1]),
-    ...[...text.matchAll(/^\s*\[Key\]\s+(.+?)\s*$/gm)].map(m => m[1]),
-  ]
-  return [...new Set(keys.map(k => k.trim()))].sort()
+  return Object.keys(parseEntitlements(text)).sort()
+}
+
+/** Every `<key>` / `<string>` pair in a plist, as a plain object. */
+export function parsePlistStrings(xml) {
+  const values = {}
+  for (const match of xml.matchAll(/<key>([^<]+)<\/key>\s*<string>([\s\S]*?)<\/string>/g)) {
+    values[match[1].trim()] = match[2].trim()
+  }
+  return values
 }
 
 function sameSet(actual, expected) {
@@ -152,12 +212,25 @@ export function verifyPackage(bundleRoot, deps = {}) {
     fail('the code-directory flags do not report runtime; the Hardened Runtime is not in force', flags.join(',') || '(none)')
   }
 
-  const entitlementKeys = parseEntitlementKeys(exec('codesign', ['-d', '--entitlements', '-', appPath]).combined)
+  const entitlements = parseEntitlements(exec('codesign', ['-d', '--entitlements', '-', appPath]).combined)
+  const entitlementKeys = Object.keys(entitlements).sort()
   if (!sameSet(entitlementKeys, EXPECTED_ENTITLEMENTS)) {
     fail(
       `the shipped entitlements must be exactly ${EXPECTED_ENTITLEMENTS.join(', ')}`,
       entitlementKeys.join(', ') || '(none)'
     )
+  }
+  // Presence is not a grant. A key carrying false, a non-boolean, or no value
+  // leaf at all authorises nothing, and reporting it as satisfied would be the
+  // false pass this assertion exists to prevent.
+  for (const key of EXPECTED_ENTITLEMENTS) {
+    if (!(key in entitlements)) continue
+    if (entitlements[key] !== true) {
+      fail(
+        `the entitlement ${key} must be set to true`,
+        entitlements[key] === null ? '(no value)' : JSON.stringify(entitlements[key])
+      )
+    }
   }
 
   // Versions are read from the manifests, never hardcoded here.
@@ -184,9 +257,36 @@ export function verifyPackage(bundleRoot, deps = {}) {
       fail(`Info.plist ${key} does not match the manifest`, `bundled ${actual ?? '(absent)'} != expected ${expected ?? '(unset)'}`)
     }
   }
-  for (const key of ['NSMicrophoneUsageDescription', 'NSSpeechRecognitionUsageDescription']) {
+  // The usage descriptions are compared against the plist the repository
+  // ships, not merely required to be present: the string macOS shows the user
+  // is the claim, and a bundled copy that has drifted from the tracked source
+  // is exactly what a presence check cannot see.
+  const sourcePlistPath = path.join(repoRoot, ...SOURCE_INFO_PLIST)
+  const sourcePlistRelative = SOURCE_INFO_PLIST.join('/')
+  let sourceDescriptions = null
+  try {
+    sourceDescriptions = parsePlistStrings(readText(sourcePlistPath))
+  } catch (err) {
+    fail(`${sourcePlistRelative} is missing, so the usage descriptions cannot be compared`, err.message)
+  }
+  for (const key of EXPECTED_USAGE_DESCRIPTIONS) {
     const actual = plistValue(infoPlist, key, exec)
-    if (!actual) fail(`Info.plist is missing ${key}, so macOS cannot prompt for the capability`)
+    if (!actual) {
+      fail(`Info.plist is missing ${key}, so macOS cannot prompt for the capability`)
+      continue
+    }
+    if (sourceDescriptions === null) continue
+    const expected = sourceDescriptions[key]
+    if (expected === undefined) {
+      fail(`${sourcePlistRelative} declares no ${key} for the bundle to be checked against`)
+      continue
+    }
+    if (actual !== expected) {
+      fail(
+        `Info.plist ${key} does not match ${sourcePlistRelative}`,
+        `bundled ${JSON.stringify(actual)} != expected ${JSON.stringify(expected)}`
+      )
+    }
   }
 
   if (config.version !== manifest.version) {
@@ -208,7 +308,6 @@ export function verifyPackage(bundleRoot, deps = {}) {
     fail('the DMG filename does not contain the agreed version', `${dmgs[0]} does not contain ${config.version}`)
   }
 
-  void readText
   return findings
 }
 
