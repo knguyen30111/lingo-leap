@@ -80,8 +80,16 @@ the executable, DMG integrity through `hdiutil verify`, and a minimum size for e
 `scripts/verify-package.mjs` is the authoritative list; it has unit tests, and the README summarises
 it.
 
-Those two figures are **floors**, derived from measurements of real arm64 artifacts recorded under
-`plans/260912-30-release-hardening/reports/`:
+Those two figures are **floors**, derived from measurements of real arm64 artifacts. Each is the
+quantity the verifier itself computes, and each was taken on macOS with the BSD `stat`:
+
+```sh
+find "$APP" -type f -exec stat -f '%z' {} + | awk '{ total += $1 } END { print total }'
+stat -f '%z' "$DMG"
+```
+
+The results were recorded locally when they were taken; the raw output is not carried in this
+repository:
 
 | Artifact | Measured | Where it came from |
 |---|---|---|
@@ -93,15 +101,15 @@ Those two figures are **floors**, derived from measurements of real arm64 artifa
 Each floor sits just under half the smallest measurement of its artifact: **4 MiB** is 40% of
 10,392,093 and **2 MiB** is 44% of 4,777,012. That leaves a leaner future build room while still
 catching an artifact whose payload never landed — a DMG truncated to 1,000,000 bytes and a stubbed
-`.app` payload were both reported against a real bundle, recorded in the same directory. There is
-deliberately **no** upper bound on either artifact: a ceiling would be a distribution-size policy
-this project does not have.
+`.app` payload were both reported against a real bundle, recorded locally alongside those
+measurements. There is deliberately **no** upper bound on either artifact: a ceiling would be a
+distribution-size policy this project does not have.
 
 **Not asserted by the verifier**, and stated here so the boundary is not blurred: the SHA-256
 checksums are computed by a separate workflow step, and neither the verifier nor the workflow starts
 the app — no step launches or terminates it. A controlled launch and termination was carried out by
-hand against a locally built bundle and recorded under
-`plans/260912-30-release-hardening/reports/` — local evidence from a single machine, not a gate.
+hand against a locally built bundle and its output recorded locally at the time — local evidence
+from a single machine, not a gate, and not carried in this repository.
 
 **Not proven:** the *runner*. A `workflow_dispatch` workflow can only be dispatched once its
 definition exists on the repository's default branch, and this work does not reach the default
@@ -116,9 +124,11 @@ was produced by the packaging path described above, which has never run, and non
 `scripts/verify-package.mjs`, which did not exist when they were built.
 
 A read-only inspection of the asset published under the **v1.1.0** release — downloaded with
-`gh release download`, with nothing uploaded, edited, replaced, or deleted — found the following. The
-raw tool output is recorded in
-`plans/260912-30-release-hardening/reports/review-fix2-260912-published-asset.txt`.
+`gh release download`, with nothing uploaded, edited, replaced, or deleted — found the following.
+Every row below is reproducible against that download with `lipo -archs`, `codesign -dv
+--verbose=4`, `codesign -d --entitlements :-`, `codesign --verify --deep --strict`, and
+`plutil -p` on the bundled `Info.plist`; the raw output was recorded locally at the time and is not
+carried in this repository.
 
 **What it gets right**, so the list of failures below is not read as "everything":
 
@@ -238,7 +248,8 @@ node scripts/run-gates.mjs frontend
 node scripts/run-gates.mjs rust
 ```
 
-Every surface runs a group through that script; nothing keeps a second copy of the commands.
+Every surface runs a group through that script; no execution surface keeps a second copy of the
+commands. The gate list itself is written down twice on purpose, in the two files below.
 
 What a gate *is* lives in two files that have to agree:
 `scripts/release-contract/lib/gate-contract.mjs` declares which gates are required and in which

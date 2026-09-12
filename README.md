@@ -271,8 +271,8 @@ Three things are **separate workflow steps, not verifier assertions**, and the v
 without them: the SHA-256 checksums of the DMG and the archived `.app`, the `.app` tarball itself,
 and the run summary. Neither the workflow nor the verifier starts the app: no step launches or
 terminates it. A controlled launch and termination was performed by hand against a locally built
-bundle and recorded under `plans/260912-30-release-hardening/reports/`; it is local evidence from
-one machine, not an automated gate.
+bundle and its output recorded locally at the time; it is local evidence from one machine, not an
+automated gate, and it is not carried in this repository.
 
 See [docs/release.md](docs/release.md).
 
