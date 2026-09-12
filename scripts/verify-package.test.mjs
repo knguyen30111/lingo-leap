@@ -13,6 +13,8 @@ import {
   parsePlistStrings,
   EXPECTED_ENTITLEMENTS,
   EXPECTED_USAGE_DESCRIPTIONS,
+  MIN_APP_PAYLOAD_BYTES,
+  MIN_DMG_BYTES,
 } from './verify-package.mjs'
 
 // Recorded output from a real `codesign -dv --verbose=4` run against a bundle
@@ -187,12 +189,15 @@ function buildFixture(overrides = {}) {
   fs.mkdirSync(path.join(appPath, 'Contents', 'MacOS'), { recursive: true })
   fs.mkdirSync(path.join(bundleRoot, 'dmg'), { recursive: true })
 
+  const pad = overrides.padToBytes ?? {}
+  const body = (text, bytes) => (bytes ? Buffer.alloc(bytes, 'x') : Buffer.from(text))
+
   for (const name of overrides.dmgNames ?? [`Lingo Leap_${VERSION}_aarch64.dmg`]) {
-    fs.writeFileSync(path.join(bundleRoot, 'dmg', name), 'dmg')
+    fs.writeFileSync(path.join(bundleRoot, 'dmg', name), body('dmg', pad.dmg))
   }
   if (overrides.executable !== false) {
     const bin = path.join(appPath, 'Contents', 'MacOS', overrides.executableName ?? 'tran-app')
-    fs.writeFileSync(bin, 'binary')
+    fs.writeFileSync(bin, body('binary', pad.app))
     fs.chmodSync(bin, 0o755)
   }
   fs.writeFileSync(path.join(appPath, 'Contents', 'Info.plist'), 'plist')
@@ -260,8 +265,34 @@ function toolDouble(overrides = {}) {
   }
 }
 
+// Sizes measured on real arm64 artifacts this repository produced: the app
+// payload of a 1.1.0 bundle built under CI=true, and the DMG published under
+// the v1.1.0 release. The fixture tree holds a few bytes per file, so the
+// healthy sizes are injected rather than written out.
+const REAL_APP_PAYLOAD_BYTES = 10_392_093
+const REAL_DMG_BYTES = 5_802_624
+const PAYLOAD_MARKER = '<app payload>'
+
+/**
+ * Size doubles. `realSizes: true` drops them so the default `node:fs`
+ * implementation measures the fixture tree on disk.
+ */
+function sizeDeps(overrides) {
+  if (overrides.realSizes) return {}
+  const appBytes = overrides.appBytes ?? REAL_APP_PAYLOAD_BYTES
+  const dmgBytes = overrides.dmgBytes ?? REAL_DMG_BYTES
+  return {
+    listFiles: () => [PAYLOAD_MARKER],
+    fileSize: target => (target === PAYLOAD_MARKER ? appBytes : dmgBytes),
+  }
+}
+
 function run(bundleRoot, toolOverrides = {}) {
-  return verifyPackage(bundleRoot, { exec: toolDouble(toolOverrides), repoRoot: fixture })
+  return verifyPackage(bundleRoot, {
+    exec: toolDouble(toolOverrides),
+    repoRoot: fixture,
+    ...sizeDeps(toolOverrides),
+  })
 }
 
 function messages(findings) {
@@ -429,6 +460,67 @@ describe('verifyPackage', () => {
   it('reports a DMG that fails hdiutil verify', () => {
     expect(messages(run(buildFixture(), { hdiutilFails: true })))
       .toContain('hdiutil verify failed on the DMG')
+  })
+
+  // Artifact size. A build that produces a zero-length or truncated artifact
+  // satisfies every structural assertion above — the names are right, the
+  // plist is right, the signature is right — so a floor is the only thing that
+  // sees it.
+  it('reports an app payload below the floor', () => {
+    expect(messages(run(buildFixture(), { appBytes: 1024 })))
+      .toContain(`the .app payload is 1024 bytes, below the ${MIN_APP_PAYLOAD_BYTES}-byte floor`)
+  })
+
+  it('reports an empty app payload', () => {
+    expect(messages(run(buildFixture(), { appBytes: 0 })))
+      .toContain(`the .app payload is 0 bytes, below the ${MIN_APP_PAYLOAD_BYTES}-byte floor`)
+  })
+
+  it('reports a DMG below the floor', () => {
+    expect(messages(run(buildFixture(), { dmgBytes: 4096 })))
+      .toContain(`the DMG is 4096 bytes, below the ${MIN_DMG_BYTES}-byte floor`)
+  })
+
+  it('reports a zero-length DMG', () => {
+    expect(messages(run(buildFixture(), { dmgBytes: 0 })))
+      .toContain(`the DMG is 0 bytes, below the ${MIN_DMG_BYTES}-byte floor`)
+  })
+
+  // The floor is a floor, not a window: the measured value is allowed to sit
+  // on it, and nothing above it is ever reported.
+  it('accepts artifacts exactly at both floors', () => {
+    expect(run(buildFixture(), { appBytes: MIN_APP_PAYLOAD_BYTES, dmgBytes: MIN_DMG_BYTES })).toEqual([])
+  })
+
+  it('asserts no upper bound on either artifact', () => {
+    const huge = 4 * 1024 * 1024 * 1024
+
+    expect(run(buildFixture(), { appBytes: huge, dmgBytes: huge })).toEqual([])
+  })
+
+  // The floors have to hold against real measurements, or they would fail a
+  // healthy build.
+  it('keeps both floors below the real measured artifacts', () => {
+    expect(MIN_APP_PAYLOAD_BYTES).toBeLessThan(REAL_APP_PAYLOAD_BYTES)
+    expect(MIN_DMG_BYTES).toBeLessThan(REAL_DMG_BYTES)
+    expect(MIN_APP_PAYLOAD_BYTES).toBeGreaterThan(0)
+    expect(MIN_DMG_BYTES).toBeGreaterThan(0)
+  })
+
+  // Without the doubles, the sizes come from the filesystem. The fixture tree
+  // holds a handful of bytes, so both floors must report against it.
+  it('measures the real tree when no size double is injected', () => {
+    const found = messages(run(buildFixture(), { realSizes: true }))
+
+    expect(found).toContain('the .app payload is')
+    expect(found).toContain('below the')
+    expect(found).toContain('the DMG is')
+  })
+
+  it('measures a padded real tree as satisfying both floors', () => {
+    const root = buildFixture({ padToBytes: { app: MIN_APP_PAYLOAD_BYTES, dmg: MIN_DMG_BYTES } })
+
+    expect(run(root, { realSizes: true })).toEqual([])
   })
 
   it('reports a DMG filename that does not carry the version', () => {
