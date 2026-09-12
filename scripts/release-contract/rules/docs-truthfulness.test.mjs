@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import fs from 'node:fs'
+import { spawnSync } from 'node:child_process'
 import os from 'node:os'
 import path from 'node:path'
 import { createRepo } from '../lib/repo.mjs'
@@ -971,5 +972,242 @@ describe('docs-truthfulness: the gate list is deliberately written down twice', 
     })
 
     expect(run()).toEqual([])
+  })
+})
+
+describe('docs-truthfulness: every occurrence of a claim is read, not just the first', () => {
+  // A denial in the first clause and the claim in the second: reading only the
+  // first place a pattern matches excuses the whole line, because the match the
+  // denial covers is the only one ever examined.
+  it.each([
+    ['a signing claim after a denial of it', 'The bundle is not notarized; the DMG is notarized before release.',
+      'claims a signing or distribution property this project does not have'],
+    ['an identity claim after a denial of it', 'No Developer ID exists here; this is a Developer ID signed build.',
+      'claims a signing or distribution property this project does not have'],
+    ['a launch claim in the sentence after a denial', 'They are NOT notarized. The verifier confirms the app launches.',
+      'claims the bundle is launched'],
+    ['a distribution claim contradicting its own denial', 'It is not ready for distribution; actually it is ready for distribution.',
+      'claims a signing or distribution property this project does not have'],
+    ['a launch claim whose verb is denied earlier', 'The verifier does not confirm but later confirms the app launches.',
+      'claims the bundle is launched'],
+  ])('reports %s', (_label, line, message) => {
+    seed({ readme: `${GOOD_README}\n${line}\n` })
+
+    expect(messages()).toContain(message)
+  })
+
+  // The denials the real documents write have to keep working: a sentence-level
+  // boundary must not cut a denial off from the enumeration it governs.
+  it.each([
+    'The bundles are not notarized. No Developer ID credentials exist in this environment.',
+    'The bundle is not notarized, carries no secure timestamp, and is not for distribution.',
+    'There is no Developer ID: the signing identity is ad-hoc, not a team.',
+    'Neither the workflow nor the verifier launches or terminates the app.',
+    'A future Developer ID signature would add identity, a secure timestamp, and notarization.',
+  ])('leaves the denial "%s" alone', line => {
+    seed({ readme: `${GOOD_README}\n${line}\n` })
+
+    expect(messages()).not.toContain('claims a signing or distribution property')
+    expect(messages()).not.toContain('claims the bundle is launched')
+  })
+})
+
+describe('docs-truthfulness: a size floor has to be asserted, not denied', () => {
+  const APP_FIGURE = mebibytes(MIN_APP_PAYLOAD_BYTES)
+  const DMG_FIGURE = mebibytes(MIN_DMG_BYTES)
+
+  it('reports a document that denies both floors in minimum wording', () => {
+    const denied =
+      `The \`.app\` payload does not have a minimum of **${APP_FIGURE}** `
+      + `and the DMG does not have a minimum of **${DMG_FIGURE}**.`
+    seed({ readme: GOOD_README.replace(SIZE_FLOOR_LINE, denied) })
+
+    expect(messages()).toContain(`README.md does not state the ${APP_FIGURE} .app payload floor`)
+    expect(messages()).toContain(`README.md does not state the ${DMG_FIGURE} DMG floor`)
+  })
+
+  it('reports the denied floor while accepting the one still asserted', () => {
+    const mixed =
+      `The \`.app\` payload has no minimum of **${APP_FIGURE}**. `
+      + `The DMG must be at least **${DMG_FIGURE}**.`
+    seed({ readme: GOOD_README.replace(SIZE_FLOOR_LINE, mixed) })
+
+    expect(messages()).toContain(`README.md does not state the ${APP_FIGURE} .app payload floor`)
+    expect(messages()).not.toContain(`does not state the ${DMG_FIGURE} DMG floor`)
+  })
+
+  it('reports a floor whose denial stands earlier in the same wrapped claim', () => {
+    const wrapped =
+      `Nothing in the verifier gives the \`.app\` payload\na minimum of **${APP_FIGURE}**, `
+      + `and the DMG has no minimum of **${DMG_FIGURE}**.`
+    seed({ readme: GOOD_README.replace(SIZE_FLOOR_LINE, wrapped) })
+
+    expect(messages()).toContain(`README.md does not state the ${APP_FIGURE} .app payload floor`)
+    expect(messages()).toContain(`README.md does not state the ${DMG_FIGURE} DMG floor`)
+  })
+
+  // A denial of something else in a neighbouring sentence is not a denial of
+  // the floor, which is what keeps the real wording acceptable.
+  it('accepts a floor stated beside a denial of an upper bound', () => {
+    const stated =
+      `The \`.app\` payload is at least **${APP_FIGURE}** and the DMG at least **${DMG_FIGURE}**. `
+      + 'No upper bound is asserted, because a ceiling would be a distribution policy this project does not have.'
+    seed({ readme: GOOD_README.replace(SIZE_FLOOR_LINE, stated) })
+
+    expect(messages()).not.toContain('does not state the')
+  })
+})
+
+describe('docs-truthfulness: a documented shell block runs on its own', () => {
+  const FAIL_FAST = [
+    '```sh',
+    'set -euo pipefail',
+    '',
+    'BUNDLE_ROOT=${1:?usage: measure <bundle-root>}',
+    'APP=$(find "$BUNDLE_ROOT/macos" -maxdepth 1 -type d -name \'*.app\')',
+    'find "$APP" -type f -exec stat -f \'%z\' {} + | awk \'{ total += $1 } END { print total }\'',
+    '```',
+  ].join('\n')
+
+  it('reports a block that expands a variable it never defines', () => {
+    const block = ['```sh', 'stat -f \'%z\' "$DMG"', '```'].join('\n')
+    seed({ docs: { 'release.md': `${GOOD_RELEASE}\n${block}\n` } })
+
+    expect(messages()).toContain('docs/release.md documents a shell block that expands $DMG without defining it')
+  })
+
+  it('reports a block that defines and uses variables without failing fast', () => {
+    const block = FAIL_FAST.replace('set -euo pipefail\n\n', '')
+    seed({ docs: { 'release.md': `${GOOD_RELEASE}\n${block}\n` } })
+
+    expect(messages()).toContain('docs/release.md documents a shell block that defines and expands variables without `set -euo pipefail`')
+  })
+
+  it('accepts a self-contained block that fails fast', () => {
+    seed({ docs: { 'release.md': `${GOOD_RELEASE}\n${FAIL_FAST}\n` } })
+
+    expect(run()).toEqual([])
+  })
+
+  it('accepts a block that expands an environment variable it cannot define', () => {
+    const block = ['```bash', 'source $HOME/.cargo/env', '```'].join('\n')
+    seed({ readme: `${GOOD_README}\n${block}\n` })
+
+    expect(messages()).not.toContain('shell block')
+  })
+})
+
+describe('docs-truthfulness: a cited directory is a citation too', () => {
+  it('reports a backticked citation of an excluded directory', () => {
+    seed({ readme: `${GOOD_README}\nThe evidence is recorded under \`plans/\`.\n` })
+
+    expect(messages()).toContain('README.md cites plans/, which .gitignore excludes')
+  })
+
+  it('reports a link whose destination is an excluded directory', () => {
+    seed({ docs: { 'release.md': `${GOOD_RELEASE}\nSee [the working notes](plans/).\n` } })
+
+    expect(messages()).toContain('docs/release.md cites plans/, which .gitignore excludes')
+  })
+
+  it('leaves an unbackticked directory name in prose alone', () => {
+    seed({ readme: `${GOOD_README}\nThe image caches node_modules between runs.\n` })
+
+    expect(messages()).not.toContain('cites node_modules')
+  })
+})
+
+// The measurement block the release document publishes is run here exactly as a
+// reader would run it, because a snippet that cannot be executed is a claim
+// nobody can check. `stat -f` is BSD, so the execution is macOS-only; the
+// structural requirements above hold everywhere.
+describe('docs-truthfulness: the documented measurement block executes', () => {
+  const REPO_ROOT = new URL('../../../', import.meta.url).pathname
+  const PAYLOAD = ['Contents/MacOS/tran-app', 'Contents/Info.plist', 'Contents/Resources/icon.icns']
+
+  function documentedSnippet() {
+    const release = fs.readFileSync(path.join(REPO_ROOT, 'docs/release.md'), 'utf8')
+    const blocks = [...release.matchAll(/^```sh\n([\s\S]*?)^```/gm)].map(m => m[1])
+    return blocks.find(block => block.includes('stat -f'))
+  }
+
+  function bundleRoot({ apps = ['Lingo Leap.app'], dmgs = ['Lingo Leap_1.1.0_aarch64.dmg'] } = {}) {
+    const root = path.join(fixture, 'bundle')
+    for (const app of apps) {
+      for (const [index, relative] of PAYLOAD.entries()) {
+        const target = path.join(root, 'macos', app, relative)
+        fs.mkdirSync(path.dirname(target), { recursive: true })
+        fs.writeFileSync(target, Buffer.alloc(1000 * (index + 1)))
+      }
+    }
+    for (const dmg of dmgs) {
+      const target = path.join(root, 'dmg', dmg)
+      fs.mkdirSync(path.dirname(target), { recursive: true })
+      fs.writeFileSync(target, Buffer.alloc(4096))
+    }
+    return root
+  }
+
+  function measure(args, options = {}) {
+    const script = path.join(fixture, 'measure.sh')
+    fs.writeFileSync(script, documentedSnippet())
+    return spawnSync('zsh', [script, ...args], { encoding: 'utf8', ...options })
+  }
+
+  const onMacOS = process.platform === 'darwin' ? it : it.skip
+
+  it('publishes a measurement block', () => {
+    expect(documentedSnippet()).toBeDefined()
+  })
+
+  onMacOS('prints the payload sum and the DMG size for a single bundle', () => {
+    const root = bundleRoot()
+
+    const result = measure([root])
+
+    expect(result.status).toBe(0)
+    expect(result.stdout.trim().split('\n')).toEqual(['6000', '4096'])
+  })
+
+  onMacOS('fails when no bundle root is given', () => {
+    const result = measure([])
+
+    expect(result.status).not.toBe(0)
+    expect(result.stdout.trim()).toBe('')
+  })
+
+  onMacOS('fails when the bundle root does not exist', () => {
+    const result = measure([path.join(fixture, 'absent')])
+
+    expect(result.status).not.toBe(0)
+    expect(result.stdout.trim()).toBe('')
+  })
+
+  onMacOS('fails when the bundle root carries two .app bundles', () => {
+    const root = bundleRoot({ apps: ['One.app', 'Two.app'] })
+
+    const result = measure([root])
+
+    expect(result.status).not.toBe(0)
+    expect(result.stderr).toContain('.app')
+  })
+
+  onMacOS('fails when the bundle root carries no DMG', () => {
+    const root = bundleRoot({ dmgs: [] })
+
+    const result = measure([root])
+
+    expect(result.status).not.toBe(0)
+    expect(result.stdout.trim()).toBe('')
+  })
+
+  onMacOS('fails rather than printing an empty sum for an empty .app', () => {
+    const root = bundleRoot()
+    fs.rmSync(path.join(root, 'macos', 'Lingo Leap.app', 'Contents'), { recursive: true })
+
+    const result = measure([root])
+
+    expect(result.status).not.toBe(0)
+    expect(result.stdout.trim()).toBe('')
   })
 })
