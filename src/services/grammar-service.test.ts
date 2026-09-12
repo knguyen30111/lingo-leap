@@ -545,28 +545,23 @@ describe('console hygiene', () => {
   })
 })
 
-// The retry counter in the Ollama client is the one console call in this area
-// that carries no user or model content and is worth keeping. Pinning its
-// shape here stops a future edit from quietly appending the response to it.
+// The retry notice in the Ollama client is the one console call in this area
+// worth keeping. Its argument has to stay a fixed literal: no lexical check
+// can tell an interpolated counter from an interpolated prompt, so the only
+// enforceable line is that nothing is interpolated at all.
 describe('retained diagnostic ownership', () => {
   const consoleCall = /console\.(log|debug|info|dir|table|trace|warn|error)\(/g
 
-  it('keeps the ollama client retry counter as its only console call', () => {
+  it('keeps one console call in the ollama client', () => {
     const calls = ollamaClientSource.match(consoleCall) ?? []
 
     expect(calls).toEqual(['console.warn('])
-    expect(ollamaClientSource).toContain(
-      'console.warn(`JSON parse retry ${attempt + 1}/${maxRetries}`)'
-    )
   })
 
-  it('lets the retry counter interpolate only numbers', () => {
-    const [, interpolations] =
-      ollamaClientSource.match(/console\.warn\(`([^`]*)`\)/) ?? []
+  it('gives that call a fixed message with nothing interpolated', () => {
+    const [, argument] = ollamaClientSource.match(/console\.warn\((.*)\)/) ?? []
 
-    expect(interpolations).toBeDefined()
-    for (const expression of interpolations!.matchAll(/\$\{([^}]*)\}/g)) {
-      expect(expression[1]).toMatch(/^[\w\s+.\-*/()]+$/)
-    }
+    expect(argument).toBeDefined()
+    expect(argument).toMatch(/^'[^'$]*'$/)
   })
 })
