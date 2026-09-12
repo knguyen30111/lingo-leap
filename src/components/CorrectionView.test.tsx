@@ -206,6 +206,24 @@ describe('CorrectionView', () => {
     expect(state.changes).toEqual([])
   })
 
+  it('clears a previous error when clear clicked', () => {
+    useAppStore.setState({
+      inputText: 'Hello',
+      outputText: 'Hello corrected',
+      error: 'Correction failed',
+      changes: [{ from: 'wrold', to: 'world', reason: 'Typo' }],
+    })
+    render(<CorrectionView />)
+
+    fireEvent.click(screen.getByTestId('clear-input'))
+
+    const state = useAppStore.getState()
+    expect(state.inputText).toBe('')
+    expect(state.outputText).toBe('')
+    expect(state.error).toBeNull()
+    expect(state.changes).toEqual([])
+  })
+
   it('shows placeholder when no output', () => {
     render(<CorrectionView />)
     expect(screen.getByText('Corrected text will appear here')).toBeInTheDocument()
@@ -227,6 +245,29 @@ describe('CorrectionView', () => {
     useAppStore.setState({ error: 'Correction failed' })
     render(<CorrectionView />)
     expect(screen.getByText('Correction failed')).toBeInTheDocument()
+  })
+
+  it('renders exactly three skeleton bars while loading', () => {
+    useAppStore.setState({ isLoading: true })
+    const { container } = render(<CorrectionView />)
+
+    expect(container.querySelectorAll('.animate-pulse > div')).toHaveLength(3)
+  })
+
+  it('shows the loading skeleton in preference to an error', () => {
+    useAppStore.setState({ isLoading: true, error: 'boom' })
+    const { container } = render(<CorrectionView />)
+
+    expect(container.querySelectorAll('.animate-pulse > div')).toHaveLength(3)
+    expect(screen.queryByText('boom')).not.toBeInTheDocument()
+  })
+
+  it('shows an error in preference to stale output', () => {
+    useAppStore.setState({ error: 'boom', outputText: 'Hello world' })
+    render(<CorrectionView />)
+
+    expect(screen.getByText('boom')).toBeInTheDocument()
+    expect(screen.queryByText('Hello world')).not.toBeInTheDocument()
   })
 
   it('shows done status when output available', () => {
@@ -280,6 +321,43 @@ describe('CorrectionView', () => {
     expect(mockCorrect).toHaveBeenCalledWith(undefined, undefined, { skipCache: true })
   })
 
+  it('does not correct on Enter without modifier', () => {
+    useAppStore.setState({ inputText: 'Hello' })
+    render(<CorrectionView />)
+    const input = screen.getByPlaceholderText('Enter text to correct...')
+
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    expect(mockCorrect).not.toHaveBeenCalled()
+  })
+
+  it('does not correct on Cmd+Enter when input is only whitespace', () => {
+    useAppStore.setState({ inputText: '   ' })
+    render(<CorrectionView />)
+    const input = screen.getByPlaceholderText('Enter text to correct...')
+
+    fireEvent.keyDown(input, { key: 'Enter', metaKey: true })
+
+    expect(mockCorrect).not.toHaveBeenCalled()
+  })
+
+  it('does not correct on Ctrl+Enter when input is only whitespace', () => {
+    useAppStore.setState({ inputText: '   ' })
+    render(<CorrectionView />)
+    const input = screen.getByPlaceholderText('Enter text to correct...')
+
+    fireEvent.keyDown(input, { key: 'Enter', ctrlKey: true })
+
+    expect(mockCorrect).not.toHaveBeenCalled()
+  })
+
+  it('titles the generate button with its keyboard shortcut', () => {
+    useAppStore.setState({ inputText: 'Hello' })
+    render(<CorrectionView />)
+
+    expect(screen.getByText('Generate')).toHaveAttribute('title', 'Generate (⌘+Enter)')
+  })
+
   describe('Copy functionality', () => {
     it('shows copy button when output available', () => {
       useAppStore.setState({ outputText: 'Hello world' })
@@ -309,6 +387,42 @@ describe('CorrectionView', () => {
         expect(screen.getByText('Copied')).toBeInTheDocument()
       })
     })
+
+    it('keeps the copy title in both the idle and the copied state', async () => {
+      useAppStore.setState({ outputText: 'Hello world' })
+      render(<CorrectionView />)
+
+      expect(screen.getByText('Copy').closest('button')).toHaveAttribute('title', 'Copy')
+
+      fireEvent.click(screen.getByText('Copy'))
+
+      await waitFor(() => {
+        expect(screen.getByText('Copied')).toBeInTheDocument()
+      })
+      expect(screen.getByText('Copied').closest('button')).toHaveAttribute('title', 'Copy')
+    })
+
+    it('reverts the copied state after 2000 ms', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true })
+      try {
+        useAppStore.setState({ outputText: 'Hello world' })
+        render(<CorrectionView />)
+
+        fireEvent.click(screen.getByText('Copy'))
+        await waitFor(() => {
+          expect(screen.getByText('Copied')).toBeInTheDocument()
+        })
+
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(2000)
+        })
+
+        expect(screen.queryByText('Copied')).not.toBeInTheDocument()
+        expect(screen.getByText('Copy')).toBeInTheDocument()
+      } finally {
+        vi.useRealTimers()
+      }
+    })
   })
 
   describe('Regenerate functionality', () => {
@@ -325,6 +439,16 @@ describe('CorrectionView', () => {
       fireEvent.click(screen.getByText('Regenerate'))
 
       expect(mockCorrect).toHaveBeenCalledWith(undefined, undefined, { skipCache: true })
+    })
+
+    it('titles the regenerate button', () => {
+      useAppStore.setState({ outputText: 'Hello world', inputText: 'Hello' })
+      render(<CorrectionView />)
+
+      expect(screen.getByText('Regenerate').closest('button')).toHaveAttribute(
+        'title',
+        'Regenerate'
+      )
     })
   })
 
@@ -474,6 +598,18 @@ describe('CorrectionView', () => {
       expect(screen.getByPlaceholderText('Enter text to correct...')).toBeInTheDocument()
     })
 
+    it('still reports a speech failure after support is lost', () => {
+      speechState.isSupported = false
+      speechState.error = 'Microphone access denied'
+      render(<CorrectionView />)
+
+      expect(screen.queryByTestId('mic-button')).not.toBeInTheDocument()
+      expect(screen.queryByTitle('Speech language')).not.toBeInTheDocument()
+      const alerts = screen.getAllByRole('alert')
+      expect(alerts).toHaveLength(1)
+      expect(alerts[0]).toHaveTextContent('Microphone access denied')
+    })
+
     it('exposes a failed attempt as one accessible alert and keeps the mic retryable', () => {
       speechState.error = 'Microphone access denied'
       render(<CorrectionView />)
@@ -523,6 +659,54 @@ describe('CorrectionView', () => {
       render(<CorrectionView />)
 
       expect(capturedLang).toBe('ja')
+    })
+  })
+
+  describe('Focus behavior', () => {
+    it('keeps focus on the textarea across a chord submit', () => {
+      useAppStore.setState({ inputText: 'hello' })
+      render(<CorrectionView />)
+      const textarea = screen.getByPlaceholderText('Enter text to correct...')
+      textarea.focus()
+      expect(document.activeElement).toBe(textarea)
+
+      fireEvent.keyDown(textarea, { key: 'Enter', metaKey: true })
+
+      expect(mockCorrect).toHaveBeenCalledWith(undefined, undefined, { skipCache: true })
+      expect(document.activeElement).toBe(textarea)
+    })
+
+    it('keeps focus on the copy button across the copied re-render', async () => {
+      useAppStore.setState({ outputText: 'Hello world' })
+      render(<CorrectionView />)
+      const copyButton = screen.getByText('Copy').closest('button') as HTMLButtonElement
+      copyButton.focus()
+      expect(document.activeElement).toBe(copyButton)
+
+      fireEvent.click(copyButton)
+
+      await waitFor(() => {
+        expect(screen.getByText('Copied')).toBeInTheDocument()
+      })
+      expect(document.activeElement).toBe(copyButton)
+    })
+
+    it('keeps focus on the textarea when the input is cleared', () => {
+      useAppStore.setState({ inputText: 'Hello' })
+      render(<CorrectionView />)
+      const textarea = screen.getByPlaceholderText('Enter text to correct...')
+      textarea.focus()
+      expect(document.activeElement).toBe(textarea)
+
+      fireEvent.click(screen.getByTestId('clear-input'))
+
+      expect(screen.queryByTestId('clear-input')).not.toBeInTheDocument()
+      // Identity first: a remount replaces the element, and reading `.value` off the
+      // captured reference would report the detached node's stale text instead.
+      expect(document.activeElement).toBe(textarea)
+      expect(
+        (screen.getByPlaceholderText('Enter text to correct...') as HTMLTextAreaElement).value
+      ).toBe('')
     })
   })
 
