@@ -81,10 +81,31 @@ the executable, DMG integrity through `hdiutil verify`, and a minimum size for e
 it.
 
 Those two figures are **floors**, derived from measurements of real arm64 artifacts. Each is the
-quantity the verifier itself computes, and each was taken on macOS with the BSD `stat`:
+quantity the verifier itself computes, and each was taken on macOS with the BSD `stat`. Save the
+block below and run it with `zsh measure-artifacts.sh <bundle-root>`, giving it the same bundle root
+`npm run verify:package` is given — it stops at the first failure rather than printing a number it
+did not measure:
 
 ```sh
-find "$APP" -type f -exec stat -f '%z' {} + | awk '{ total += $1 } END { print total }'
+set -euo pipefail
+
+BUNDLE_ROOT=${1:?usage: measure-artifacts.sh <bundle-root>}
+
+APP_COUNT=$(find "$BUNDLE_ROOT/macos" -maxdepth 1 -type d -name '*.app' | wc -l | tr -d ' ')
+[ "$APP_COUNT" -eq 1 ] || { echo "expected exactly one .app under $BUNDLE_ROOT/macos, found $APP_COUNT" >&2; exit 1; }
+DMG_COUNT=$(find "$BUNDLE_ROOT/dmg" -maxdepth 1 -type f -name '*.dmg' | wc -l | tr -d ' ')
+[ "$DMG_COUNT" -eq 1 ] || { echo "expected exactly one .dmg under $BUNDLE_ROOT/dmg, found $DMG_COUNT" >&2; exit 1; }
+
+APP=$(find "$BUNDLE_ROOT/macos" -maxdepth 1 -type d -name '*.app')
+DMG=$(find "$BUNDLE_ROOT/dmg" -maxdepth 1 -type f -name '*.dmg')
+[ -d "$APP" ] && [ -f "$DMG" ] || { echo "not a bundle root: $BUNDLE_ROOT" >&2; exit 1; }
+
+# The .app payload: every regular file under the bundle, summed.
+find "$APP" -type f -exec stat -f '%z' {} + | awk '
+  { total += $1; files += 1 }
+  END { if (files == 0) { print "no regular files under the .app payload" > "/dev/stderr"; exit 1 } print total }'
+
+# The DMG: one file.
 stat -f '%z' "$DMG"
 ```
 
