@@ -1,21 +1,16 @@
 import { finding } from '../lib/findings.mjs'
+import { requiredNpmScripts } from '../lib/gate-contract.mjs'
 
 // Every gate this repository claims to run has to be invocable by name, and
 // every surface that installs Node has to install the one `.nvmrc` pins. Both
 // are read from tracked files only: no network, no node_modules, no build
 // output, so the rule runs on a clean checkout before anything is built.
 
-// Scripts the gate list names. A gate list that names a script package.json
-// does not define is the failure this assertion exists to catch — it is what
-// makes the executable-gate claim structural rather than documentary.
-const REQUIRED_SCRIPTS = [
-  'lint',
-  'lint:workflows',
-  'typecheck',
-  'verify:release-contract',
-  'build',
-  'test:coverage',
-]
+// Scripts the gate contract names, derived from it rather than copied. A gate
+// the contract requires that package.json does not define is the failure this
+// assertion exists to catch — it is what makes the executable-gate claim
+// structural rather than documentary.
+const REQUIRED_SCRIPTS = requiredNpmScripts()
 
 const ACTIONLINT_PLATFORMS = ['darwin_arm64', 'linux_amd64']
 
