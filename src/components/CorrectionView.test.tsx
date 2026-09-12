@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { act, render, screen, fireEvent, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { CorrectionView } from './CorrectionView'
 import { useAppStore } from '../stores/appStore'
 import { useSettingsStore } from '../stores/settingsStore'
@@ -691,22 +692,32 @@ describe('CorrectionView', () => {
       expect(document.activeElement).toBe(copyButton)
     })
 
-    it('keeps focus on the textarea when the input is cleared', () => {
+    it('moves focus to the clear control on press and to the body once it unmounts', async () => {
+      const user = userEvent.setup()
       useAppStore.setState({ inputText: 'Hello' })
       render(<CorrectionView />)
       const textarea = screen.getByPlaceholderText('Enter text to correct...')
       textarea.focus()
       expect(document.activeElement).toBe(textarea)
 
-      fireEvent.click(screen.getByTestId('clear-input'))
+      // Real pointer activation, not fireEvent.click: a press focuses the control it lands
+      // on, which is what a browser does and what a synthetic click never models. Press and
+      // release are issued separately so the press-time focus target can be read while the
+      // control is still mounted. This sequence was measured identical at base 60ea115.
+      const clear = screen.getByTestId('clear-input')
+      await user.pointer({ target: clear, keys: '[MouseLeft>]' })
+      expect(document.activeElement).toBe(clear)
 
+      await user.pointer({ target: clear, keys: '[/MouseLeft]' })
+
+      // The control took focus and then left the document, so focus falls to the body.
+      // Nothing refocuses the textarea; asserting that it does would be fiction.
       expect(screen.queryByTestId('clear-input')).not.toBeInTheDocument()
-      // Identity first: a remount replaces the element, and reading `.value` off the
-      // captured reference would report the detached node's stale text instead.
-      expect(document.activeElement).toBe(textarea)
-      expect(
-        (screen.getByPlaceholderText('Enter text to correct...') as HTMLTextAreaElement).value
-      ).toBe('')
+      expect(document.activeElement).toBe(document.body)
+      expect(document.activeElement).not.toBe(textarea)
+      // The textarea itself is not remounted: same node, emptied in place.
+      expect(screen.getByPlaceholderText('Enter text to correct...')).toBe(textarea)
+      expect((textarea as HTMLTextAreaElement).value).toBe('')
     })
   })
 
