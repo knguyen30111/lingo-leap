@@ -6,6 +6,11 @@ import {
   gateRunnerCommand,
   documentedNpmGateCommands,
 } from '../lib/gate-contract.mjs'
+import {
+  MIN_APP_PAYLOAD_BYTES,
+  MIN_DMG_BYTES,
+  EXPECTED_EXECUTABLE,
+} from '../../verify-package.mjs'
 
 function listDocsFiles(root) {
   try {
@@ -32,6 +37,16 @@ const SECURITY = 'SECURITY.md'
 const PRIVACY = 'docs/privacy.md'
 const CACHE_MODULE = 'src/lib/cache.ts'
 const I18N_CONFIG = 'src/i18n/config.ts'
+const RELEASE_DOC = 'docs/release.md'
+const PACKAGING_WORKFLOW = '.github/workflows/package-macos.yml'
+
+// The two surfaces that together decide what a gate is. Neither is the sole
+// authority: the contract module declares the required list, the manifest is
+// what the runner executes, and the gate-manifest rule asserts they are the
+// same list. A document that names only one of them tells a contributor to
+// change half of a two-key agreement.
+const GATE_CONTRACT_MODULE = 'scripts/release-contract/lib/gate-contract.mjs'
+const GATES_MANIFEST = 'scripts/gates.json'
 
 const FORBIDDEN_ARTIFACTS = ['.deb', '.rpm', '.AppImage']
 
@@ -55,16 +70,64 @@ const FORBIDDEN_CLAIMS = [
 // the list above: each is a phrase a previous draft actually contained, and
 // each describes something the repository cannot do.
 //
-// `verify-package` asserts neither checksums nor artifact sizes, and nothing
-// launches or terminates the app; GitHub has no primitive that revokes a
-// published asset; and no workflow builds the Linux image.
+// `verify-package` does not compute checksums and nothing launches or
+// terminates the app; it asserts a minimum artifact size but never a maximum,
+// so a ceiling is still a claim this project cannot make. GitHub has no
+// primitive that revokes a published asset, and no workflow builds the Linux
+// image.
 const FORBIDDEN_PACKAGING_CLAIMS = [
   /\bDocker workflow\b/i,
   /\brevoke the (affected )?release\b/i,
-  /artifact names and sizes/i,
-  /\bsize enforcement\b/i,
+  /\b(maximum|max) (artifact |bundle |DMG )?size\b/i,
+  /\bsize (cap|ceiling|limit)\b/i,
   /(workflow|verifier) launches and terminates/i,
   /\b(verifier|verification) (also )?(asserts?|checks?|computes?)[^.]{0,40}checksum/i,
+]
+
+// A launch claim, wherever it is made. The workflow builds, signs, and runs the
+// verifier; no step starts the app, so a status line saying it launches
+// describes a run the reader cannot have had.
+//
+// The second pattern stops at a semicolon as well as a full stop, so a sentence
+// that attributes a hand-run launch to something other than an assertion is not
+// swept up by the verb in its first clause.
+const FORBIDDEN_LAUNCH_CLAIMS = [
+  /\b(and|or) launches\b/i,
+  /\b(verif(?:y|ies|ied)|assert(?:s|ed)?|prove[sd]?|confirm(?:s|ed)?)\b[^.;]{0,60}\blaunch(?:es|ed)?\b/i,
+]
+
+// Sole-authority wording about gates. The required list and the manifest the
+// runner executes are two files that must agree, so calling either one of them
+// the only place a gate is read or changed sends a contributor to half of it.
+const FORBIDDEN_SOLE_GATE_AUTHORITY = [
+  /\b(only|single|sole)\b[^.]{0,40}\bauthority\b/i,
+  /\bthe (only|single|sole) place to (read|change|edit|update)\b/i,
+]
+
+// Sweeping claims about a published asset. The historical bundle does satisfy
+// some assertions — it is arm64 and its executable is where the verifier looks
+// — so "fails every assertion" is false in the project's own favour and hides
+// which assertions actually fail.
+const FORBIDDEN_SWEEPING_ASSET_CLAIMS = [
+  /\bevery (current )?assertion\b/i,
+  /\bfails every\b/i,
+  /\bdisagrees with every\b/i,
+]
+
+// A size denial. These are not subject to the negation exemption below, because
+// the denial IS the negated form and the verifier now asserts both floors.
+const FORBIDDEN_SIZE_DENIALS = [
+  /\b(nothing|no assertion|neither)\b[^.]{0,80}\b(asserts?|checks?|enforces?)\b[^.]{0,30}\bsize\b/i,
+  /\bno\b[^.]{0,30}\bsize\b[^.]{0,40}\b(assertion|assert(s|ed)?|check(s|ed)?)\b/i,
+]
+
+// Editing a release body and opening an advisory are the first step of the
+// rollback procedure, so a sentence that calls editing a published release
+// forbidden contradicts the procedure two sections above it. Replacing an
+// asset's bytes and moving a tag are the operations that stay forbidden.
+const FORBIDDEN_ROLLBACK_CONTRADICTIONS = [
+  /\bediting a (published )?release\b[^.]{0,120}\b(forbid|not allowed|must not|never)/i,
+  /\b(forbid|never|must not)\w*\b[^.]{0,80}\bedit(ing)? (the|a) release (body|notes|metadata)\b/i,
 ]
 
 // "Developer ID" and "notarization" are legitimate when the sentence says they
@@ -74,7 +137,34 @@ const FORBIDDEN_PACKAGING_CLAIMS = [
 // happily in an affirmative overclaim ("the DMG is notarized before release"),
 // so treating it as a denial would hide exactly what this list exists to catch.
 const NEGATED_CONTEXT =
-  /\b(not|no|never|without|once|until|future|would|planned|requires?|lacks?|absent|cannot)\b/i
+  /\b(not|no|never|neither|nor|without|once|until|future|would|planned|requires?|lacks?|absent|cannot)\b/i
+
+/** The first non-empty line under a document's title, or null. */
+export function readmeSummary(markdown) {
+  const lines = markdown.split('\n')
+  const title = lines.findIndex(line => /^#\s/.test(line))
+  if (title === -1) return null
+  return lines.slice(title + 1).find(line => line.trim() !== '') ?? null
+}
+
+/**
+ * The body of the section whose heading matches `heading`, up to the next
+ * heading of any level, or null when there is no such section.
+ */
+export function documentSection(markdown, heading) {
+  const lines = markdown.split('\n')
+  const start = lines.findIndex(line => heading.test(line))
+  if (start === -1) return null
+  const rest = lines.slice(start + 1)
+  const end = rest.findIndex(line => /^#{1,6}\s/.test(line))
+  return (end === -1 ? rest : rest.slice(0, end)).join('\n')
+}
+
+/** A byte count as the mebibyte figure a document states. */
+export function mebibytes(bytes) {
+  const value = bytes / (1024 * 1024)
+  return `${Number.isInteger(value) ? value : value.toFixed(1)} MiB`
+}
 
 export function readModelDefault(storeText, field) {
   const match = storeText.match(new RegExp(`${field}\\s*:\\s*"([^"]+)"`))
@@ -187,6 +277,189 @@ function checkSupportedVersions(ctx, findings) {
         message: `${SECURITY} calls a published release supported, but every published asset is historical and unverified`,
         file: SECURITY,
         evidence: line.trim(),
+      }))
+    }
+  }
+}
+
+/**
+ * The summary line under the README title.
+ *
+ * It is the first claim anybody reads, so it cannot present the app as
+ * distributed: nothing is published, and the platform is one the app is built
+ * and verified for.
+ */
+function checkReadmeSummary(readme, findings) {
+  const summary = readmeSummary(readme)
+  if (summary === null) {
+    findings.push(finding({ message: `${README} has no summary line under its title`, file: README }))
+    return
+  }
+  if (/\bdistributed for\b/i.test(summary)) {
+    findings.push(finding({
+      message: `${README} presents the app as distributed, but no binary is published`,
+      file: README,
+      evidence: summary.trim(),
+    }))
+  }
+  if (!/built and verified/i.test(summary)) {
+    findings.push(finding({
+      message: `${README} does not say the platform is one the app is built and verified for`,
+      file: README,
+      evidence: summary.trim(),
+    }))
+  }
+}
+
+/**
+ * The gate surfaces a document has to name, and the sole-authority wording it
+ * may not use. Both files have to be findable from the document, because
+ * changing a gate means changing both of them deliberately.
+ */
+function checkGateAuthority(ctx, findings) {
+  for (const file of [README, CONTRIBUTING, RELEASE_DOC]) {
+    const text = ctx.readText(file)
+    // Absence is owned elsewhere: governance for the release document, the
+    // checks above for the other two.
+    if (text === null) continue
+
+    for (const [surface, why] of [
+      [GATE_CONTRACT_MODULE, 'which is where the required gates are declared'],
+      [GATES_MANIFEST, 'which is the manifest the runner executes'],
+    ]) {
+      if (!text.includes(surface)) {
+        findings.push(finding({
+          message: `${file} does not name ${surface}, ${why}`,
+          file,
+          evidence: surface,
+        }))
+      }
+    }
+
+    for (const line of text.split('\n')) {
+      for (const pattern of FORBIDDEN_SOLE_GATE_AUTHORITY) {
+        if (pattern.test(line)) {
+          findings.push(finding({
+            message: `${file} calls one surface the sole gate authority, but ${GATE_CONTRACT_MODULE} and ${GATES_MANIFEST} have to agree`,
+            file,
+            evidence: line.trim(),
+          }))
+        }
+      }
+    }
+  }
+}
+
+/**
+ * The artifact-size floors, read from the verifier so a changed constant makes
+ * the documents follow.
+ */
+function checkSizeFloors(ctx, findings) {
+  for (const file of [README, RELEASE_DOC]) {
+    const text = ctx.readText(file)
+    if (text === null) continue
+    for (const [bytes, label] of [
+      [MIN_APP_PAYLOAD_BYTES, '.app payload'],
+      [MIN_DMG_BYTES, 'DMG'],
+    ]) {
+      const figure = mebibytes(bytes)
+      if (!text.includes(figure)) {
+        findings.push(finding({
+          message: `${file} does not state the ${figure} ${label} floor the verifier asserts`,
+          file,
+          evidence: figure,
+        }))
+      }
+    }
+  }
+}
+
+/**
+ * The historical published asset, described by what it actually fails.
+ *
+ * It satisfies the architecture and executable-path assertions, so a document
+ * that says it fails everything is wrong in the project's own favour and tells
+ * a reader nothing about which assertions matter.
+ */
+function checkHistoricalAssets(ctx, findings) {
+  const release = ctx.readText(RELEASE_DOC)
+  if (release === null) return
+
+  const section = documentSection(release, /^#{2,4}\s+Historical published assets\b/i)
+  if (section === null) {
+    findings.push(finding({
+      message: `${RELEASE_DOC} has no historical published assets section, so the published bundle is unclassified`,
+      file: RELEASE_DOC,
+    }))
+    return
+  }
+  if (!/\barm64\b/i.test(section)) {
+    findings.push(finding({
+      message: `${RELEASE_DOC} does not record that the published asset is arm64, which is one of the assertions it satisfies`,
+      file: RELEASE_DOC,
+    }))
+  }
+  const executablePath = `Contents/MacOS/${EXPECTED_EXECUTABLE}`
+  if (!section.includes(executablePath)) {
+    findings.push(finding({
+      message: `${RELEASE_DOC} does not record that the published asset carries its executable at ${executablePath}`,
+      file: RELEASE_DOC,
+      evidence: executablePath,
+    }))
+  }
+}
+
+/**
+ * The rollback procedure.
+ *
+ * Recording the problem in the release body and opening an advisory are
+ * permitted safety operations, and so is withdrawing availability by drafting
+ * the release or deleting an affected asset. Moving a tag and replacing an
+ * asset in place are the operations that destroy the record, so the document
+ * has to forbid exactly those.
+ */
+function checkRollback(ctx, findings) {
+  const release = ctx.readText(RELEASE_DOC)
+  if (release === null) return
+
+  const section = documentSection(release, /^##\s+Rollback\b/i)
+  if (section === null) {
+    findings.push(finding({
+      message: `${RELEASE_DOC} has no rollback section`,
+      file: RELEASE_DOC,
+    }))
+    return
+  }
+
+  const required = [
+    [/\bdraft\b/i, 'does not name converting the release back to a draft, which is the withdrawal the platform actually offers'],
+    [/\badvisor/i, 'does not name the advisory that records the problem before availability is removed'],
+    [/\brelease body\b/i, 'does not name the release body the problem is recorded in first'],
+    [
+      /(never|not)\b[^.]{0,80}\bmov(e|ing)\b[^.]{0,40}\btag\b|\btag\b[^.]{0,60}(never|not)\b[^.]{0,40}\bmov/i,
+      'does not forbid moving the tag, which is what would destroy the record of what was published',
+    ],
+    [
+      /(never|not|no)\b[^.]{0,80}\breplac\w*\b[^.]{0,60}\basset\b|\basset\b[^.]{0,60}(never|not)\b[^.]{0,40}\breplac/i,
+      'does not forbid replacing a published asset in place',
+    ],
+  ]
+  for (const [pattern, why] of required) {
+    if (!pattern.test(section)) {
+      findings.push(finding({ message: `${RELEASE_DOC} ${why}`, file: RELEASE_DOC }))
+    }
+  }
+
+  // The contradiction is a wrapped sentence in practice, so the whole document
+  // is read as one line for this check alone.
+  const joined = release.split('\n').join(' ')
+  for (const pattern of FORBIDDEN_ROLLBACK_CONTRADICTIONS) {
+    const match = joined.match(pattern)
+    if (match) {
+      findings.push(finding({
+        message: `${RELEASE_DOC} treats editing a published release as forbidden, but recording the problem in the release body is the first rollback step`,
+        file: RELEASE_DOC,
+        evidence: match[0].trim(),
       }))
     }
   }
@@ -338,26 +611,39 @@ export const docsTruthfulnessRule = {
       }
     }
 
+    checkReadmeSummary(readme, findings)
     checkPrivacyDisclosures(ctx, findings)
     checkSupportedVersions(ctx, findings)
+    checkGateAuthority(ctx, findings)
+    checkSizeFloors(ctx, findings)
+    checkHistoricalAssets(ctx, findings)
+    checkRollback(ctx, findings)
 
-    for (const file of [README, ...listDocsFiles(ctx.root)]) {
+    // The packaging workflow's echoed status text is read exactly like a
+    // document: it is prose a reader trusts about the run in front of them, and
+    // a YAML `run:` block is the one place nothing else would check it.
+    for (const file of [README, PACKAGING_WORKFLOW, ...listDocsFiles(ctx.root)]) {
       const text = ctx.readText(file)
       if (text === null) continue
       for (const line of text.split('\n')) {
-        for (const pattern of FORBIDDEN_CLAIMS) {
-          if (pattern.test(line) && !NEGATED_CONTEXT.test(line)) {
-            findings.push(finding({
-              message: `${file} claims a signing or distribution property this project does not have`,
-              file,
-              evidence: line.trim(),
-            }))
+        for (const [patterns, message] of [
+          [FORBIDDEN_CLAIMS, 'claims a signing or distribution property this project does not have'],
+          [FORBIDDEN_PACKAGING_CLAIMS, 'claims a packaging or rollback property this project does not have'],
+          [FORBIDDEN_LAUNCH_CLAIMS, 'claims the bundle is launched, which no gate and no workflow step does'],
+          [FORBIDDEN_SWEEPING_ASSET_CLAIMS, 'claims a published asset fails every assertion, instead of naming the ones it fails'],
+        ]) {
+          for (const pattern of patterns) {
+            if (pattern.test(line) && !NEGATED_CONTEXT.test(line)) {
+              findings.push(finding({ message: `${file} ${message}`, file, evidence: line.trim() }))
+            }
           }
         }
-        for (const pattern of FORBIDDEN_PACKAGING_CLAIMS) {
-          if (pattern.test(line) && !NEGATED_CONTEXT.test(line)) {
+        // Not exempted by the negation above: a denial that no size is asserted
+        // is itself the false claim now that both floors exist.
+        for (const pattern of FORBIDDEN_SIZE_DENIALS) {
+          if (pattern.test(line)) {
             findings.push(finding({
-              message: `${file} claims a packaging or rollback property this project does not have`,
+              message: `${file} says no assertion checks an artifact size, but the verifier asserts a minimum for the .app payload and the DMG`,
               file,
               evidence: line.trim(),
             }))
