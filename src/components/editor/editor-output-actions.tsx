@@ -31,7 +31,7 @@ export function EditorOutputActions({
     if (!outputText) return
     const result = await copyOutput(outputText)
     if (!result.copied) {
-      console.error('Failed to copy:', result.copyError)
+      console.error('Failed to copy')
       return
     }
     setCopied(true)

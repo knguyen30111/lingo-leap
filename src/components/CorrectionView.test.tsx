@@ -545,8 +545,9 @@ describe('CorrectionView', () => {
 
   describe('Copy error handling', () => {
     it('handles copy error gracefully', async () => {
+      const COPY_ERROR_SENTINEL = 'ZZ-COPY-ERROR-SENTINEL-ZZ'
       const { writeText } = await import('@tauri-apps/plugin-clipboard-manager')
-      vi.mocked(writeText).mockRejectedValueOnce(new Error('Copy failed'))
+      vi.mocked(writeText).mockRejectedValueOnce(new Error(COPY_ERROR_SENTINEL))
 
       const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
       useAppStore.setState({ outputText: 'Text to copy' })
@@ -555,8 +556,15 @@ describe('CorrectionView', () => {
       fireEvent.click(screen.getByText('Copy'))
 
       await waitFor(() => {
-        expect(consoleSpy).toHaveBeenCalledWith('Failed to copy:', expect.any(Error))
+        expect(consoleSpy).toHaveBeenCalledTimes(1)
       })
+      // The diagnostic survives, the payload does not: the clipboard rejection
+      // and the text the user asked to copy both stay out of the console.
+      const args = consoleSpy.mock.calls[0] as unknown[]
+      expect(args).toHaveLength(1)
+      expect(typeof args[0]).toBe('string')
+      expect(args[0] as string).not.toContain(COPY_ERROR_SENTINEL)
+      expect(args[0] as string).not.toContain('Text to copy')
 
       consoleSpy.mockRestore()
     })

@@ -94,7 +94,6 @@ export class GrammarService {
   ): Promise<Change[]> {
     // No changes if text is identical
     if (original.trim() === corrected.trim()) {
-      console.log('[GrammarService] No changes - text identical')
       return []
     }
 
@@ -106,8 +105,6 @@ export class GrammarService {
       this.modelName
     )
 
-    console.log('[GrammarService] Extracting changes with prompt:', prompt)
-
     try {
       const changes = await this.provider.generateJSON<Change[]>(
         prompt,
@@ -115,8 +112,6 @@ export class GrammarService {
         EXTRACTION_JSON_RETRIES,
         signal
       )
-      console.log('[GrammarService] Raw changes:', changes)
-
       // Validate and filter changes
       const filtered = changes.filter(c =>
         c && typeof c.from === 'string' && typeof c.to === 'string'
@@ -126,14 +121,14 @@ export class GrammarService {
         reason: c.reason || ''
       }))
 
-      console.log('[GrammarService] Filtered changes:', filtered)
-
       // An answer that describes no change is as unusable as a failed one.
       return filtered.length > 0 ? filtered : wholeTextFallback(original, corrected)
     } catch (err) {
       if (isAbortFailure(err, signal)) throw err
 
-      console.error('[GrammarService] Failed to extract changes:', err)
+      // Content-free by contract: an extraction failure is a JSON.parse error
+      // whose message quotes the model output it choked on.
+      console.error('[GrammarService] Failed to extract changes')
 
       return wholeTextFallback(original, corrected)
     }

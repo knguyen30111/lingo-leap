@@ -99,11 +99,11 @@ export function useCorrection() {
         }
         setChangesLoading(false)
       })
-      .catch(err => {
+      .catch(() => {
         // The service answers an ordinary failure with its own fallback, so
         // anything reaching here is a retired or cancelled request.
         if (!request.isCurrent()) return
-        console.error('[Changes] Extraction failed:', err)
+        console.error('[Changes] Extraction failed')
         setChangesLoading(false)
       })
   }, [service, setChanges, setChangesLoading])
