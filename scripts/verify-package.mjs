@@ -29,13 +29,17 @@ export const EXPECTED_EXECUTABLE = 'tran-app'
 // only assertion that sees a build whose payload did not actually land.
 //
 // The floors are derived from measurements of real arm64 artifacts this
-// repository produced, recorded under plans/260912-30-release-hardening/reports/:
-// the .app payload of a 1.1.0 bundle built under CI=true is 10,392,093 bytes and
-// the payload of the historical bundle published under v1.1.0 is 13,168,031
-// bytes, while that release's DMG is 5,802,624 bytes. Each floor is set at
-// roughly a third of the smallest of those, which leaves a leaner future build
-// ample room while still being millions of bytes above an empty or header-only
-// file.
+// repository produced, recorded under plans/260912-30-release-hardening/reports/.
+//
+//   .app payload   10,392,093 bytes  a 1.1.0 bundle built here under CI=true
+//                  13,168,031 bytes  the bundle published under v1.1.0
+//   DMG             4,777,012 bytes  the DMG of that same 1.1.0 build
+//                   5,802,624 bytes  the DMG published under v1.1.0
+//
+// Each floor is set just under half the smallest measurement of its artifact:
+// 4 MiB is 40% of 10,392,093 and 2 MiB is 44% of 4,777,012. That leaves a
+// leaner future build ample room while still sitting millions of bytes above an
+// empty or header-only file.
 //
 // They are floors only. No upper bound is asserted, because a ceiling would be
 // a distribution-size policy this project does not have and cannot justify.

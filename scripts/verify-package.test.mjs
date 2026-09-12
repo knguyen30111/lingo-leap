@@ -265,12 +265,11 @@ function toolDouble(overrides = {}) {
   }
 }
 
-// Sizes measured on real arm64 artifacts this repository produced: the app
-// payload of a 1.1.0 bundle built under CI=true, and the DMG published under
-// the v1.1.0 release. The fixture tree holds a few bytes per file, so the
+// Sizes measured on the real arm64 artifacts of a 1.1.0 bundle this repository
+// built under CI=true. The fixture tree holds a few bytes per file, so the
 // healthy sizes are injected rather than written out.
 const REAL_APP_PAYLOAD_BYTES = 10_392_093
-const REAL_DMG_BYTES = 5_802_624
+const REAL_DMG_BYTES = 4_777_012
 const PAYLOAD_MARKER = '<app payload>'
 
 /**

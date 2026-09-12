@@ -81,12 +81,21 @@ the executable, DMG integrity through `hdiutil verify`, and a minimum size for e
 it.
 
 Those two figures are **floors**, derived from measurements of real arm64 artifacts recorded under
-`plans/260912-30-release-hardening/reports/`: a locally built 1.1.0 `.app` payload is 10,392,093
-bytes, the payload published under v1.1.0 is 13,168,031 bytes, and that release's DMG is 5,802,624
-bytes. Each floor sits at roughly a third of the smallest of those, which leaves a leaner future
-build room while still catching an artifact whose payload never landed. There is deliberately **no**
-upper bound on either artifact: a ceiling would be a distribution-size policy this project does not
-have.
+`plans/260912-30-release-hardening/reports/`:
+
+| Artifact | Measured | Where it came from |
+|---|---|---|
+| `.app` payload | 10,392,093 bytes | a 1.1.0 bundle built here under `CI=true` |
+| `.app` payload | 13,168,031 bytes | the bundle published under v1.1.0 |
+| DMG | 4,777,012 bytes | the DMG of that same 1.1.0 build |
+| DMG | 5,802,624 bytes | the DMG published under v1.1.0 |
+
+Each floor sits just under half the smallest measurement of its artifact: **4 MiB** is 40% of
+10,392,093 and **2 MiB** is 44% of 4,777,012. That leaves a leaner future build room while still
+catching an artifact whose payload never landed — a DMG truncated to 1,000,000 bytes and a stubbed
+`.app` payload were both reported against a real bundle, recorded in the same directory. There is
+deliberately **no** upper bound on either artifact: a ceiling would be a distribution-size policy
+this project does not have.
 
 **Not asserted by the verifier**, and stated here so the boundary is not blurred: the SHA-256
 checksums are computed by a separate workflow step, and neither the verifier nor the workflow starts
