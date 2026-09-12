@@ -13,6 +13,7 @@ import {
   documentSection,
   mebibytes,
   ignoredDirectories,
+  statesFloor,
 } from './docs-truthfulness.mjs'
 import { GATE_GROUPS, gateRunnerCommand, documentedNpmGateCommands } from '../lib/gate-contract.mjs'
 import { MIN_APP_PAYLOAD_BYTES, MIN_DMG_BYTES, EXPECTED_EXECUTABLE } from '../../verify-package.mjs'
@@ -1209,5 +1210,157 @@ describe('docs-truthfulness: the documented measurement block executes', () => {
 
     expect(result.status).not.toBe(0)
     expect(result.stdout.trim()).toBe('')
+  })
+})
+
+// A claim stops at the end of the sentence that carries it, and English ends a
+// sentence with an exclamation or a question mark as readily as with a full
+// stop. A denial in one sentence must not excuse the assertion in the next.
+describe('docs-truthfulness: a sentence ends at an exclamation or a question mark too', () => {
+  it.each([
+    'Is the bundle ever notarized without a Developer ID? The DMG is notarized before release.',
+    'The bundle is never stapled! Each build is stapled for Gatekeeper.',
+  ])('reports the signing claim made after a denial: %s', line => {
+    seed({ readme: `${GOOD_README}\n${line}\n` })
+
+    expect(messages()).toContain('claims a signing or distribution property this project does not have')
+  })
+
+  it.each([
+    'The verifier never launches the app! The run verifies the bundle launches cleanly.',
+    'Is the app ever launched without a gate? The workflow verifies that it launches.',
+  ])('reports the launch claim made after a denial: %s', line => {
+    seed({ readme: `${GOOD_README}\n${line}\n` })
+
+    expect(messages()).toContain('claims the bundle is launched')
+  })
+
+  // The denial still governs the sentence it stands in, whichever mark ends it.
+  it.each([
+    'The bundle is never notarized! It is never stapled either.',
+    'Neither the workflow nor the verifier launches the app! Nothing here starts it.',
+  ])('leaves a denial that governs its own sentence alone: %s', line => {
+    seed({ readme: `${GOOD_README}\n${line}\n` })
+
+    expect(messages()).not.toContain('claims a signing or distribution property')
+    expect(messages()).not.toContain('claims the bundle is launched')
+  })
+
+  // The verb and the launch have to sit in the same sentence for one to be a
+  // claim about the other.
+  it('does not read a launch claim across a sentence boundary', () => {
+    const line = 'The workflow verifies the signature! A launch was run by hand; no gate asserts it.'
+    seed({ readme: `${GOOD_README}\n${line}\n` })
+
+    expect(messages()).not.toContain('claims the bundle is launched')
+  })
+})
+
+// English writes a denial as a contraction as often as it writes it out.
+describe('docs-truthfulness: a contracted denial denies', () => {
+  it.each([
+    "The bundle isn't notarized and carries no secure timestamp.",
+    "There isn't a Developer ID in this environment.",
+    "These builds won't be stapled.",
+    "The workflow doesn't verify that the app launches.",
+  ])('leaves the contracted denial alone: %s', line => {
+    seed({ readme: `${GOOD_README}\n${line}\n` })
+
+    expect(messages()).not.toContain('claims a signing or distribution property')
+    expect(messages()).not.toContain('claims the bundle is launched')
+  })
+
+  // A contraction somewhere in the line is not a licence for the claim beside it.
+  it.each([
+    "The bundle isn't stapled, but the DMG is notarized before release.",
+    "Signing doesn't happen automatically; each build is stapled for Gatekeeper.",
+  ])('still reports the affirmative claim beside a contracted denial: %s', line => {
+    seed({ readme: `${GOOD_README}\n${line}\n` })
+
+    expect(messages()).toContain('claims a signing or distribution property this project does not have')
+  })
+})
+
+// Floor vocabulary can be used to say the floor is not there. What decides is
+// where the negation stands: in front of the floor it removes it, behind the
+// floor it qualifies it, and the "no" of "no smaller than" is the floor itself.
+describe('docs-truthfulness: floor vocabulary is not the same as a floor', () => {
+  const APP = mebibytes(MIN_APP_PAYLOAD_BYTES)
+  const DMG = mebibytes(MIN_DMG_BYTES)
+
+  function readmeStating(line) {
+    return GOOD_README.replace(SIZE_FLOOR_LINE, line)
+  }
+
+  it.each([
+    `The .app payload fails to have a minimum of ${APP} and the DMG fails to have a minimum of ${DMG}.`,
+    `The .app payload is exempt from a minimum of ${APP} and the DMG is exempt from a minimum of ${DMG}.`,
+    `Nothing gives the .app payload a minimum of ${APP} or the DMG a minimum of ${DMG}.`,
+    `The .app payload never had a minimum of ${APP} and the DMG never had a minimum of ${DMG}.`,
+    `The .app payload doesn't have a minimum of ${APP} and the DMG doesn't have a minimum of ${DMG}.`,
+    `Neither the .app payload has a minimum of ${APP} nor the DMG has a minimum of ${DMG}.`,
+  ])('reports floor vocabulary that denies the floor: %s', line => {
+    seed({ readme: readmeStating(line) })
+
+    expect(messages()).toContain(`README.md does not state the ${APP} .app payload floor`)
+    expect(messages()).toContain(`README.md does not state the ${DMG} DMG floor`)
+  })
+
+  it.each([
+    `The .app payload is no smaller than ${APP} and the DMG is no less than ${DMG}.`,
+    `The .app payload must be at least ${APP}, and anything smaller is not allowed. `
+      + `The DMG must be at least ${DMG}, and anything smaller is not allowed.`,
+    `The .app payload has a minimum of ${APP} and the DMG has a minimum of ${DMG}; no maximum is asserted.`,
+    `The .app payload requires a minimum of ${APP} and the DMG requires a minimum of ${DMG}.`,
+    `The .app payload is at least ${APP}, and anything smaller is not allowed, `
+      + `and the DMG is at least ${DMG}, and anything smaller is not allowed.`,
+  ])('accepts the floor stated positively: %s', line => {
+    seed({ readme: readmeStating(line) })
+
+    expect(messages()).not.toContain(`README.md does not state the ${APP}`)
+    expect(messages()).not.toContain(`README.md does not state the ${DMG}`)
+  })
+
+  it('reads a lower-bound phrasing as a floor and a missing minimum as its denial', () => {
+    const artifact = String.raw`\.app\b`
+
+    expect(statesFloor(`The .app payload is no smaller than ${APP}.`, artifact, APP)).toBe(true)
+    expect(statesFloor(`The .app payload is no less than ${APP}.`, artifact, APP)).toBe(true)
+    expect(statesFloor(`The .app payload has no minimum of ${APP}.`, artifact, APP)).toBe(false)
+    expect(statesFloor(`The .app payload is exempt from a minimum of ${APP}.`, artifact, APP)).toBe(false)
+  })
+})
+
+// A trailing slash is what turns a directory name into somewhere a reader is
+// being sent, and a document sends a reader there in more than one syntax.
+describe('docs-truthfulness: pointing at an excluded directory is a citation in every form', () => {
+  it.each([
+    ['prose', 'The measurements are recorded under plans/ in the working tree.'],
+    ['a code span', 'The measurements are recorded under `plans/`.'],
+    ['an inline destination', 'See [the working notes](plans/).'],
+    ['an angle-bracketed destination', 'See [the working notes](<plans/>).'],
+    ['a relative destination', 'See [the working notes](./plans/).'],
+  ])('reports %s pointing at an excluded directory', (_form, line) => {
+    seed({ readme: `${GOOD_README}\n${line}\n` })
+
+    expect(messages()).toContain('README.md cites plans/, which .gitignore excludes')
+  })
+
+  it('reports a reference definition whose destination is an excluded directory', () => {
+    seed({ readme: `${GOOD_README}\n[the working notes]: plans/\n` })
+
+    expect(messages()).toContain('README.md cites plans/, which .gitignore excludes')
+  })
+
+  it.each([
+    ['a directory named in prose without a path', 'The image caches node_modules between runs.'],
+    ['a directory named in a code span without a path', 'The image caches `node_modules` between runs.'],
+    ['a word that merely begins with the directory name', 'Release plans are tracked in the issue tracker.'],
+    ['a URL whose last segment shares the name', 'The upstream notes live at https://example.com/notes/plans/ instead.'],
+    ['a path that only contains the directory name', 'The packager writes to `build/dist/index.html` instead.'],
+  ])('leaves %s alone', (_form, line) => {
+    seed({ readme: `${GOOD_README}\n${line}\n` })
+
+    expect(messages()).not.toContain('which .gitignore excludes')
   })
 })
