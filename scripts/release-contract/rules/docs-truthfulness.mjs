@@ -142,8 +142,8 @@ const FLOOR_WORDING = String.raw`(?:at least|a minimum of|minimum|floors?|no (?:
 // that promises the payload the DMG's floor from satisfying both checks at once.
 const FLOOR_GAP = String.raw`(?:(?!\bMiB\b|\.app\b|\bDMG\b)[^.]){0,80}`
 
-// Where the floor wording itself starts inside a match, which is the point a
-// denial has to stand in front of to be a denial of the floor.
+// Where the floor wording itself starts inside a match, which is one of the two
+// places the floor phrase can begin.
 const FLOOR_WORDING_PATTERN = new RegExp(String.raw`\b${FLOOR_WORDING}\b`, 'i')
 
 // Wording that turns a stated minimum into a denial that one exists.
@@ -172,6 +172,25 @@ const FLOOR_SUBJECT_DENIAL = /\b(?:nothing|none|no one|nobody|neither|nor)\b/i
 
 function deniesFloor(before) {
   return FLOOR_SUBJECT_DENIAL.test(before) || FLOOR_GOVERNED_DENIAL.test(before)
+}
+
+/**
+ * Whether the floor a match `[start, end)` states is denied rather than stated.
+ *
+ * What a denial governs is the floor phrase — the figure together with the
+ * wording that makes it a minimum — and a document writes the two in either
+ * order. "does not have a minimum of 4 MiB" puts the denial in front of the
+ * wording; "no 4 MiB floor" and "lacks a 4 MiB minimum" put it in front of the
+ * figure, and the figure is as much part of the phrase as the wording is. So
+ * the phrase begins at whichever of the two the document wrote first, and what
+ * governs it is the stretch of the claim in front of that point.
+ */
+function floorIsDenied(text, start, end, sizePattern) {
+  const matched = text.slice(start, end)
+  const offsets = [matched.search(FLOOR_WORDING_PATTERN), matched.search(sizePattern)]
+    .filter(offset => offset !== -1)
+  const phraseAt = start + (offsets.length === 0 ? 0 : Math.min(...offsets))
+  return deniesFloor(claimPrefix(text, start, end, phraseAt))
 }
 
 // A size denial. These are not subject to the negation exemption below, because
@@ -245,22 +264,21 @@ function escapeRegExp(text) {
  * so the figure belonging to the other artifact cannot stand in for this one.
  *
  * Every occurrence is read, and each is accepted only when nothing in front of
- * its floor wording, inside the claim carrying it, denies that the floor is
- * there. Reading only what precedes the wording is also what leaves the "no" of
+ * its floor phrase, inside the claim carrying it, denies that the floor is
+ * there. Reading only what precedes the phrase is also what leaves the "no" of
  * "no smaller than" alone: that word belongs to the floor, not to a denial of
  * it.
  */
 export function statesFloor(text, artifactSource, figure) {
   const size = String.raw`\*{0,2}${escapeRegExp(figure)}`
+  const sizePattern = new RegExp(size, 'i')
   const artifactFirst = new RegExp(
     `${artifactSource}${FLOOR_GAP}\\b${FLOOR_WORDING}\\b${FLOOR_GAP}${size}`, 'i')
   const figureFirst = new RegExp(
     `${size}${FLOOR_GAP}\\b${FLOOR_WORDING}\\b${FLOOR_GAP}${artifactSource}`, 'i')
   for (const pattern of [artifactFirst, figureFirst]) {
     for (const [start, end] of matchRanges(pattern, text)) {
-      const wordingAt = text.slice(start, end).search(FLOOR_WORDING_PATTERN)
-      const floorAt = wordingAt === -1 ? start : start + wordingAt
-      if (!deniesFloor(claimPrefix(text, start, end, floorAt))) return true
+      if (!floorIsDenied(text, start, end, sizePattern)) return true
     }
   }
   return false
