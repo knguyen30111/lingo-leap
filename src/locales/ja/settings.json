@@ -46,5 +46,5 @@
     "microphoneDesc": "音声認識はシステムの既定のマイクを使用します。変更はOSのサウンド設定から行ってください。",
     "systemDefault": "システムの既定"
   },
-  "version": "Lingo Leap v0.1.0"
+  "version": "Lingo Leap v{{version}}"
 }

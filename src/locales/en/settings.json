@@ -46,5 +46,5 @@
     "microphoneDesc": "Speech recognition uses your system default microphone. Change it in your operating system sound settings.",
     "systemDefault": "System default"
   },
-  "version": "Lingo Leap v0.1.0"
+  "version": "Lingo Leap v{{version}}"
 }

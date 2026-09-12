@@ -6,7 +6,10 @@
     "connected": "Đã kết nối Ollama",
     "notFound": "Không tìm thấy Ollama",
     "pleaseWait": "Vui lòng chờ...",
-    "installToContinue": "Cài đặt Ollama để tiếp tục"
+    "installToContinue": "Cài đặt Ollama để tiếp tục",
+    "hostLabel": "Máy chủ Ollama",
+    "hostHint": "Điểm cuối mà ứng dụng gửi văn bản dịch và sửa lỗi đến. Hãy đổi tại đây nếu không kết nối được địa chỉ đã lưu.",
+    "hostInvalid": "Nhập URL http:// hoặc https:// đầy đủ, ví dụ http://localhost:11434"
   },
   "models": {
     "title": "Mô hình cần thiết",
@@ -20,7 +23,9 @@
     "downloadOllama": "Tải Ollama",
     "getStarted": "Bắt đầu",
     "installModelsFirst": "Cài đặt mô hình trước",
-    "skipSetup": "Bỏ qua thiết lập"
+    "skipSetup": "Bỏ qua thiết lập",
+    "saveHost": "Lưu và thử lại",
+    "restoreDefaultHost": "Khôi phục mặc định"
   },
   "instructions": {
     "title": "Hướng dẫn thiết lập",

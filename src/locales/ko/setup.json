@@ -6,7 +6,10 @@
     "connected": "Ollama 연결됨",
     "notFound": "Ollama를 찾을 수 없음",
     "pleaseWait": "잠시만 기다려주세요...",
-    "installToContinue": "계속하려면 Ollama를 설치하세요"
+    "installToContinue": "계속하려면 Ollama를 설치하세요",
+    "hostLabel": "Ollama 호스트",
+    "hostHint": "이 앱이 번역 및 교정할 텍스트를 보내는 엔드포인트입니다. 저장된 호스트에 연결할 수 없으면 여기서 변경하세요.",
+    "hostInvalid": "http:// 또는 https:// 로 시작하는 전체 URL을 입력하세요. 예: http://localhost:11434"
   },
   "models": {
     "title": "필수 모델",
@@ -20,7 +23,9 @@
     "downloadOllama": "Ollama 다운로드",
     "getStarted": "시작하기",
     "installModelsFirst": "먼저 모델 설치",
-    "skipSetup": "설정 건너뛰기"
+    "skipSetup": "설정 건너뛰기",
+    "saveHost": "저장하고 다시 시도",
+    "restoreDefaultHost": "기본값 복원"
   },
   "instructions": {
     "title": "설정 안내",

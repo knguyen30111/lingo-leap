@@ -46,5 +46,5 @@
     "microphoneDesc": "음성 인식은 시스템 기본 마이크를 사용합니다. 변경하려면 운영체제 사운드 설정에서 바꾸세요.",
     "systemDefault": "시스템 기본값"
   },
-  "version": "Lingo Leap v0.1.0"
+  "version": "Lingo Leap v{{version}}"
 }

@@ -1,3 +1,9 @@
+// The version the build injects, from package.json. Declared here because the
+// value comes from the bundler's define rather than from any module.
+declare global {
+  const __APP_VERSION__: string
+}
+
 // === Model Types ===
 export type ModelType = 'qwen' | 'aya' | 'llama' | 'gemma'
 

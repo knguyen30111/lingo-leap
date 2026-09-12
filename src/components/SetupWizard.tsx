@@ -1,5 +1,6 @@
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useSettingsStore } from "../stores/settingsStore";
+import { useSettingsStore, DEFAULT_OLLAMA_HOST } from "../stores/settingsStore";
 import { useOllama } from "../hooks/useOllama";
 import { CopyButton } from "./CopyButton";
 
@@ -55,15 +56,72 @@ function ModelStatus({
 }
 
 /**
+ * The trimmed host, or null when it is not an endpoint the client could use.
+ *
+ * A host that is not an absolute http or https URL can never connect, so
+ * persisting it would replace one unreachable endpoint with another.
+ */
+export function normalizeOllamaHost(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (trimmed === "") return null;
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+  return trimmed;
+}
+
+/**
  * Setup wizard shown when Ollama is not available or models are missing.
  * Guides user through installing Ollama and required models.
+ *
+ * The host field is part of the wizard rather than only of the settings panel:
+ * the wizard is what the application shows whenever the configured endpoint
+ * does not answer, so a persisted typo would otherwise leave the user with no
+ * screen that can correct it.
  */
 export function SetupWizard() {
   const { t } = useTranslation("setup");
   const { isConnected, isChecking, checkConnection, models, hasModel } =
     useOllama();
-  const { setSetupComplete, translationModel, correctionModel } =
-    useSettingsStore();
+  const {
+    setSetupComplete,
+    translationModel,
+    correctionModel,
+    ollamaHost,
+    setOllamaHost,
+  } = useSettingsStore();
+
+  // Null means "nothing typed yet", so the field keeps showing whatever the
+  // store holds — including a host changed from somewhere else — until the
+  // user actually edits it.
+  const [hostDraft, setHostDraft] = useState<string | null>(null);
+  const [hostRejected, setHostRejected] = useState(false);
+  const hostValue = hostDraft ?? ollamaHost;
+
+  const handleSaveHost = () => {
+    const normalized = normalizeOllamaHost(hostValue);
+    if (normalized === null) {
+      setHostRejected(true);
+      return;
+    }
+    setHostRejected(false);
+    if (normalized === ollamaHost) {
+      checkConnection();
+      return;
+    }
+    setHostDraft(null);
+    setOllamaHost(normalized);
+  };
+
+  const handleRestoreDefaultHost = () => {
+    setHostRejected(false);
+    setHostDraft(null);
+    setOllamaHost(DEFAULT_OLLAMA_HOST);
+  };
 
   // Check if required models are installed
   const hasTranslationModel = hasModel(translationModel);
@@ -117,6 +175,48 @@ export function SetupWizard() {
                   ? `${models.length} model${models.length !== 1 ? "s" : ""} available`
                   : t("ollama.installToContinue")}
               </div>
+            </div>
+          </div>
+
+          {/* Ollama host - always editable, so an unreachable saved endpoint
+              can be corrected from the only screen the app will show. */}
+          <div className="glass-card p-4 space-y-2">
+            <label
+              htmlFor="ollama-host"
+              className="block text-sm font-medium text-[var(--text-primary)]"
+            >
+              {t("ollama.hostLabel")}
+            </label>
+            <input
+              id="ollama-host"
+              type="text"
+              value={hostValue}
+              onChange={(e) => setHostDraft(e.target.value)}
+              spellCheck={false}
+              autoComplete="off"
+              className="input-glass w-full text-sm font-mono"
+            />
+            <p className="text-xs text-[var(--text-tertiary)]">
+              {t("ollama.hostHint")}
+            </p>
+            {hostRejected && (
+              <p className="text-xs text-[var(--error)]">
+                {t("ollama.hostInvalid")}
+              </p>
+            )}
+            <div className="flex gap-2">
+              <button
+                onClick={handleSaveHost}
+                className="glass-button px-4 py-2 text-sm font-medium"
+              >
+                {t("buttons.saveHost")}
+              </button>
+              <button
+                onClick={handleRestoreDefaultHost}
+                className="glass-button px-4 py-2 text-sm font-medium"
+              >
+                {t("buttons.restoreDefaultHost")}
+              </button>
             </div>
           </div>
 

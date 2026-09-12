@@ -46,5 +46,5 @@
     "microphoneDesc": "Nhận dạng giọng nói dùng micrô mặc định của hệ thống. Hãy đổi trong cài đặt âm thanh của hệ điều hành.",
     "systemDefault": "Mặc định hệ thống"
   },
-  "version": "Lingo Leap v0.1.0"
+  "version": "Lingo Leap v{{version}}"
 }
