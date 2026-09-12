@@ -4,7 +4,13 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { createRepo } from '../lib/repo.mjs'
-import { actionPinsRule, runCommands, usesEntries } from './action-pins.mjs'
+import {
+  actionPinsRule,
+  runCommands,
+  usesEntries,
+  parseUsesValue,
+  unparsedUsesLines,
+} from './action-pins.mjs'
 
 let fixture
 
@@ -417,5 +423,187 @@ describe('text readers', () => {
 
   it('reports a null comment when there is none', () => {
     expect(usesEntries('      - uses: actions/checkout@v7')[0].comment).toBeNull()
+  })
+
+  it('reads a single-quoted value and its trailing comment', () => {
+    expect(usesEntries(`      - uses: 'actions/checkout@${SHA}' # v7`)).toEqual([
+      { line: 1, value: `actions/checkout@${SHA}`, comment: 'v7' },
+    ])
+  })
+
+  it('reads a double-quoted value and its trailing comment', () => {
+    expect(usesEntries(`      - uses: "actions/checkout@${SHA}" # v7`)).toEqual([
+      { line: 1, value: `actions/checkout@${SHA}`, comment: 'v7' },
+    ])
+  })
+
+  it('reads a quoted value with no comment', () => {
+    expect(usesEntries(`      - uses: 'actions/checkout@${SHA}'`)[0].comment).toBeNull()
+  })
+
+  it('unescapes a doubled single quote inside a single-quoted value', () => {
+    expect(parseUsesValue("'a''b'").value).toBe("a'b")
+  })
+
+  it('unescapes a backslash-escaped quote inside a double-quoted value', () => {
+    expect(parseUsesValue('"a\\"b"').value).toBe('a"b')
+  })
+
+  // Conservative cases: an expression can resolve to anything, and a value
+  // this reader cannot parse must not be judged by shape.
+  it.each([
+    ['a bare expression', '${{ matrix.action }}'],
+    ['an expression inside a quoted value', "'owner/repo@${{ env.SHA }}'"],
+    ['an unterminated single quote', "'owner/repo@v1"],
+    ['an unterminated double quote', '"owner/repo@v1'],
+    ['trailing text that is not a comment', "'owner/repo@v1' with: x"],
+  ])('leaves %s unparsed rather than guessing', (_label, rest) => {
+    expect(parseUsesValue(rest)).toBeNull()
+  })
+
+  it('lists the lines it left unparsed so a silent skip is visible', () => {
+    const text = [
+      '      - uses: ${{ matrix.action }}',
+      `      - uses: actions/checkout@${SHA} # v7`,
+      "      - uses: 'owner/repo@v1",
+    ].join('\n')
+
+    expect(unparsedUsesLines(text)).toEqual([
+      { line: 1, value: '${{ matrix.action }}' },
+      { line: 3, value: "'owner/repo@v1" },
+    ])
+  })
+
+  it('skips a commented-out uses line', () => {
+    expect(usesEntries('      # - uses: actions/checkout@v7')).toEqual([])
+  })
+})
+
+describe('action-pins: quoted action references', () => {
+  const withStep = step => [
+    'name: CI',
+    'on:',
+    '  pull_request:',
+    'jobs:',
+    '  frontend:',
+    '    runs-on: ubuntu-latest',
+    '    steps:',
+    `      ${step}`,
+    '      - name: Gates',
+    '        run: node scripts/run-gates.mjs frontend',
+    '  rust:',
+    '    runs-on: macos-latest',
+    '    steps:',
+    `      - uses: actions/checkout@${SHA} # v7`,
+    '      - name: Gates',
+    '        run: node scripts/run-gates.mjs rust',
+    '',
+  ].join('\n')
+
+  it('accepts a single-quoted immutable pin with a version comment', () => {
+    seed({ ci: withStep(`- uses: 'actions/checkout@${SHA}' # v7`) })
+
+    expect(run()).toEqual([])
+  })
+
+  it('accepts a double-quoted immutable pin with a version comment', () => {
+    seed({ ci: withStep(`- uses: "actions/checkout@${SHA}" # v7`) })
+
+    expect(run()).toEqual([])
+  })
+
+  // The hole this closes: quoting an action reference used to exempt it.
+  it('rejects a single-quoted mutable tag reference', () => {
+    seed({ ci: withStep("- uses: 'actions/checkout@v7' # v7") })
+
+    expect(messages()).toContain('uses a mutable action reference instead of an immutable commit')
+  })
+
+  it('rejects a double-quoted mutable branch reference', () => {
+    seed({ ci: withStep('- uses: "actions/checkout@main"') })
+
+    expect(messages()).toContain('uses a mutable action reference instead of an immutable commit')
+  })
+
+  it('rejects a quoted immutable pin that carries no version comment', () => {
+    seed({ ci: withStep(`- uses: 'actions/checkout@${SHA}'`) })
+
+    expect(messages()).toContain('pins an action with no version comment')
+  })
+
+  it('leaves an expression reference to actionlint rather than judging it', () => {
+    seed({ ci: withStep('- uses: ${{ matrix.action }}') })
+
+    expect(messages()).not.toContain('mutable action reference')
+  })
+
+  it('notes the references it declined to judge', () => {
+    const notes = []
+    const ctx = { ...createRepo(fixture), root: fixture, info: line => notes.push(line) }
+    seed({ ci: withStep('- uses: ${{ matrix.action }}') })
+    actionPinsRule.check(ctx)
+
+    expect(notes.join('\n')).toContain('.github/workflows/ci.yml:8')
+  })
+})
+
+describe('action-pins: verification artifact naming', () => {
+  const withArtifact = name => PACKAGE.replace(
+    '      - name: Verify\n        run: npm run verify:package -- src-tauri/target/release/bundle\n',
+    '      - name: Verify\n        run: npm run verify:package -- src-tauri/target/release/bundle\n' +
+    `      - uses: actions/upload-artifact@${SHA} # v7\n` +
+    `        with:\n          name: ${name}\n`
+  )
+
+  it('accepts a name that says both ad-hoc signed and identity unsigned', () => {
+    seed({ pkg: withArtifact('lingo-leap-verification-adhoc-signed-identity-unsigned-dmg-abc') })
+
+    expect(run()).toEqual([])
+  })
+
+  // "unsigned" alone is wrong in both directions: the bundle IS signed, and
+  // what it lacks is an identity.
+  it('rejects a name that calls the artifact merely unsigned', () => {
+    seed({ pkg: withArtifact('lingo-leap-verification-unsigned-dmg-abc') })
+
+    expect(messages()).toContain(
+      'names an artifact "unsigned", but the bundle is ad-hoc signed with no Developer ID identity'
+    )
+  })
+
+  it('rejects a name that says ad-hoc signed without saying the identity is absent', () => {
+    seed({ pkg: withArtifact('lingo-leap-verification-adhoc-signed-dmg-abc') })
+
+    expect(messages()).toContain('does not say the signing identity is absent')
+  })
+
+  // The shape a real name has: a run-scoped suffix built from expressions
+  // whose inner spaces must not end the reader's capture.
+  it('rejects a merely-unsigned name carrying a run-scoped expression suffix', () => {
+    seed({
+      pkg: withArtifact(
+        'lingo-leap-verification-unsigned-dmg-${{ github.sha }}-${{ github.run_id }}'
+      ),
+    })
+
+    expect(messages()).toContain(
+      'names an artifact "unsigned", but the bundle is ad-hoc signed with no Developer ID identity'
+    )
+  })
+
+  it('accepts a precise name carrying a run-scoped expression suffix', () => {
+    seed({
+      pkg: withArtifact(
+        'lingo-leap-verification-adhoc-signed-identity-unsigned-dmg-${{ github.sha }}-${{ github.run_id }}'
+      ),
+    })
+
+    expect(run()).toEqual([])
+  })
+
+  it('ignores step names, which are prose rather than artifact names', () => {
+    seed()
+
+    expect(run()).toEqual([])
   })
 })
