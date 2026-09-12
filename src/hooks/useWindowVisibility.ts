@@ -48,8 +48,14 @@ export function useWindowVisibility(): UseWindowVisibilityReturn {
     }
 
     const setup = async () => {
-      // Listen for window close (minimize to menu bar)
-      const unlistenClose = await appWindow.onCloseRequested(() => {
+      // Listen for window close (minimize to menu bar).
+      //
+      // Preventing the default matters: Tauri's own wrapper destroys the window
+      // in its default branch, and the Rust host already hides the window and
+      // prevents the close itself. Leaving the default in place would issue a
+      // destroy the app neither wants nor is permitted to perform.
+      const unlistenClose = await appWindow.onCloseRequested((event) => {
+        event.preventDefault()
         setIsVisible(false)
       })
       register(unlistenClose)

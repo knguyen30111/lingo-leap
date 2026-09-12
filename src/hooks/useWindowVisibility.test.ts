@@ -18,8 +18,16 @@ vi.mock('@tauri-apps/api/core', () => ({
 }))
 
 describe('useWindowVisibility', () => {
-  let closeRequestedCallback: (() => void) | null = null
+  // Tauri always hands the close handler a CloseRequestedEvent, so the double
+  // does too. A no-argument call would let the handler's use of that event go
+  // unexercised.
+  interface CloseRequestedEventDouble {
+    preventDefault: () => void
+  }
+  let closeRequestedCallback: ((event: CloseRequestedEventDouble) => void) | null = null
   let windowCreatedCallback: (() => void) | null = null
+
+  const fireCloseRequested = () => closeRequestedCallback?.({ preventDefault: vi.fn() })
 
   beforeEach(async () => {
     closeRequestedCallback = null
@@ -71,7 +79,7 @@ describe('useWindowVisibility', () => {
     })
 
     act(() => {
-      closeRequestedCallback?.()
+      fireCloseRequested()
     })
 
     expect(result.current.isVisible).toBe(false)
@@ -90,9 +98,7 @@ describe('useWindowVisibility', () => {
 
     const preventDefault = vi.fn()
     act(() => {
-      ;(closeRequestedCallback as unknown as (event: { preventDefault: () => void }) => void)?.({
-        preventDefault,
-      })
+      closeRequestedCallback?.({ preventDefault })
     })
 
     expect(preventDefault).toHaveBeenCalledTimes(1)
@@ -108,7 +114,7 @@ describe('useWindowVisibility', () => {
     })
 
     act(() => {
-      closeRequestedCallback?.()
+      fireCloseRequested()
     })
 
     expect(invoke).not.toHaveBeenCalled()
@@ -123,7 +129,7 @@ describe('useWindowVisibility', () => {
     })
 
     act(() => {
-      closeRequestedCallback?.()
+      fireCloseRequested()
     })
     expect(result.current.isVisible).toBe(false)
 
@@ -349,8 +355,8 @@ describe('useWindowVisibility', () => {
     })
 
     act(() => {
-      closeRequestedCallback?.()
-      closeRequestedCallback?.()
+      fireCloseRequested()
+      fireCloseRequested()
     })
 
     expect(result.current.isVisible).toBe(false)
