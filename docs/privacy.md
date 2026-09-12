@@ -55,9 +55,21 @@ translating.
 | Data | Where | Lifetime |
 |---|---|---|
 | Settings — endpoint, models, language, theme, toggles | the webview's local storage, key `tran-app-settings` | until you change or clear them |
-| Response cache | memory only | discarded when the app exits |
+| Selected interface language | the webview's local storage, key `tran-app-ui-language`, written by the language detector so the choice survives a restart | until you change or clear it |
+| Response cache — the model's answers, keyed by a digest | memory only | up to **30 minutes** per entry, or until the app exits, whichever comes first |
 
-Nothing is written to a cloud sync service by this app.
+Two details about the cache are worth being exact about, because "in memory only" alone would
+understate its lifetime and overstate its contents:
+
+- An entry is served for at most **30 minutes** and is then discarded on the next read. The store
+  holds at most 100 entries and evicts the least recently used one beyond that. Quitting the app
+  discards everything.
+- The **cache key is a SHA-256 digest**, not your text: the endpoint, model, languages, level, and
+  the input are hashed together, and only the digest is kept as a key. The cached **value** is the
+  model's answer, so answers — not prompts — are what sits in memory for those 30 minutes.
+
+Nothing is written to a cloud sync service by this app, and nothing above is written to disk outside
+the webview's own local storage.
 
 ## Permissions the app requests
 

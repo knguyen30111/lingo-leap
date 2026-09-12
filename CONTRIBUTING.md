@@ -33,19 +33,25 @@ Platform dependency lists live in the [README](README.md); they are not duplicat
 
 ## Local gates
 
-Run these before opening a pull request. They are the same commands CI runs.
+Run both groups before opening a pull request:
 
 ```sh
-npm ci
-npm audit --audit-level=moderate
-npm run lint
-npm run lint:workflows
-npm run typecheck
-npm run verify:release-contract
-npm run build
-npm run test:coverage
-cargo check --locked --manifest-path src-tauri/Cargo.toml
+node scripts/run-gates.mjs frontend
+node scripts/run-gates.mjs rust
 ```
+
+**That runner is the single authority.** It reads the commands and their order from
+[`scripts/gates.json`](scripts/gates.json), and CI and the packaging workflow invoke exactly the
+same script, so what you run locally cannot drift from what CI runs. Do not keep a hand-copied list
+of the individual commands anywhere: the release contract asserts that the manifest is the complete
+required gate list in the required order, so the manifest is the only place to read or change one.
+
+The individual gates the `frontend` group runs are `npm ci`, `npm audit --audit-level=moderate`,
+`npm run lint`, `npm run lint:workflows`, `npm run typecheck`, `npm run verify:release-contract`,
+`npm run build`, and `npm run test:coverage`; the `rust` group runs
+`cargo check --locked --manifest-path src-tauri/Cargo.toml`. Invoke one of those directly only to
+iterate on the failure the runner already reported — the runner, not this paragraph, is what a
+pull request is checked against, and the README describes what each gate asserts.
 
 `npm run build` is the Vite production build only — it does **not** type-check. Type checking is
 `npm run typecheck`, so a type error is reported as a type error rather than as a build failure.

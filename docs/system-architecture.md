@@ -39,6 +39,12 @@ Plus two commands the app defines itself, in `src-tauri/src/audio_session.rs` an
 Nothing else is granted. In particular the app holds no shell, global-shortcut, positioner, or
 clipboard-read authority, and the corresponding plugins are not compiled in.
 
+The Ollama endpoint is reachable from **two** screens, not one. The settings panel owns it in normal
+use, and the setup wizard carries the same field because the wizard is what the shell renders
+whenever the configured endpoint does not answer — `App` routes on `ollamaInstalled`, which the
+Ollama runtime clears on every failed check. Without the field there, a persisted unreachable host
+would leave no screen able to correct it.
+
 Window destruction is **not** granted, and the frontend does not request it: the close handler calls
 `preventDefault()` and the Rust host hides the window and calls `prevent_close()` instead. Closing the
 window leaves the app running in the tray.
@@ -107,7 +113,14 @@ The `bundle.macOS` block in `tauri.conf.json` is the authority for all of the ab
   versioned migration contract. Migration is fail-closed: a payload from a newer version than the
   running app understands is refused rather than downgraded, and a malformed payload is refused
   rather than partially applied.
-- **The response cache is in memory only.** It does not survive a restart.
+- **The selected interface language persists separately**, under `tran-app-ui-language`, because the
+  i18next language detector owns that key. Both keys are listed in
+  [privacy.md](privacy.md).
+- **The response cache is in memory only**, and an entry additionally expires after 30 minutes. It
+  does not survive a restart.
+- **The visible version has one authority.** The build injects `package.json`'s `version` as
+  `__APP_VERSION__`, `src/lib/app-version.ts` re-exports it, and the locale files carry a
+  `{{version}}` placeholder rather than a literal, so no translation can pin a stale version.
 
 ## Deliberately absent
 

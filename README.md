@@ -53,19 +53,25 @@ Local-AI translation and grammar correction app powered by Ollama. Distributed f
    ollama pull qwen2.5:7b
    ```
 
-3. **Download and run Lingo Leap**
-   - **macOS (arm64)**: download the `.dmg` and drag the app to Applications
-   - Get the latest release from [Releases](https://github.com/knguyen30111/lingo-leap/releases)
-   - Published bundles are ad-hoc signed, so Gatekeeper does not accept them on first launch;
-     open the app from its context menu the first time. A Developer ID signed build is a future
-     decision, not something that exists today — see [docs/release.md](docs/release.md)
+3. **Build Lingo Leap from source**
+
+   There is no distributable download. Build the app yourself by following
+   [Development](#development) below.
+
+   The assets on the [Releases](https://github.com/knguyen30111/lingo-leap/releases) page are
+   **historical and unverified**: they predate the checks described here, and none of them was
+   produced by the current packaging path. They are ad-hoc signed; they are **not** notarized and
+   carry **no** Developer ID identity. They are **not distributable** and are kept only as a record
+   of what was once published — [docs/release.md](docs/release.md) records exactly how that asset
+   disagrees with every assertion the current path makes. A signed and notarized build is a future
+   decision, not something that exists today
 
 ## Platform support
 
 | Platform | Status |
 | -------- | ------ |
-| macOS 14.0+, arm64 | the only supported distributed binary |
-| Linux | best-effort **source development** only, via the Docker workflow below. No release artifact is built or published |
+| macOS 14.0+, arm64 | the only target the app is built and verified for. Bundles are ad-hoc signed and verification-only; no distributable binary is published |
+| Linux | best-effort **source development** only, in the container built from [`Dockerfile.linux`](Dockerfile.linux). No release artifact is built or published, and no workflow builds one |
 | Windows | unsupported |
 
 ## Development
@@ -111,6 +117,22 @@ sudo apt install -y build-essential libwebkit2gtk-4.1-dev libappindicator3-dev l
 sudo dnf install -y webkit2gtk4.1-devel libappindicator-gtk3-devel librsvg2-devel
 ```
 
+**Linux without installing any of that:** [`Dockerfile.linux`](Dockerfile.linux) builds an Ubuntu
+22.04 image carrying the Tauri system libraries, the Node major `.nvmrc` pins, and Rust stable, and
+[`docker-compose.linux.yml`](docker-compose.linux.yml) mounts the repository into it with caches for
+`node_modules`, the Cargo registry, and the build target:
+
+```bash
+docker compose -f docker-compose.linux.yml run --rm linux-dev
+# inside the container
+npm ci
+node scripts/run-gates.mjs frontend
+node scripts/run-gates.mjs rust
+```
+
+The container is for **source development and gate runs only**. It produces no release artifact,
+and no workflow builds or publishes a Linux bundle.
+
 ### Setup
 
 ```bash
@@ -146,18 +168,35 @@ Required check names do not make their workflow definitions immutable: a pull re
 manual trust boundary is required while the repository has a single maintainer and cannot require
 an independent GitHub approval without making owner-authored pull requests unmergeable.
 
-| Check      | What it runs                                                                              | Run it locally                                                                         |
-| ---------- | ----------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| `frontend` | locked install, dependency audit, lint, workflow lint, typecheck, release contract, Vite build, unit tests, coverage thresholds | `npm ci && npm audit --audit-level=moderate && npm run lint && npm run lint:workflows && npm run typecheck && npm run verify:release-contract && npm run build && npm run test:coverage` |
-| `rust`     | locked Rust check of the Tauri crate                                                      | `cargo check --locked --manifest-path src-tauri/Cargo.toml`                            |
+### Running the gates
 
-Three of those gates are individually invocable, and each fails the build on its own:
+`node scripts/run-gates.mjs <group>` is the **only** authority for running a gate group. It reads
+the commands and their order from `scripts/gates.json`, and CI, the packaging workflow, and a local
+run all invoke exactly that script, so no surface can quietly fall behind another. The release
+contract asserts that the manifest is the complete, ordered gate list, so a manifest that has lost
+a gate fails a gate instead of passing quietly.
 
-| Gate                             | What it asserts                                                                 | Run it locally                     |
-| -------------------------------- | ------------------------------------------------------------------------------- | ---------------------------------- |
-| `npm run typecheck`              | `tsc --noEmit`, so a type error is reported as a type error rather than as a build failure | `npm run typecheck`                |
-| `npm run lint:workflows`         | `actionlint`, fetched from a release pinned by version and SHA-256 in `scripts/actionlint.sha256` and verified before it is extracted or executed | `npm run lint:workflows`           |
-| `npm run verify:release-contract` | the machine-checkable release rules under `scripts/release-contract/`           | `npm run verify:release-contract`  |
+| Check      | Run it locally                          |
+| ---------- | --------------------------------------- |
+| `frontend` | `node scripts/run-gates.mjs frontend`   |
+| `rust`     | `node scripts/run-gates.mjs rust`       |
+
+The `frontend` group is a locked install, a dependency audit, lint, workflow lint, typecheck, the
+release contract, the Vite build, unit tests, and coverage thresholds; the `rust` group is a locked
+`cargo check` of the Tauri crate. `scripts/gates.json` is where those commands are written down —
+the list below describes what each one asserts and is not a second copy to run by hand:
+
+| Gate                              | What it asserts                                                                 |
+| --------------------------------- | ------------------------------------------------------------------------------- |
+| `npm ci`                          | the dependency tree installs from the lockfile, with no resolution drift        |
+| `npm audit --audit-level=moderate` | no moderate-or-higher advisory in the whole installed tree                     |
+| `npm run lint`                    | `eslint` over `src` and `scripts`, failing on any warning                       |
+| `npm run lint:workflows`          | `actionlint`, fetched from a release pinned by version and SHA-256 in `scripts/actionlint.sha256` and verified before it is extracted or executed |
+| `npm run typecheck`               | `tsc --noEmit`, so a type error is reported as a type error rather than as a build failure |
+| `npm run verify:release-contract` | the machine-checkable release rules under `scripts/release-contract/`           |
+| `npm run build`                   | the Vite production build, and nothing else                                     |
+| `npm run test:coverage`           | unit tests plus the coverage thresholds in `vitest.config.ts`                    |
+| `cargo check --locked --manifest-path src-tauri/Cargo.toml` | the Tauri crate builds against the committed `Cargo.lock` |
 
 `build` is the Vite production build only. Type checking is `typecheck`, so the two cannot silently
 re-merge and hide a type error behind a bundler change; the release contract asserts that separation.
@@ -205,15 +244,23 @@ is the same command the workflow invokes, and it runs locally against a real bun
 - `codesign --verify --deep --strict` passes;
 - `codesign -dv` reports `Signature=adhoc` **and** a `runtime` flag, so the Hardened Runtime is in
   force;
-- the shipped entitlements are exactly `com.apple.security.device.audio-input`;
-- the bundled `Info.plist` identifier, versions, minimum system version, and both usage descriptions
-  match the manifests, which are read rather than hardcoded;
+- the shipped entitlements are exactly `com.apple.security.device.audio-input`, and that key is set
+  to boolean `true` rather than merely listed;
+- the bundled `Info.plist` identifier, versions, and minimum system version equal the values in
+  `src-tauri/tauri.conf.json`, and both usage-description strings equal the values in
+  `src-tauri/Info.plist` — every expected value is read from those files rather than hardcoded;
 - the configured CSP string is present in the executable;
 - `hdiutil verify` passes on the DMG and its filename carries the agreed version.
 
-The gate commands themselves live in `scripts/gates.json` and are executed by
-`node scripts/run-gates.mjs <group>`. CI, the packaging workflow, and a local run all call that one
-runner, so no surface can quietly fall behind another. See [docs/release.md](docs/release.md).
+Three things are **separate workflow steps, not verifier assertions**, and the verifier would pass
+without them: the SHA-256 checksums of the DMG and the archived `.app`, the `.app` tarball itself,
+and the run summary. Nothing anywhere asserts an artifact **size**, and neither the workflow nor the
+verifier **launches or terminates** the app. A controlled launch and termination was performed by
+hand against a locally built bundle and recorded under
+`plans/260912-30-release-hardening/reports/`; it is local evidence from one machine, not an
+automated gate.
+
+See [docs/release.md](docs/release.md).
 
 ## Configuration
 
@@ -224,7 +271,7 @@ Access settings via the gear icon:
 | Theme                | Light / Dark / System                   |
 | Translation Model    | Ollama model for translation            |
 | Correction Model     | Ollama model for grammar                |
-| Ollama Host          | API endpoint (default: localhost:11434) |
+| Ollama Host          | API endpoint (default: localhost:11434). Also editable from the setup screen, so an unreachable saved host can be corrected or reset there |
 | Streaming            | Enable/disable streaming responses      |
 | Default Target       | Default target language for translation |
 | Explanation Language | Language for correction explanations    |

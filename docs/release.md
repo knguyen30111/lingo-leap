@@ -41,9 +41,13 @@ The preflight only ever reads a tag name. It never creates, moves, resolves, or 
 
 ## Supported platform
 
-- **macOS 14.0+, arm64 only.** That is the only distributed binary.
-- **Linux is source-only development.** The Docker workflow builds and runs the toolchain; no Linux
-  release artifact is produced by any workflow, and none has ever been published.
+- **macOS 14.0+, arm64 only.** That is the only target the app is built and verified for. No
+  distributable binary is published for it or for anything else.
+- **Linux is source-only development.** `Dockerfile.linux` builds an Ubuntu 22.04 image with the
+  Tauri system libraries, the pinned Node major, and Rust stable, and `docker-compose.linux.yml`
+  runs the repository inside it; see the README for the exact invocation. There is no Docker
+  workflow: no GitHub Actions workflow builds that image, no Linux release artifact is produced by
+  any workflow, and none has ever been published.
 - **Windows is unsupported.**
 
 The macOS floor follows the required Ollama's own macOS 14+ minimum. Shipping a bundle that an older
@@ -60,21 +64,53 @@ Read this section before assuming anything about the artifacts.
   `TeamIdentifier=not set` — run `codesign -dv --verbose=4` on a bundle to check that claim yourself.
 - The bundles are **not notarized**. No Developer ID credentials and no secure timestamp exist in
   this environment, so no such claim is made anywhere.
-- They are **not for distribution**. They exist to verify that the bundle builds, signs, and launches.
+- They are **not for distribution**. They exist to verify that the bundle builds and signs; that a
+  built bundle also launches was checked by hand locally and recorded, not asserted by any gate.
 
 ### What has been proven, and what has not
 
 These are different, and conflating them would be the overclaim this document exists to prevent.
 
 **Proven:** the *assertion set*. The package verifier runs locally against a real bundle and asserts
-architecture, signature mode, entitlements, DMG integrity, checksums, artifact names and sizes, and a
-controlled launch and termination.
+artifact uniqueness and naming, the executable path and permission bits, architecture, signature mode
+and the Hardened Runtime flag, the entitlement set and that its one key is boolean `true`, agreement
+between the bundled `Info.plist` and the manifests it is generated from, the configured CSP inside
+the executable, and DMG integrity through `hdiutil verify`. `scripts/verify-package.mjs` is the
+authoritative list; it has unit tests, and the README summarises it.
+
+**Not asserted by the verifier**, and stated here so the boundary is not blurred: the SHA-256
+checksums are computed by a separate workflow step, no assertion anywhere checks an artifact
+**size**, and neither the verifier nor the workflow **launches or terminates** the app. A controlled
+launch and termination was carried out by hand against a locally built bundle and recorded under
+`plans/260912-30-release-hardening/reports/` — local evidence from a single machine, not a gate.
 
 **Not proven:** the *runner*. A `workflow_dispatch` workflow can only be dispatched once its
 definition exists on the repository's default branch, and this work does not reach the default
 branch. The packaging workflow has therefore **never run**. The compensating control is that the
 workflow and the local verification invoke the *same* script, so the assertions themselves are
 exercised even though the runner is not.
+
+### Historical published assets
+
+The assets already on the Releases page are **historical, unverified, and non-distributable**. None
+was produced by the packaging path described above, which has never run, and none was checked by
+`scripts/verify-package.mjs`, which did not exist when they were built.
+
+An inspection of the asset published under the **v1.1.0** release found, concretely:
+
+| Property | What the published asset actually has | What the current path requires |
+|---|---|---|
+| Embedded version | `0.1.0` | `1.1.0`, and the verifier compares it against the manifests |
+| `LSMinimumSystemVersion` | `10.13` | `14.0` |
+| Signature | ad-hoc and linker-signed, **without** the Hardened Runtime | `Signature=adhoc` with a `runtime` flag, asserted |
+| Entitlements | none at all | exactly `com.apple.security.device.audio-input`, set to `true`, asserted |
+| `codesign --verify --deep --strict` | fails | must pass, asserted |
+| `spctl` assessment | fails | not claimed either way; no notarization exists |
+
+So the published asset is not merely unverified — it disagrees with every current assertion that has
+since been written down. It is kept as a record of what was once published and nothing more. The
+README points people at building from source instead, and [SECURITY.md](../SECURITY.md) does not
+treat it as a supported release.
 
 ## The public release decision
 
@@ -99,12 +135,37 @@ Release, and only once the signed and notarized path exists.
 
 ## Rollback
 
-1. Revoke the affected release.
-2. Retain the prior signed asset — users on it keep working.
-3. Forward-fix as a **new immutable version**.
+There is **no GitHub operation that revokes a released artifact**. Nothing recalls a file somebody
+has already downloaded, and no primitive "un-publishes" bytes retroactively. What GitHub does offer
+is withdrawal of *availability*, and that is what a rollback here actually consists of.
 
-Never overwrite a tag. Never replace a published release asset. A published artifact is immutable,
-and rewriting one destroys the only record of what people actually downloaded.
+Every step below names an operation the platform really has, and none of them replaces an artifact
+in place:
+
+1. **Record what is wrong first, while the release is still visible.** Put the affected version, the
+   problem, and what to do instead at the top of the release body, and open a security advisory
+   through the private vulnerability reporting path in [SECURITY.md](../SECURITY.md) when the
+   problem has security impact, or a public issue when it does not. This is the audit evidence, and
+   it has to exist before availability is removed.
+2. **Withdraw the affected release from availability.** Convert the published release back to a
+   **draft**, which unpublishes it and stops its assets being downloadable, or delete the specific
+   affected assets when only some of them are bad. Either way the artifact is *removed*, never
+   **overwritten**: no asset is replaced in place and no filename is reused.
+3. **Keep the tag and the record.** Do not delete the tag and do not move it. The tag, the release
+   body written in step 1, and the advisory are the only surviving record of what people actually
+   received, and the platform preserves them as long as the tag stands.
+4. **Designate the previous known-good version as the supported one**, if one exists. It keeps its
+   own assets untouched — withdrawal applies only to the affected release. **Today no such version
+   exists**: as the supported-version policy in [SECURITY.md](../SECURITY.md) records, no published
+   binary is a supported release, so a withdrawal today leaves no supported asset behind and the
+   documented answer is to build from source.
+5. **Forward-fix as a new immutable version.** Move every version authority together, rebuild,
+   re-verify with `npm run verify:package`, and publish under a **new** version and a new artifact
+   filename.
+
+Never reuse a version number, never replace a published asset, and never overwrite or move a tag.
+Withdrawing a release removes availability; rewriting one would destroy the record, which is the
+one thing a rollback must not do.
 
 ## The accepted filename discontinuity
 
@@ -122,19 +183,18 @@ an immutable public artifact — which the rollback rule above forbids outright.
 
 ## The shared gate list
 
-Every path — local, CI, and packaging — runs the same gates:
+Every path — local, CI, and packaging — runs the same gates through the same runner:
 
 ```sh
-npm ci
-npm audit --audit-level=moderate
-npm run lint
-npm run lint:workflows
-npm run typecheck
-npm run verify:release-contract
-npm run build
-npm run test:coverage
-cargo check --locked --manifest-path src-tauri/Cargo.toml
+node scripts/run-gates.mjs frontend
+node scripts/run-gates.mjs rust
 ```
+
+That runner is the **only** authority for running a group. The commands and their order live in
+`scripts/gates.json`, which nothing else copies, and the release contract asserts that the manifest
+is the complete required list in the required order — so removing `npm run typecheck` from it fails
+a gate rather than silently shrinking every surface at once. The README describes what each
+individual gate asserts.
 
 `actionlint` is pinned by version **and** SHA-256 in `scripts/actionlint.sha256`, for both
 `darwin_arm64` and `linux_amd64`, so the gate is verifiable on a developer machine and on the runner.

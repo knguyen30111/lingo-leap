@@ -2,8 +2,15 @@
 
 ## Supported versions
 
-Only the **newest published release** is supported. There are no long-term support branches and no
-backports to older releases.
+**No published release is supported.** The assets on the Releases page are historical: they were
+built before the current verification path existed, and none of them was produced by it. They are
+ad-hoc signed; they are **not** notarized and carry **no** Developer ID identity. They are not
+distributable, and no fix, advisory, or backport is offered for them.
+
+What is supported is the **current state of the default branch**, built from source. Report against
+that. There are no long-term support branches and no backports, and there will be no supported
+released binary until the Developer ID signing and notarization path described in
+[docs/release.md](docs/release.md) exists.
 
 ## Reporting a vulnerability
 
