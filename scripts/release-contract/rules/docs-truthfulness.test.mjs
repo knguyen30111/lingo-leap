@@ -1364,6 +1364,60 @@ describe('docs-truthfulness: floor vocabulary is not the same as a floor', () =>
     expect(statesFloor(`The .app payload has no minimum of ${APP}.`, artifact, APP)).toBe(false)
     expect(statesFloor(`The .app payload is exempt from a minimum of ${APP}.`, artifact, APP)).toBe(false)
   })
+
+  // A figure a document formats is still the figure. Markdown wraps a run of
+  // text in a code span, in emphasis, or in bold in either spelling, and the
+  // delimiter that opens the run stands between the denial and the figure it
+  // denies. Reading the delimiter as part of what governs the floor rather
+  // than as part of the phrase is what let a denied floor pass.
+  const FLOOR_FORMATS = [
+    ['inline code', '`'],
+    ['emphasis', '_'],
+    ['bold', '__'],
+    ['star bold', '**'],
+  ]
+
+  const FLOOR_DENIALS = [
+    ['no', (app, dmg) =>
+      `There is no ${app} floor for the .app payload and no ${dmg} floor for the DMG.`],
+    ['not', (app, dmg) =>
+      `This is not a ${app} floor for the .app payload and not a ${dmg} floor for the DMG.`],
+    ['lacks', (app, dmg) =>
+      `The verifier lacks a ${app} minimum for the .app payload `
+      + `and lacks a ${dmg} minimum for the DMG.`],
+  ]
+
+  it.each(FLOOR_FORMATS.flatMap(([form, mark]) => FLOOR_DENIALS.map(([word, line]) => [
+    `"${word}" in front of a figure written as ${form}`,
+    line(`${mark}${APP}${mark}`, `${mark}${DMG}${mark}`),
+  ])))('reports %s', (_case, line) => {
+    seed({ readme: readmeStating(line) })
+
+    expect(messages()).toContain(`README.md does not state the ${APP} .app payload floor`)
+    expect(messages()).toContain(`README.md does not state the ${DMG} DMG floor`)
+  })
+
+  it.each(FLOOR_FORMATS)('accepts a figure-first floor written as %s', (_form, mark) => {
+    seed({ readme: readmeStating(
+      `The verifier asserts a ${mark}${APP}${mark} floor for the .app payload `
+      + `and a ${mark}${DMG}${mark} floor for the DMG.`) })
+
+    expect(messages()).not.toContain(`README.md does not state the ${APP}`)
+    expect(messages()).not.toContain(`README.md does not state the ${DMG}`)
+  })
+
+  it.each(FLOOR_FORMATS)('reads a denial in front of a figure written as %s', (_form, mark) => {
+    const artifact = String.raw`\.app\b`
+    const figure = `${mark}${APP}${mark}`
+
+    expect(statesFloor(`There is no ${figure} floor for the .app payload.`, artifact, APP)).toBe(false)
+    expect(statesFloor(`This is not a ${figure} floor for the .app payload.`, artifact, APP)).toBe(false)
+    expect(statesFloor(`The verifier lacks a ${figure} minimum for the .app payload.`, artifact, APP))
+      .toBe(false)
+    expect(statesFloor(`The verifier asserts a ${figure} floor for the .app payload.`, artifact, APP))
+      .toBe(true)
+    expect(statesFloor(`The .app payload must be at least ${figure}.`, artifact, APP)).toBe(true)
+  })
 })
 
 // A trailing slash is what turns a directory name into somewhere a reader is
