@@ -89,13 +89,14 @@ const FORBIDDEN_PACKAGING_CLAIMS = [
 // verifier; no step starts the app, so a status line saying it launches
 // describes a run the reader cannot have had.
 //
-// The second pattern stops at a semicolon as well as a full stop, so a sentence
+// The second pattern stops at every mark that ends a sentence, so a sentence
 // that attributes a hand-run launch to something other than an assertion is not
-// swept up by the verb in its first clause. The clause-by-clause denial check
-// below narrows it further.
+// swept up by the verb in its first clause: the verb and the launch have to
+// stand in the same sentence for one to be a claim about the other. The
+// clause-by-clause denial check below narrows it further.
 const FORBIDDEN_LAUNCH_CLAIMS = [
   /\b(and|or) launches\b/i,
-  /\b(verif(?:y|ies|ied)|assert(?:s|ed)?|prove[sd]?|confirm(?:s|ed)?)\b[^.;]{0,60}\blaunch(?:es|ed)?\b/i,
+  /\b(verif(?:y|ies|ied)|assert(?:s|ed)?|prove[sd]?|confirm(?:s|ed)?)\b[^.;!?]{0,60}\blaunch(?:es|ed)?\b/i,
 ]
 
 // Sole-authority wording about gates. The required list and the manifest the
@@ -141,13 +142,37 @@ const FLOOR_WORDING = String.raw`(?:at least|a minimum of|minimum|floors?|no (?:
 // that promises the payload the DMG's floor from satisfying both checks at once.
 const FLOOR_GAP = String.raw`(?:(?!\bMiB\b|\.app\b|\bDMG\b)[^.]){0,80}`
 
-// Wording that turns a stated minimum into a denial that one exists. Unlike the
-// sweep's markers below, it cannot contain "requires": requiring a minimum is
-// precisely what a floor claim says, so treating that as a denial would reject
-// the true sentence. What it has to catch is a document that writes the floor
-// vocabulary and the figure while saying the floor is not there.
-const FLOOR_DENIAL =
-  /\b(?:not|no|never|neither|nor|nothing|none|without|lacks?|lacking|absent|cannot)\b|n['\u2019]t\b/i
+// Where the floor wording itself starts inside a match, which is the point a
+// denial has to stand in front of to be a denial of the floor.
+const FLOOR_WORDING_PATTERN = new RegExp(String.raw`\b${FLOOR_WORDING}\b`, 'i')
+
+// Wording that turns a stated minimum into a denial that one exists.
+//
+// What decides is whether the negation governs the floor, not whether the claim
+// contains one anywhere. A negation governs when it stands immediately in front
+// of the floor wording, with nothing between them but the determiner and the
+// existence verb English puts there: "does not have a minimum of 4 MiB", "is
+// exempt from a minimum", "fails to have a minimum", "has no minimum". A
+// negation anywhere else qualifies the floor instead of removing it — "at least
+// 4 MiB, and anything smaller is not allowed, and the DMG is at least 2 MiB"
+// states two floors and denies neither.
+//
+// Position is also why "requires" is absent from the markers: "requires a
+// minimum" asserts the floor, and "does not require a minimum" is caught by the
+// negation standing in front of it.
+const FLOOR_DENIAL_MARKER = String.raw`(?:\b(?:not|never|no|without|lacks?|lacking|absent|cannot|exempt|fails?|failed|failing)\b|n['\u2019]t)`
+const FLOOR_DENIAL_BRIDGE = String.raw`(?:\s+(?:to|of|from|for|a|an|the|any|its|their|be|been|is|are|was|were|have|has|had|hold|holds|held|carry|carries|carried|state|states|stated|assert|asserts|asserted|require|requires|required|set|sets|define|defines|defined|impose|imposes|imposed|enforce|enforces|enforced|specify|specifies|specified|declare|declares|declared|document|documents|documented)){0,4}[\s,]*$`
+const FLOOR_GOVERNED_DENIAL = new RegExp(FLOOR_DENIAL_MARKER + FLOOR_DENIAL_BRIDGE, 'i')
+
+// A denial in subject position governs its whole claim however far the floor
+// wording sits from it: "nothing gives the payload a minimum of 4 MiB" and
+// "neither artifact has a minimum" both say the floor is absent. A claim that
+// states a floor positively puts its contrast behind a separator instead.
+const FLOOR_SUBJECT_DENIAL = /\b(?:nothing|none|no one|nobody|neither|nor)\b/i
+
+function deniesFloor(before) {
+  return FLOOR_SUBJECT_DENIAL.test(before) || FLOOR_GOVERNED_DENIAL.test(before)
+}
 
 // A size denial. These are not subject to the negation exemption below, because
 // the denial IS the negated form and the verifier now asserts both floors.
@@ -171,8 +196,13 @@ const FORBIDDEN_ROLLBACK_CONTRADICTIONS = [
 // The markers are deliberately narrow: a word like "before" or "when" appears
 // happily in an affirmative overclaim ("the DMG is notarized before release"),
 // so treating it as a denial would hide exactly what this list exists to catch.
+//
+// The contracted form is the same denial written the way English usually writes
+// it. "isn't notarized" and "doesn't launch" deny as plainly as the spelled-out
+// words above, and reading only the spelled-out ones reported a true sentence as
+// an overclaim.
 const NEGATED_CONTEXT =
-  /\b(not|no|never|neither|nor|without|once|until|future|would|planned|requires?|lacks?|absent|cannot)\b/i
+  /\b(not|no|never|neither|nor|without|once|until|future|would|planned|requires?|lacks?|absent|cannot)\b|n['\u2019]t\b/i
 
 /** The first non-empty line under a document's title, or null. */
 export function readmeSummary(markdown) {
@@ -213,6 +243,12 @@ function escapeRegExp(text) {
  *
  * The gap between the two may not cross another artifact name or another size,
  * so the figure belonging to the other artifact cannot stand in for this one.
+ *
+ * Every occurrence is read, and each is accepted only when nothing in front of
+ * its floor wording, inside the claim carrying it, denies that the floor is
+ * there. Reading only what precedes the wording is also what leaves the "no" of
+ * "no smaller than" alone: that word belongs to the floor, not to a denial of
+ * it.
  */
 export function statesFloor(text, artifactSource, figure) {
   const size = String.raw`\*{0,2}${escapeRegExp(figure)}`
@@ -222,7 +258,9 @@ export function statesFloor(text, artifactSource, figure) {
     `${size}${FLOOR_GAP}\\b${FLOOR_WORDING}\\b${FLOOR_GAP}${artifactSource}`, 'i')
   for (const pattern of [artifactFirst, figureFirst]) {
     for (const [start, end] of matchRanges(pattern, text)) {
-      if (!FLOOR_DENIAL.test(claimContext(text, start, end))) return true
+      const wordingAt = text.slice(start, end).search(FLOOR_WORDING_PATTERN)
+      const floorAt = wordingAt === -1 ? start : start + wordingAt
+      if (!deniesFloor(claimPrefix(text, start, end, floorAt))) return true
     }
   }
   return false
@@ -248,10 +286,11 @@ export function ignoredDirectories(gitignoreText) {
 // commas are deliberately not separators, because that is how an enumeration
 // under one denial is written.
 //
-// A full stop only separates when something follows it, which keeps `.app`,
-// `release.md`, and `1.1.0` inside the claim they belong to.
+// A sentence ends at an exclamation or a question mark as readily as at a full
+// stop, so all three end a claim. Each separates only when something follows it,
+// which keeps `.app`, `release.md`, and `1.1.0` inside the claim they belong to.
 const CLAIM_SEPARATOR =
-  /[.;:](?=\s|$)|[\u2014\u2013]|\b(?:but|while|although|though|however|yet|whereas)\b/gi
+  /[.;:!?](?=\s|$)|[\u2014\u2013]|\b(?:but|while|although|though|however|yet|whereas)\b/gi
 
 /**
  * The segments of a line, as `[start, end)` offsets into it: the stretches
@@ -275,9 +314,22 @@ export function claimSegments(line) {
  * attributed to one of them.
  */
 export function claimContext(line, start, end) {
+  return claimPrefix(line, start, end, line.length)
+}
+
+/**
+ * The same claim, clipped at `upto`: what stands in front of a given point
+ * inside it.
+ *
+ * Some negations only deny when they come first. A floor is removed by a
+ * negation written before the floor wording and merely restated by one written
+ * after it, so the check needs the front of the claim rather than all of it.
+ */
+export function claimPrefix(line, start, end, upto) {
   return claimSegments(line)
     .filter(([from, to]) => from < end && to > start)
-    .map(([from, to]) => line.slice(from, to))
+    .map(([from, to]) => line.slice(from, Math.max(from, Math.min(to, upto))))
+    .filter(part => part !== '')
     .join(' ')
 }
 
@@ -537,13 +589,21 @@ function checkCitedPaths(ctx, findings, files) {
 
   for (const directory of ignoredDirectories(gitignore)) {
     const escaped = escapeRegExp(directory)
-    // A file beneath the directory, and the directory itself when a document
-    // points at it as a path rather than naming it in prose: inside a code span,
-    // or as a link destination. The trailing slash is what separates those two
-    // cases — the README's `node_modules` build-cache sentence names a directory
-    // without sending anybody to one.
-    const underneath = new RegExp(`${escaped}[A-Za-z0-9._/-]+`, 'g')
-    const bare = new RegExp(`\`${escaped}\`|\\]\\((?:\\.{0,2}/)?${escaped}\\)`)
+    // Where a path can start: at the beginning of one, not in the middle of a
+    // longer path and not at the tail of a URL, though a relative `./` or `../`
+    // does introduce one. Without this, `build/dist/index.html` was read as a
+    // citation of the excluded `dist/`, and an upstream URL ending in the same
+    // name was one too.
+    const opens = String.raw`(?:(?<=\.{1,2}/)|(?<![A-Za-z0-9._/-]))`
+    // A file beneath the directory, and the directory itself wherever a document
+    // points at it as a path rather than naming it in prose. The trailing slash
+    // is what separates those two cases — the README's `node_modules`
+    // build-cache sentence names a directory without sending anybody to one —
+    // and the slash reads the same in prose, in a code span, in an inline
+    // destination with or without angle brackets, and in a reference definition,
+    // so one pattern covers every syntax a document uses.
+    const underneath = new RegExp(`${opens}${escaped}[A-Za-z0-9._/-]+`, 'g')
+    const bare = new RegExp(`${opens}${escaped}(?![A-Za-z0-9._/-])`)
 
     for (const file of files) {
       const text = ctx.readText(file)
