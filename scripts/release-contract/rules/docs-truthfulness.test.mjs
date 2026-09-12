@@ -5,6 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { createRepo } from '../lib/repo.mjs'
 import { docsTruthfulnessRule, readModelDefault, namedNpmScripts } from './docs-truthfulness.mjs'
+import { GATE_GROUPS, gateRunnerCommand, documentedNpmGateCommands } from '../lib/gate-contract.mjs'
 
 let fixture
 
@@ -22,14 +23,9 @@ function write(relative, contents) {
   fs.writeFileSync(target, typeof contents === 'string' ? contents : JSON.stringify(contents, null, 2))
 }
 
-const GATES = [
-  'npm run lint',
-  'npm run lint:workflows',
-  'npm run typecheck',
-  'npm run verify:release-contract',
-  'npm run build',
-  'npm run test:coverage',
-]
+const GATES = documentedNpmGateCommands()
+
+const RUNNERS = GATE_GROUPS.map(gateRunnerCommand)
 
 const GOOD_README = [
   '# Lingo Leap',
@@ -39,13 +35,48 @@ const GOOD_README = [
   '',
   '## Quality gates',
   '',
+  ...RUNNERS.map(r => `- \`${r}\``),
   ...GATES.map(g => `- \`${g}\``),
   '',
   'Packaging is manual dispatch only and is not for distribution.',
   '',
 ].join('\n')
 
-const GOOD_CONTRIBUTING = ['# Contributing', '', ...GATES.map(g => `- \`${g}\``), ''].join('\n')
+const GOOD_CONTRIBUTING = [
+  '# Contributing',
+  '',
+  ...RUNNERS.map(r => `- \`${r}\``),
+  ...GATES.map(g => `- \`${g}\``),
+  '',
+].join('\n')
+
+const GOOD_SECURITY = [
+  '# Security Policy',
+  '',
+  '## Supported versions',
+  '',
+  'No published release is supported. The assets on the Releases page are historical.',
+  '',
+].join('\n')
+
+const CACHE_SOURCE = 'const aiResultCache = new LRUCache<string>(100, 30)\n'
+
+const I18N_SOURCE = [
+  "      lookupLocalStorage: 'tran-app-ui-language',",
+  "  localStorage.setItem('tran-app-ui-language', lng);",
+  '',
+].join('\n')
+
+const GOOD_PRIVACY = [
+  '# Privacy',
+  '',
+  '| Data | Where | Lifetime |',
+  '|---|---|---|',
+  '| Settings | local storage, key `tran-app-settings` | until cleared |',
+  '| Interface language | local storage, key `tran-app-ui-language` | until cleared |',
+  '| Response cache | memory only | up to **30 minutes**, or until the app exits |',
+  '',
+].join('\n')
 
 const STORE = [
   'export const useSettingsStore = create(',
@@ -73,6 +104,9 @@ function seed(overrides = {}) {
       'test:coverage': 'vitest run --coverage',
     },
   })
+  write('src/lib/cache.ts', overrides.cache ?? CACHE_SOURCE)
+  write('src/i18n/config.ts', overrides.i18n ?? I18N_SOURCE)
+  write('SECURITY.md', overrides.security ?? GOOD_SECURITY)
   write('.github/workflows/package-macos.yml', overrides.workflow ?? 'on:\n  workflow_dispatch:\n')
   if (overrides.docs) {
     for (const [name, body] of Object.entries(overrides.docs)) write(`docs/${name}`, body)
@@ -215,5 +249,161 @@ describe('docs-truthfulness helpers', () => {
   it('collects each npm script named in prose once', () => {
     expect(namedNpmScripts('run `npm run lint` then `npm run lint` then `npm run build`'))
       .toEqual(['lint', 'build'])
+  })
+})
+
+describe('docs-truthfulness: the gate runner is the only authority', () => {
+  it.each(GATE_GROUPS)('reports a README that never names the %s runner invocation', group => {
+    seed({ readme: GOOD_README.replace(`\`${gateRunnerCommand(group)}\``, '`run the gates`') })
+
+    expect(messages()).toContain(`README.md does not name "${gateRunnerCommand(group)}"`)
+  })
+
+  it.each(GATE_GROUPS)('reports a CONTRIBUTING that never names the %s runner invocation', group => {
+    seed({
+      contributing: GOOD_CONTRIBUTING.replace(`\`${gateRunnerCommand(group)}\``, '`run the gates`'),
+    })
+
+    expect(messages()).toContain(`CONTRIBUTING.md does not name "${gateRunnerCommand(group)}"`)
+  })
+
+  // The gate names the documents have to carry are derived from the contract,
+  // so adding a required gate makes the documentation check follow by itself.
+  it('requires exactly the npm gates the contract derives', () => {
+    expect(documentedNpmGateCommands()).toContain('npm run typecheck')
+    seed({ readme: GOOD_README.replace('`npm run typecheck`', '') })
+
+    expect(messages()).toContain('README.md does not name the npm run typecheck gate')
+  })
+})
+
+describe('docs-truthfulness: the overclaims this issue removed', () => {
+  it.each([
+    ['a Docker workflow that does not exist', 'The Docker workflow builds the toolchain.'],
+    ['a revoke primitive GitHub does not have', 'Revoke the affected release.'],
+    ['sizes the verifier never checks', 'It asserts artifact names and sizes.'],
+    ['a launch the workflow never performs', 'The workflow launches and terminates the app.'],
+    ['a size limit nothing enforces', 'Artifact size enforcement happens in the workflow.'],
+    ['checksums the verifier does not compute', 'The verifier asserts the SHA-256 checksum.'],
+  ])('reports %s', (_label, line) => {
+    seed({ readme: `${GOOD_README}\n${line}\n` })
+
+    expect(messages()).toContain('claims a packaging or rollback property this project does not have')
+  })
+
+  it.each([
+    'There is no Docker workflow: nothing builds that image.',
+    'GitHub offers no primitive that revokes a published asset.',
+    'Nothing anywhere asserts an artifact size.',
+    'Neither the workflow nor the verifier launches or terminates the app.',
+  ])('leaves the denial "%s" alone', line => {
+    seed({ readme: `${GOOD_README}\n${line}\n` })
+
+    expect(messages()).not.toContain('claims a packaging or rollback property')
+  })
+
+  it('checks docs files as well as the README', () => {
+    seed({ docs: { 'release.md': 'Revoke the affected release.\n' } })
+
+    expect(messages()).toContain('claims a packaging or rollback property this project does not have')
+  })
+})
+
+describe('docs-truthfulness: the privacy disclosures the code forces', () => {
+  it('reports nothing when the privacy note matches the code', () => {
+    seed({ docs: { 'privacy.md': GOOD_PRIVACY } })
+
+    expect(run()).toEqual([])
+  })
+
+  it('reports a privacy note that never names the interface-language storage key', () => {
+    seed({ docs: { 'privacy.md': GOOD_PRIVACY.replace(/tran-app-ui-language/g, 'somewhere') } })
+
+    expect(messages()).toContain(
+      'docs/privacy.md does not disclose the tran-app-ui-language value the app persists'
+    )
+  })
+
+  it('reports a privacy note that states the wrong cache lifetime', () => {
+    seed({ docs: { 'privacy.md': GOOD_PRIVACY.replace('30 minutes', '5 minutes') } })
+
+    expect(messages()).toContain('docs/privacy.md does not state the 30-minute response-cache lifetime')
+  })
+
+  it('reports a privacy note that never says the cache dies with the app', () => {
+    seed({ docs: { 'privacy.md': GOOD_PRIVACY.replace(', or until the app exits', '') } })
+
+    expect(messages()).toContain('docs/privacy.md does not state that the response cache ends when the app exits')
+  })
+
+  it('reports a cache module whose lifetime cannot be read', () => {
+    seed({ cache: 'const aiResultCache = new LRUCache<string>()\n', docs: { 'privacy.md': GOOD_PRIVACY } })
+
+    expect(messages()).toContain('could not read the response-cache lifetime from src/lib/cache.ts')
+  })
+
+  it('reports an i18n module whose storage key cannot be read', () => {
+    seed({ i18n: 'const detection = {}\n', docs: { 'privacy.md': GOOD_PRIVACY } })
+
+    expect(messages()).toContain('could not read the interface-language storage key from src/i18n/config.ts')
+  })
+
+  it('says nothing about privacy when the document is absent, which governance owns', () => {
+    seed()
+
+    expect(messages()).not.toContain('privacy')
+  })
+})
+
+describe('docs-truthfulness: how published assets are classified', () => {
+  const withReleases = extra => [
+    GOOD_README,
+    'Get it from [Releases](https://github.com/knguyen30111/lingo-leap/releases).',
+    extra,
+    '',
+  ].join('\n')
+
+  it('accepts a release link that classifies the assets', () => {
+    seed({ readme: withReleases('They are **historical and unverified** and **not distributable**.') })
+
+    expect(run()).toEqual([])
+  })
+
+  it('reports a release link with no classification at all', () => {
+    seed({ readme: withReleases('Download the DMG.') })
+
+    expect(messages()).toContain('README.md links the releases page without classifying the assets as historical')
+  })
+
+  it('reports a release link that never says the assets are not distributable', () => {
+    seed({ readme: withReleases('They are **historical**.') })
+
+    expect(messages()).toContain('README.md links the releases page without saying the assets are not distributable')
+  })
+})
+
+describe('docs-truthfulness: the supported-version policy', () => {
+  it('accepts a policy that supports no published release', () => {
+    seed()
+
+    expect(run()).toEqual([])
+  })
+
+  // The published asset disagrees with every current assertion, so calling it
+  // supported would promise a fix for something nothing here can vouch for.
+  it.each([
+    'Only the newest published release is supported.',
+    'The newest published release is supported on a best-effort basis.',
+    'A published release is supported until the next one ships.',
+  ])('reports "%s"', line => {
+    seed({ security: `# Security Policy\n\n## Supported versions\n\n${line}\n` })
+
+    expect(messages()).toContain('SECURITY.md calls a published release supported')
+  })
+
+  it('reports a security policy that states no supported-version position at all', () => {
+    seed({ security: '# Security Policy\n\nReport bugs.\n' })
+
+    expect(messages()).toContain('SECURITY.md states no supported-version position')
   })
 })
