@@ -77,6 +77,28 @@ describe('useWindowVisibility', () => {
     expect(result.current.isVisible).toBe(false)
   })
 
+  // Tauri's own onCloseRequested wrapper calls destroy() in its default branch
+  // whenever the handler does not prevent it. The Rust host already hides the
+  // window and prevents the close, and the capability set grants no destroy, so
+  // the frontend must not leave that request to be made and denied.
+  it('prevents the default close so no destroy is requested', async () => {
+    const { result } = renderHook(() => useWindowVisibility())
+
+    await waitFor(() => {
+      expect(closeRequestedCallback).not.toBeNull()
+    })
+
+    const preventDefault = vi.fn()
+    act(() => {
+      ;(closeRequestedCallback as unknown as (event: { preventDefault: () => void }) => void)?.({
+        preventDefault,
+      })
+    })
+
+    expect(preventDefault).toHaveBeenCalledTimes(1)
+    expect(result.current.isVisible).toBe(false)
+  })
+
   it('does not own the native voice session on close request', async () => {
     const { invoke } = await import('@tauri-apps/api/core')
     renderHook(() => useWindowVisibility())
