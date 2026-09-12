@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Lingo Leap",
-  "version": "0.1.0",
+  "version": "1.1.0",
   "identifier": "com.lingoleap.translator",
   "build": {
     "frontendDist": "../dist",
@@ -43,9 +43,7 @@
     "macOS": {
       "entitlements": "Entitlements.plist",
       "hardenedRuntime": true,
-      "exceptionDomain": "",
-      "frameworks": [],
-      "providerShortName": null,
+      "minimumSystemVersion": "14.0",
       "signingIdentity": "-"
     }
   }

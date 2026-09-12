@@ -28,7 +28,7 @@ Local-AI translation and grammar correction app powered by Ollama. Available for
 
 ## Requirements
 
-- **macOS** 12.0+ or **Linux** (Ubuntu 20.04+, Fedora 35+, etc.)
+- **macOS** 14.0+ — the floor the required Ollama itself supports
 - [Ollama](https://ollama.com) installed and running
 - Required models:
   - `aya:8b` - Translation
