@@ -70,10 +70,6 @@ export function buildCorrectionPrompt(
   const system = CORRECTION_SYSTEM_PROMPTS[level](langName)
   const user = `${CORRECTION_USER_VERBS[level]} this ${langName} text:\n\n${text}`
 
-  console.log('[Prompt] Building correction prompt for language:', language, langName)
-  console.log('[Prompt] Model:', modelName)
-  console.log('[Prompt] System:', system.substring(0, 200) + '...')
-
   return wrapPrompt(system, user, modelName)
 }
 

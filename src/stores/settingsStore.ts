@@ -5,6 +5,13 @@ import { changeLanguage, type UILanguageCode } from "../i18n";
 export type ThemeMode = "light" | "dark" | "system";
 
 /**
+ * The shipped Ollama endpoint. Exported so the recovery control in the setup
+ * wizard restores the same value the store defaults to, rather than a second
+ * copy of the string that could drift from it.
+ */
+export const DEFAULT_OLLAMA_HOST = "http://localhost:11434";
+
+/**
  * Current shape of the persisted `tran-app-settings` payload.
  *
  * Version 1 retired `useSameModelForBoth`: the shipped UI, locales, README,
@@ -111,7 +118,7 @@ export const useSettingsStore = create<SettingsState>()(
   persist(
     (set) => ({
       // Ollama defaults
-      ollamaHost: "http://localhost:11434",
+      ollamaHost: DEFAULT_OLLAMA_HOST,
       setOllamaHost: (host) => set({ ollamaHost: host }),
       translationModel: "aya:8b",
       setTranslationModel: (model) => set({ translationModel: model }),

@@ -776,6 +776,30 @@ describe('useCorrection cancellation and races', () => {
     expect(useAppStore.getState().error).toBeNull()
   })
 
+  // A rejection reaching this handler carries whatever the service failed on,
+  // which for an extraction is the user's own text quoted back inside a parser
+  // error. The diagnostic stays; the payload does not.
+  it('keeps the extraction-failure diagnostic content-free', async () => {
+    const EXTRACTION_SENTINEL = 'ZZ-EXTRACTION-SENTINEL-ZZ'
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    grammar.correctText.mockResolvedValue('Hello world')
+    grammar.extractChanges.mockRejectedValue(new Error(EXTRACTION_SENTINEL))
+
+    const { result } = renderHook(() => useCorrection())
+
+    await act(async () => {
+      await result.current.correct()
+    })
+
+    await waitFor(() => expect(errorSpy).toHaveBeenCalledTimes(1))
+    const args = errorSpy.mock.calls[0] as unknown[]
+    expect(args).toHaveLength(1)
+    expect(typeof args[0]).toBe('string')
+    expect(args[0] as string).not.toContain(EXTRACTION_SENTINEL)
+
+    errorSpy.mockRestore()
+  })
+
   it('ignores AbortError during correction', async () => {
     const abortError = new Error('Aborted')
     abortError.name = 'AbortError'

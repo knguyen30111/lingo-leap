@@ -18,8 +18,16 @@ vi.mock('@tauri-apps/api/core', () => ({
 }))
 
 describe('useWindowVisibility', () => {
-  let closeRequestedCallback: (() => void) | null = null
+  // Tauri always hands the close handler a CloseRequestedEvent, so the double
+  // does too. A no-argument call would let the handler's use of that event go
+  // unexercised.
+  interface CloseRequestedEventDouble {
+    preventDefault: () => void
+  }
+  let closeRequestedCallback: ((event: CloseRequestedEventDouble) => void) | null = null
   let windowCreatedCallback: (() => void) | null = null
+
+  const fireCloseRequested = () => closeRequestedCallback?.({ preventDefault: vi.fn() })
 
   beforeEach(async () => {
     closeRequestedCallback = null
@@ -71,9 +79,29 @@ describe('useWindowVisibility', () => {
     })
 
     act(() => {
-      closeRequestedCallback?.()
+      fireCloseRequested()
     })
 
+    expect(result.current.isVisible).toBe(false)
+  })
+
+  // Tauri's own onCloseRequested wrapper calls destroy() in its default branch
+  // whenever the handler does not prevent it. The Rust host already hides the
+  // window and prevents the close, and the capability set grants no destroy, so
+  // the frontend must not leave that request to be made and denied.
+  it('prevents the default close so no destroy is requested', async () => {
+    const { result } = renderHook(() => useWindowVisibility())
+
+    await waitFor(() => {
+      expect(closeRequestedCallback).not.toBeNull()
+    })
+
+    const preventDefault = vi.fn()
+    act(() => {
+      closeRequestedCallback?.({ preventDefault })
+    })
+
+    expect(preventDefault).toHaveBeenCalledTimes(1)
     expect(result.current.isVisible).toBe(false)
   })
 
@@ -86,7 +114,7 @@ describe('useWindowVisibility', () => {
     })
 
     act(() => {
-      closeRequestedCallback?.()
+      fireCloseRequested()
     })
 
     expect(invoke).not.toHaveBeenCalled()
@@ -101,7 +129,7 @@ describe('useWindowVisibility', () => {
     })
 
     act(() => {
-      closeRequestedCallback?.()
+      fireCloseRequested()
     })
     expect(result.current.isVisible).toBe(false)
 
@@ -327,8 +355,8 @@ describe('useWindowVisibility', () => {
     })
 
     act(() => {
-      closeRequestedCallback?.()
-      closeRequestedCallback?.()
+      fireCloseRequested()
+      fireCloseRequested()
     })
 
     expect(result.current.isVisible).toBe(false)

@@ -1,8 +1,9 @@
 /// <reference types="vite/client" />
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import appStoreSource from '../stores/appStore.ts?raw'
 import correctionHookSource from '../hooks/useCorrection.ts?raw'
 import typesSource from '../types/index.ts?raw'
+import ollamaClientSource from '../lib/ollama-client.ts?raw'
 import { GrammarService, createGrammarService } from './grammar-service'
 import { buildCorrectionPrompt, buildChangesExtractionPrompt } from '../lib/prompt-builder'
 import type {
@@ -413,4 +414,154 @@ describe('domain type ownership', () => {
       expect(declaringFiles).toEqual(['src/types/index.ts'])
     }
   )
+})
+
+// The extraction path builds a prompt out of the whole document the user is
+// correcting and receives change objects that quote that text on both sides of
+// every edit. Anything this module writes to the console is therefore readable
+// by anyone who opens the webview console, so the contract is that it writes
+// nothing that came from the user or from the model.
+describe('console hygiene', () => {
+  const ORIGINAL_SENTINEL = 'ZZ-ORIGINAL-SENTINEL-ZZ'
+  const CORRECTED_SENTINEL = 'ZZ-CORRECTED-SENTINEL-ZZ'
+  const ERROR_SENTINEL = 'ZZ-ERROR-SENTINEL-ZZ'
+
+  let provider: ReturnType<typeof createFakeProvider>
+  let spies: Record<'log' | 'debug' | 'info' | 'warn' | 'error', ReturnType<typeof vi.spyOn>>
+
+  beforeEach(() => {
+    provider = createFakeProvider()
+    spies = {
+      log: vi.spyOn(console, 'log').mockImplementation(() => {}),
+      debug: vi.spyOn(console, 'debug').mockImplementation(() => {}),
+      info: vi.spyOn(console, 'info').mockImplementation(() => {}),
+      warn: vi.spyOn(console, 'warn').mockImplementation(() => {}),
+      error: vi.spyOn(console, 'error').mockImplementation(() => {}),
+    }
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  function allCalls(): unknown[][] {
+    return Object.values(spies).flatMap(spy => spy.mock.calls as unknown[][])
+  }
+
+  // Serializing rather than string-matching each argument catches a sentinel
+  // nested inside a logged object as well as one passed directly.
+  function serialized(): string {
+    return allCalls()
+      .map(args => args.map(arg => {
+        if (arg instanceof Error) return `${arg.name}: ${arg.message}`
+        try {
+          return JSON.stringify(arg) ?? String(arg)
+        } catch {
+          return String(arg)
+        }
+      }).join(' '))
+      .join('\n')
+  }
+
+  it('writes nothing when the text is unchanged', async () => {
+    const service = new GrammarService({ modelName: 'qwen2.5:7b', provider })
+
+    await service.extractChanges(ORIGINAL_SENTINEL, ` ${ORIGINAL_SENTINEL} `, 'en', 'en')
+
+    expect(allCalls()).toEqual([])
+  })
+
+  it('writes neither the built prompt nor the user text on a successful extraction', async () => {
+    provider.generateJSON.mockResolvedValue([
+      { from: ORIGINAL_SENTINEL, to: CORRECTED_SENTINEL, reason: 'Typo' },
+    ])
+    const service = new GrammarService({ modelName: 'qwen2.5:7b', provider })
+
+    await service.extractChanges(ORIGINAL_SENTINEL, CORRECTED_SENTINEL, 'en', 'en')
+
+    expect(allCalls()).toEqual([])
+    expect(serialized()).not.toContain(ORIGINAL_SENTINEL)
+    expect(serialized()).not.toContain(CORRECTED_SENTINEL)
+  })
+
+  it('writes nothing when the model answer filters down to no usable change', async () => {
+    provider.generateJSON.mockResolvedValue([{ from: 'only-from' }, null])
+    const service = new GrammarService({ modelName: 'qwen2.5:7b', provider })
+
+    await service.extractChanges(ORIGINAL_SENTINEL, CORRECTED_SENTINEL, 'en', 'en')
+
+    expect(allCalls()).toEqual([])
+    expect(serialized()).not.toContain(ORIGINAL_SENTINEL)
+    expect(serialized()).not.toContain(CORRECTED_SENTINEL)
+  })
+
+  // Extraction failures arrive as JSON.parse SyntaxErrors whose messages quote
+  // the offending input, so a raw error here leaks model output as surely as
+  // logging the response would.
+  it('keeps one content-free diagnostic on the failure path and leaks no payload', async () => {
+    provider.generateJSON.mockRejectedValue(
+      new Error(`Unexpected token in JSON: ${ERROR_SENTINEL} near ${CORRECTED_SENTINEL}`)
+    )
+    const service = new GrammarService({ modelName: 'qwen2.5:7b', provider })
+
+    await service.extractChanges(ORIGINAL_SENTINEL, CORRECTED_SENTINEL, 'en', 'en')
+
+    // The diagnostic must survive — a failure that reports nothing trades one
+    // defect for another.
+    expect(spies.error).toHaveBeenCalledTimes(1)
+    expect(spies.log).not.toHaveBeenCalled()
+
+    const args = spies.error.mock.calls[0] as unknown[]
+    expect(args).toHaveLength(1)
+    expect(typeof args[0]).toBe('string')
+    expect(serialized()).not.toContain(ORIGINAL_SENTINEL)
+    expect(serialized()).not.toContain(CORRECTED_SENTINEL)
+    expect(serialized()).not.toContain(ERROR_SENTINEL)
+  })
+
+  it('writes nothing when the extraction is cancelled', async () => {
+    const abortError = new Error(ERROR_SENTINEL)
+    abortError.name = 'AbortError'
+    provider.generateJSON.mockRejectedValue(abortError)
+    const service = new GrammarService({ modelName: 'qwen2.5:7b', provider })
+
+    await expect(
+      service.extractChanges(ORIGINAL_SENTINEL, CORRECTED_SENTINEL, 'en', 'en')
+    ).rejects.toBe(abortError)
+
+    expect(allCalls()).toEqual([])
+  })
+
+  it('writes nothing while correcting or streaming a correction', async () => {
+    provider.generateFromPrompt.mockResolvedValue(CORRECTED_SENTINEL)
+    const service = new GrammarService({ modelName: 'qwen2.5:7b', provider })
+
+    await service.correctText(ORIGINAL_SENTINEL, 'en', 'fix')
+    for await (const _chunk of service.correctTextStream(ORIGINAL_SENTINEL, 'en', 'fix')) {
+      void _chunk
+    }
+
+    expect(allCalls()).toEqual([])
+  })
+})
+
+// The retry notice in the Ollama client is the one console call in this area
+// worth keeping. Its argument has to stay a fixed literal: no lexical check
+// can tell an interpolated counter from an interpolated prompt, so the only
+// enforceable line is that nothing is interpolated at all.
+describe('retained diagnostic ownership', () => {
+  const consoleCall = /console\.(log|debug|info|dir|table|trace|warn|error)\(/g
+
+  it('keeps one console call in the ollama client', () => {
+    const calls = ollamaClientSource.match(consoleCall) ?? []
+
+    expect(calls).toEqual(['console.warn('])
+  })
+
+  it('gives that call a fixed message with nothing interpolated', () => {
+    const [, argument] = ollamaClientSource.match(/console\.warn\((.*)\)/) ?? []
+
+    expect(argument).toBeDefined()
+    expect(argument).toMatch(/^'[^'$]*'$/)
+  })
 })

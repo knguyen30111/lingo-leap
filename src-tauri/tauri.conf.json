@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Lingo Leap",
-  "version": "0.1.0",
+  "version": "1.1.0",
   "identifier": "com.lingoleap.translator",
   "build": {
     "frontendDist": "../dist",
@@ -26,7 +26,8 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self' ipc: http://ipc.localhost http: https:; media-src 'none'; worker-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'self'; form-action 'none'",
+      "devCsp": null
     }
   },
   "bundle": {
@@ -41,9 +42,8 @@
     ],
     "macOS": {
       "entitlements": "Entitlements.plist",
-      "exceptionDomain": "",
-      "frameworks": [],
-      "providerShortName": null,
+      "hardenedRuntime": true,
+      "minimumSystemVersion": "14.0",
       "signingIdentity": "-"
     }
   }

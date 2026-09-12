@@ -6,7 +6,10 @@
     "connected": "Ollama Connected",
     "notFound": "Ollama Not Found",
     "pleaseWait": "Please wait...",
-    "installToContinue": "Install Ollama to continue"
+    "installToContinue": "Install Ollama to continue",
+    "hostLabel": "Ollama host",
+    "hostHint": "The endpoint this app sends translation and correction text to. Change it here if the saved one cannot be reached.",
+    "hostInvalid": "Enter a full http:// or https:// URL, for example http://localhost:11434"
   },
   "models": {
     "title": "Required Models",
@@ -20,7 +23,9 @@
     "downloadOllama": "Download Ollama",
     "getStarted": "Get Started",
     "installModelsFirst": "Install Models First",
-    "skipSetup": "Skip setup"
+    "skipSetup": "Skip setup",
+    "saveHost": "Save and retry",
+    "restoreDefaultHost": "Restore default"
   },
   "instructions": {
     "title": "Setup Instructions",

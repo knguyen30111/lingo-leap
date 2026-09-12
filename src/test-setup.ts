@@ -7,38 +7,45 @@ afterEach(() => {
   cleanup()
 })
 
-// Mock localStorage for Zustand persist middleware
-const localStorageMock = {
-  store: {} as Record<string, string>,
-  getItem(key: string) {
-    return this.store[key] ?? null
-  },
-  setItem(key: string, value: string) {
-    this.store[key] = value
-  },
-  removeItem(key: string) {
-    delete this.store[key]
-  },
-  clear() {
-    this.store = {}
-  },
-}
-Object.defineProperty(window, 'localStorage', { value: localStorageMock })
+// This file is the global setup for every suite, including the node-environment
+// suites under scripts/ that exercise the release-contract checker. Those have
+// no `window`, so the browser doubles below are installed only where there is a
+// window to install them on; the Tauri module mocks are environment-independent
+// and stay unconditional.
+if (typeof window !== 'undefined') {
+  // Mock localStorage for Zustand persist middleware
+  const localStorageMock = {
+    store: {} as Record<string, string>,
+    getItem(key: string) {
+      return this.store[key] ?? null
+    },
+    setItem(key: string, value: string) {
+      this.store[key] = value
+    },
+    removeItem(key: string) {
+      delete this.store[key]
+    },
+    clear() {
+      this.store = {}
+    },
+  }
+  Object.defineProperty(window, 'localStorage', { value: localStorageMock })
 
-// Mock window.matchMedia for theme tests
-Object.defineProperty(window, 'matchMedia', {
-  writable: true,
-  value: vi.fn().mockImplementation((query: string) => ({
-    matches: false,
-    media: query,
-    onchange: null,
-    addListener: vi.fn(),
-    removeListener: vi.fn(),
-    addEventListener: vi.fn(),
-    removeEventListener: vi.fn(),
-    dispatchEvent: vi.fn(),
-  })),
-})
+  // Mock window.matchMedia for theme tests
+  Object.defineProperty(window, 'matchMedia', {
+    writable: true,
+    value: vi.fn().mockImplementation((query: string) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })),
+  })
+}
 
 // Mock Tauri APIs
 vi.mock('@tauri-apps/api/core', () => ({
@@ -47,7 +54,6 @@ vi.mock('@tauri-apps/api/core', () => ({
 
 vi.mock('@tauri-apps/plugin-clipboard-manager', () => ({
   writeText: vi.fn(),
-  readText: vi.fn(),
 }))
 
 vi.mock('@tauri-apps/api/window', () => ({

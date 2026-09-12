@@ -516,8 +516,8 @@ export function useSpeechToText(options: UseSpeechToTextOptions = {}): UseSpeech
     session.activation = activation.then(() => undefined, () => undefined)
     try {
       await activation
-    } catch (e) {
-      console.warn('Failed to activate voice session:', e)
+    } catch {
+      console.warn('Failed to activate voice session')
       // Continue anyway - speech recognition may still work
     }
     session.activation = null

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { useSettingsStore } from './settingsStore'
+import { useSettingsStore, SETTINGS_STORAGE_VERSION } from './settingsStore'
 
 // Mock i18n changeLanguage
 vi.mock('../i18n', () => ({
@@ -370,6 +370,51 @@ describe('settingsStore', () => {
       expect(useSettingsStore.getState().ollamaHost).toBe('http://localhost:11434')
       expect(useSettingsStore.getState().legacyUnsupportedSettings).toEqual({})
       expect(localStorage.getItem(STORAGE_KEY)).toBe(before)
+    })
+  })
+
+  // The webview policy permits http: and https: in connect-src because the
+  // endpoint stays user-configurable. These pin the store end of that
+  // contract: an already-persisted remote host must survive untouched, so a
+  // later "tightening" cannot quietly strand the users who set one.
+  describe('configurable endpoints', () => {
+    const REMOTE_HOSTS = [
+      'http://ollama.example.internal:11434',
+      'https://ollama.example.com',
+      'http://192.168.1.50:11434',
+    ]
+
+    it.each(REMOTE_HOSTS)('persists %s without rewriting or defaulting it', host => {
+      useSettingsStore.getState().setOllamaHost(host)
+
+      expect(useSettingsStore.getState().ollamaHost).toBe(host)
+      expect(readRawStorage()?.state.ollamaHost).toBe(host)
+    })
+
+    it.each(REMOTE_HOSTS)('carries %s through the version 0 migration', async host => {
+      writeRawStorage({ ...V0_STATE, ollamaHost: host }, 0)
+
+      await useSettingsStore.persist.rehydrate()
+
+      expect(useSettingsStore.getState().ollamaHost).toBe(host)
+    })
+
+    it.each(REMOTE_HOSTS)('rehydrates %s unchanged on a same-version restart', async host => {
+      const current = { ...V0_STATE, ollamaHost: host, legacyUnsupportedSettings: {} }
+      delete (current as Record<string, unknown>).useSameModelForBoth
+      writeRawStorage(current, SETTINGS_STORAGE_VERSION)
+
+      await useSettingsStore.persist.rehydrate()
+
+      expect(useSettingsStore.getState().ollamaHost).toBe(host)
+    })
+
+    it('never coerces a configured host back to loopback', () => {
+      useSettingsStore.getState().setOllamaHost('https://ollama.example.com')
+
+      const { ollamaHost } = useSettingsStore.getState()
+      expect(ollamaHost).not.toContain('localhost')
+      expect(ollamaHost).not.toContain('127.0.0.1')
     })
   })
 })

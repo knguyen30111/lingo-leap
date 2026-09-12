@@ -1,10 +1,11 @@
 name: package-macos
 
+# Manual dispatch only. The v* tag trigger is deliberately absent and does not
+# come back until a Developer ID and notarization pipeline with credentials
+# exists: a tag trigger on an ad-hoc signed bundle implies a distribution path
+# this project cannot honour.
 on:
   workflow_dispatch:
-  push:
-    tags:
-      - 'v*'
 
 permissions:
   contents: read
@@ -19,15 +20,31 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 60
     steps:
+      - name: Artifact status
+        run: |
+          echo "These artifacts are ad-hoc signed with the Hardened Runtime in force."
+          echo "They carry NO Developer ID identity: the signing identity is ad-hoc, not a team."
+          echo "They are NOT notarized, carry NO secure timestamp, and are NOT for distribution."
+          echo "They exist only to verify that the bundle builds, signs, and passes the package verifier."
+          echo "No step here starts the app, so nothing in this run says it runs."
+
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
 
       - name: Set up Node
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version-file: .nvmrc
+
+      # macos-latest is Apple silicon today. Asserting it turns a future runner
+      # image change into a clear failure instead of an x86_64 bundle shipped
+      # as arm64.
+      - name: Assert an arm64 runner
+        run: |
+          uname -m
+          [ "$(uname -m)" = "arm64" ]
 
       - name: Record toolchain
         run: |
@@ -35,30 +52,78 @@ jobs:
           npm -v
           rustc --version
           cargo --version
+          sw_vers
 
-      - name: Install dependencies (locked)
-        run: npm ci
+      # Both gate groups, from the same manifest CI runs. A packaging run that
+      # skipped the Rust gates would be exactly the hole this exists to close.
+      - name: Gates (frontend)
+        run: node scripts/run-gates.mjs frontend
+
+      - name: Gates (rust)
+        run: node scripts/run-gates.mjs rust
 
       - name: Build macOS bundle
         run: npm run tauri:build
+
+      # Every bundle assertion lives in the verifier, which has unit tests and
+      # is run locally against a real bundle with this same command.
+      - name: Verify the produced bundle
+        run: npm run verify:package -- src-tauri/target/release/bundle
 
       - name: Archive the .app bundle
         run: |
           cd src-tauri/target/release/bundle/macos
           tar -czf "$GITHUB_WORKSPACE/lingo-leap-app.tar.gz" ./*.app
 
+      - name: Checksum the artifacts
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          shasum -a 256 src-tauri/target/release/bundle/dmg/*.dmg lingo-leap-app.tar.gz > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Summarise the run
+        run: |
+          {
+            echo "## Verification-only package"
+            echo
+            echo "Ad-hoc signed, Hardened Runtime in force, **not notarized**, **not for distribution**."
+            echo
+            echo '### Toolchain'
+            echo '```'
+            node -v
+            npm -v
+            rustc --version
+            cargo --version
+            uname -m
+            echo '```'
+            echo
+            echo '### Artifacts'
+            echo '```'
+            ls -l src-tauri/target/release/bundle/dmg/*.dmg lingo-leap-app.tar.gz
+            cat SHA256SUMS
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Upload DMG
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: lingo-leap-dmg-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          name: lingo-leap-verification-adhoc-signed-identity-unsigned-dmg-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: src-tauri/target/release/bundle/dmg/*.dmg
           retention-days: 14
           if-no-files-found: error
 
       - name: Upload app bundle archive
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: lingo-leap-app-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          name: lingo-leap-verification-adhoc-signed-identity-unsigned-app-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: lingo-leap-app.tar.gz
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Upload checksums
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: lingo-leap-verification-adhoc-signed-identity-unsigned-checksums-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: SHA256SUMS
           retention-days: 14
           if-no-files-found: error

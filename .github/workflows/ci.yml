@@ -24,34 +24,24 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
 
       - name: Set up Node
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version-file: .nvmrc
           cache: npm
 
-      - name: Install dependencies (locked)
-        run: npm ci
-
-      - name: Dependency audit (moderate and above)
-        run: npm audit --audit-level=moderate
-
-      - name: Lint
-        run: npm run lint
-
-      - name: TypeScript and frontend build
-        run: npm run build
-
-      - name: Unit tests and coverage thresholds
-        run: npm run test:coverage
+      # The gate commands and their order live in scripts/gates.json. Nothing
+      # here spells one out, so this surface cannot drift from the others.
+      - name: Gates (frontend)
+        run: node scripts/run-gates.mjs frontend
 
       - name: Upload coverage report
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: coverage-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: coverage
@@ -67,9 +57,16 @@ jobs:
       CARGO_INCREMENTAL: 0
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+
+      # The runner executes on the pinned Node rather than whatever the image
+      # happens to ship.
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version-file: .nvmrc
 
       - name: Record toolchain
         id: toolchain
@@ -80,7 +77,7 @@ jobs:
           echo "rustc=$(rustc --version | tr ' ' '-')" >> "$GITHUB_OUTPUT"
 
       - name: Cache cargo registry and build outputs
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: |
             ~/.cargo/registry/index
@@ -91,5 +88,5 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-${{ runner.arch }}-cargo-${{ steps.toolchain.outputs.rustc }}-
 
-      - name: Cargo check (locked)
-        run: cargo check --locked --manifest-path src-tauri/Cargo.toml
+      - name: Gates (rust)
+        run: node scripts/run-gates.mjs rust

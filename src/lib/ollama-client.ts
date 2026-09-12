@@ -260,7 +260,7 @@ export class OllamaClient implements AiProvider {
         // A cancelled request must not spend another round trip.
         if (isAbortError(lastError) || signal?.aborted) throw lastError
         if (attempt < maxRetries) {
-          console.warn(`JSON parse retry ${attempt + 1}/${maxRetries}`)
+          console.warn('Structured response unusable; retrying')
         }
       }
     }

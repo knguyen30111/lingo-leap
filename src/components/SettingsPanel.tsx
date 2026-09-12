@@ -4,6 +4,7 @@ import { useSettingsStore, ThemeMode } from "../stores/settingsStore";
 import { useDesktopRuntimeStatusStore } from "../stores/desktop-runtime-status-store";
 import { useOllama } from "../hooks/useOllama";
 import { UI_LANGUAGES, type UILanguageCode } from "../i18n";
+import { APP_VERSION } from "../lib/app-version";
 
 interface SettingsPanelProps {
   onClose: () => void;
@@ -443,7 +444,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
             <svg className="w-4 h-4 text-[var(--text-tertiary)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
             </svg>
-            <span>{t("version")}</span>
+            <span>{t("version", { version: APP_VERSION })}</span>
           </div>
         </div>
       </div>

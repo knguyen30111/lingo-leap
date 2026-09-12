@@ -54,6 +54,55 @@ describe('EditorOutputBody priority', () => {
   })
 })
 
+// Streaming sets the output text chunk by chunk while the request is still in
+// flight. A body that only ever shows skeletons while loading therefore hides
+// the very thing streaming exists to deliver.
+describe('EditorOutputBody while a streamed response arrives', () => {
+  it('shows the partial output instead of the skeleton', () => {
+    const { container } = renderBody({ isLoading: true, outputText: 'Xin ch' })
+
+    expect(screen.getByText('Xin ch')).toBeInTheDocument()
+    expect(container.querySelector('.animate-pulse')).toBeNull()
+  })
+
+  it('keeps showing the skeleton until the first chunk arrives', () => {
+    const { container } = renderBody({ isLoading: true, outputText: '' })
+
+    expect(container.querySelector('.animate-pulse')).not.toBeNull()
+  })
+
+  it('treats whitespace-only output as nothing having arrived yet', () => {
+    const { container } = renderBody({ isLoading: true, outputText: '   ' })
+
+    expect(container.querySelector('.animate-pulse')).not.toBeNull()
+  })
+
+  it('marks the partial output as still streaming', () => {
+    renderBody({ isLoading: true, outputText: 'Xin ch' })
+
+    expect(screen.getByRole('status')).toHaveAttribute('aria-busy', 'true')
+  })
+
+  it('does not mark a settled output as streaming', () => {
+    renderBody({ outputText: 'Xin chào' })
+
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+  })
+
+  it('shows the partial output in preference to an error that has not settled', () => {
+    renderBody({ isLoading: true, error: 'boom', outputText: 'Xin ch' })
+
+    expect(screen.getByText('Xin ch')).toBeInTheDocument()
+    expect(screen.queryByText('boom')).not.toBeInTheDocument()
+  })
+
+  it('does not show the placeholder while a chunk is on screen', () => {
+    renderBody({ isLoading: true, outputText: 'Xin ch' })
+
+    expect(screen.queryByText('Translation will appear here')).not.toBeInTheDocument()
+  })
+})
+
 describe('EditorOutputBody skeleton widths', () => {
   it('renders one bar per entry for a four-entry width list', () => {
     const { container } = renderBody({ isLoading: true, skeletonWidths: FOUR_BARS })

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import { SettingsPanel } from './SettingsPanel'
 import { useSettingsStore } from '../stores/settingsStore'
+import { APP_VERSION } from '../lib/app-version'
 import { useDesktopRuntimeStatusStore } from '../stores/desktop-runtime-status-store'
 import enSettings from '../locales/en/settings.json'
 import jaSettings from '../locales/ja/settings.json'
@@ -33,7 +34,7 @@ vi.mock('../hooks/useOllama', () => ({
 vi.mock('react-i18next', () => ({
   initReactI18next: { type: '3rdParty', init: vi.fn() },
   useTranslation: () => ({
-    t: (key: string) => {
+    t: (key: string, options?: Record<string, unknown>) => {
       const translations: Record<string, string> = {
         title: 'Settings',
         'sections.interface': 'Interface',
@@ -69,7 +70,7 @@ vi.mock('react-i18next', () => ({
         'desktop.autoHideAfterCopy': 'Auto Hide After Copy',
         'desktop.autoHideAfterCopyDesc': 'Hide the window after copying output',
         'desktop.autoHideAfterCopyError': 'Could not hide the window after copying',
-        version: 'Version 1.0.0',
+        version: 'Lingo Leap v{{version}}',
         'common:save': 'Save',
         'common:languages.en': 'English',
         'common:languages.ja': 'Japanese',
@@ -77,7 +78,12 @@ vi.mock('react-i18next', () => ({
         'common:languages.zh': 'Chinese',
         'common:languages.ko': 'Korean',
       }
-      return translations[key] || key
+      const template = translations[key] || key
+      // The real i18next interpolates named values; the version string is one,
+      // so a mock that dropped them would hide a broken interpolation.
+      return template.replace(/\{\{(\w+)\}\}/g, (_match, name) =>
+        options && name in options ? String(options[name]) : `{{${name}}}`
+      )
     },
   }),
 }))
@@ -356,9 +362,18 @@ describe('SettingsPanel', () => {
     }
   })
 
-  it('renders version in footer', () => {
+  // The footer used to carry a version literal copied into four locale files,
+  // which is how the shipped UI came to show 0.1.0 for a 1.1.0 build.
+  it('renders the built version in the footer', () => {
     render(<SettingsPanel onClose={onClose} />)
-    expect(screen.getByText('Version 1.0.0')).toBeInTheDocument()
+
+    expect(screen.getByText(`Lingo Leap v${APP_VERSION}`)).toBeInTheDocument()
+  })
+
+  it('does not leave the version placeholder uninterpolated', () => {
+    render(<SettingsPanel onClose={onClose} />)
+
+    expect(screen.queryByText(/\{\{version\}\}/)).not.toBeInTheDocument()
   })
 
   describe('Model fallback options', () => {
@@ -531,6 +546,18 @@ describe('SettingsPanel', () => {
         expect(typeof desktop?.[key]).toBe('string')
         expect(desktop?.[key]?.length ?? 0).toBeGreaterThan(0)
       }
+    })
+
+    it.each([
+      ['en', enSettings],
+      ['ja', jaSettings],
+      ['ko', koSettings],
+      ['vi', viSettings],
+    ])('leaves the version to the build authority in %s', (_locale, bundle) => {
+      const version = (bundle as Record<string, unknown>).version
+
+      expect(version).toContain('{{version}}')
+      expect(version).not.toMatch(/\d+\.\d+\.\d+/)
     })
 
     it('grants the exact window permissions the desktop settings need', () => {

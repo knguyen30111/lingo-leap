@@ -1047,10 +1047,13 @@ describe('useSpeechToText', () => {
   })
 
   it('starts even when the native voice session cannot be activated', async () => {
+    // The rejection value is the native layer's own error. It reaches the
+    // console as a diagnostic only, never as a payload.
+    const ACTIVATION_SENTINEL = 'ZZ-ACTIVATION-SENTINEL-ZZ'
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     vi.mocked(invoke).mockImplementation((command: string) =>
       command === 'activate_voice_session'
-        ? Promise.reject(new Error('no session'))
+        ? Promise.reject(new Error(ACTIVATION_SENTINEL))
         : Promise.resolve(undefined)
     )
 
@@ -1061,6 +1064,13 @@ describe('useSpeechToText', () => {
 
     expect(latest().start).toHaveBeenCalledTimes(1)
     expect(result.current.isListening).toBe(true)
+
+    expect(warn).toHaveBeenCalledTimes(1)
+    const args = warn.mock.calls[0] as unknown[]
+    expect(args).toHaveLength(1)
+    expect(typeof args[0]).toBe('string')
+    expect(args[0] as string).not.toContain(ACTIVATION_SENTINEL)
+
     warn.mockRestore()
   })
 
