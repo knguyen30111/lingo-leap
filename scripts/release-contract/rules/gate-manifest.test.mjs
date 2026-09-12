@@ -5,7 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { createRepo } from '../lib/repo.mjs'
 import { REQUIRED_GATES, GATE_GROUPS } from '../lib/gate-contract.mjs'
-import { gateManifestRule } from './gate-manifest.mjs'
+import { gateManifestRule, isExactGateList } from './gate-manifest.mjs'
 
 let fixture
 
@@ -109,6 +109,44 @@ describe('gate-manifest rule', () => {
     write('{not json')
 
     expect(messages()).toContain('scripts/gates.json is not valid JSON')
+  })
+
+  // A duplicate is the hole an ordered-subsequence check cannot see: every
+  // required command is still present, in order, so the manifest passes while
+  // the runner would execute a gate twice.
+  it('reports a duplicate command prepended to the required list', () => {
+    write(manifest({ frontend: ['npm run build', ...REQUIRED_GATES.frontend] }))
+
+    expect(messages()).toContain('scripts/gates.json group "frontend" runs "npm run build" more than once')
+  })
+
+  it('reports a duplicate command appended to the required list', () => {
+    write(manifest({ frontend: [...REQUIRED_GATES.frontend, 'npm ci'] }))
+
+    expect(messages()).toContain('scripts/gates.json group "frontend" runs "npm ci" more than once')
+  })
+
+  it('reports a duplicate in the rust group', () => {
+    const locked = REQUIRED_GATES.rust[0]
+    write(manifest({ rust: [locked, locked] }))
+
+    expect(messages()).toContain(`scripts/gates.json group "rust" runs "${locked}" more than once`)
+  })
+
+  // The positive statement of the same rule: each group has to equal the
+  // required list element for element, so no arrangement that is merely
+  // compatible with it passes.
+  it('accepts only the exact required list for every group', () => {
+    for (const group of GATE_GROUPS) {
+      const required = REQUIRED_GATES[group]
+      write(manifest())
+      expect(isExactGateList(required, required)).toBe(true)
+      expect(isExactGateList([...required, required[0]], required)).toBe(false)
+      expect(isExactGateList([required[0], ...required], required)).toBe(false)
+      expect(isExactGateList([...required].reverse(), required)).toBe(
+        required.length === 1
+      )
+    }
   })
 
   it('reports a group that is not an array', () => {
