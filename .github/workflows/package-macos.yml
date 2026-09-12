@@ -25,7 +25,8 @@ jobs:
           echo "These artifacts are ad-hoc signed with the Hardened Runtime in force."
           echo "They carry NO Developer ID identity: the signing identity is ad-hoc, not a team."
           echo "They are NOT notarized, carry NO secure timestamp, and are NOT for distribution."
-          echo "They exist only to verify that the bundle builds, signs, and launches."
+          echo "They exist only to verify that the bundle builds, signs, and passes the package verifier."
+          echo "No step here starts the app, so nothing in this run says it runs."
 
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
