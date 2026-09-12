@@ -29,7 +29,7 @@ export const EXPECTED_EXECUTABLE = 'tran-app'
 // only assertion that sees a build whose payload did not actually land.
 //
 // The floors are derived from measurements of real arm64 artifacts this
-// repository produced, recorded under plans/260912-30-release-hardening/reports/.
+// repository produced, recorded with the release verification evidence.
 //
 //   .app payload   10,392,093 bytes  a 1.1.0 bundle built here under CI=true
 //                  13,168,031 bytes  the bundle published under v1.1.0
