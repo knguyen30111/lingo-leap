@@ -1,6 +1,11 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { finding } from '../lib/findings.mjs'
+import {
+  GATE_GROUPS,
+  gateRunnerCommand,
+  documentedNpmGateCommands,
+} from '../lib/gate-contract.mjs'
 
 function listDocsFiles(root) {
   try {
@@ -23,18 +28,17 @@ const README = 'README.md'
 const CONTRIBUTING = 'CONTRIBUTING.md'
 const SETTINGS_STORE = 'src/stores/settingsStore.ts'
 const PACKAGE_MANIFEST = 'package.json'
+const SECURITY = 'SECURITY.md'
+const PRIVACY = 'docs/privacy.md'
+const CACHE_MODULE = 'src/lib/cache.ts'
+const I18N_CONFIG = 'src/i18n/config.ts'
 
 const FORBIDDEN_ARTIFACTS = ['.deb', '.rpm', '.AppImage']
 
-// The full gate list a contributor has to be able to find.
-const DOCUMENTED_GATES = [
-  'npm run lint',
-  'npm run lint:workflows',
-  'npm run typecheck',
-  'npm run verify:release-contract',
-  'npm run build',
-  'npm run test:coverage',
-]
+// The gate list a contributor has to be able to find, derived from the one
+// canonical gate contract rather than written down a second time. Adding a
+// required gate therefore makes this check follow on its own.
+const DOCUMENTED_GATES = documentedNpmGateCommands()
 
 // The specific overclaims this issue exists to prevent. Prose drifts back
 // toward them easily, so they are matched literally.
@@ -45,6 +49,22 @@ const FORBIDDEN_CLAIMS = [
   /Gatekeeper[- ]approved/i,
   /ready for distribution/i,
   /safe to distribute/i,
+]
+
+// Packaging and rollback overclaims, matched literally for the same reason as
+// the list above: each is a phrase a previous draft actually contained, and
+// each describes something the repository cannot do.
+//
+// `verify-package` asserts neither checksums nor artifact sizes, and nothing
+// launches or terminates the app; GitHub has no primitive that revokes a
+// published asset; and no workflow builds the Linux image.
+const FORBIDDEN_PACKAGING_CLAIMS = [
+  /\bDocker workflow\b/i,
+  /\brevoke the (affected )?release\b/i,
+  /artifact names and sizes/i,
+  /\bsize enforcement\b/i,
+  /(workflow|verifier) launches and terminates/i,
+  /\b(verifier|verification) (also )?(asserts?|checks?|computes?)[^.]{0,40}checksum/i,
 ]
 
 // "Developer ID" and "notarization" are legitimate when the sentence says they
@@ -63,6 +83,113 @@ export function readModelDefault(storeText, field) {
 
 export function namedNpmScripts(markdown) {
   return [...new Set([...markdown.matchAll(/npm run ([A-Za-z0-9:_-]+)/g)].map(m => m[1]))]
+}
+
+/** The minute count the shared AI result cache is constructed with, or null. */
+export function readCacheLifetimeMinutes(cacheSource) {
+  const match = cacheSource.match(/new LRUCache<[^>]*>\(\s*\d+\s*,\s*(\d+)\s*\)/)
+  return match ? match[1] : null
+}
+
+/** The local-storage key the language detector persists, or null. */
+export function readUiLanguageKey(i18nSource) {
+  const match = i18nSource.match(/lookupLocalStorage:\s*['"]([^'"]+)['"]/)
+  return match ? match[1] : null
+}
+
+/**
+ * What the privacy note has to disclose, read from the code that does it.
+ *
+ * Both values are things a user cannot see: a second local-storage key the
+ * language detector writes, and how long an answer stays in memory. Reading
+ * them from source is what stops the note from silently going stale when
+ * either changes.
+ */
+function checkPrivacyDisclosures(ctx, findings) {
+  const privacy = ctx.readText(PRIVACY)
+  // Governance owns whether the document exists; this rule only checks what it
+  // says when it is there.
+  if (privacy === null) return
+
+  const cacheSource = ctx.readText(CACHE_MODULE)
+  if (cacheSource === null) {
+    findings.push(finding({ message: `${CACHE_MODULE} is missing`, file: CACHE_MODULE }))
+  } else {
+    const minutes = readCacheLifetimeMinutes(cacheSource)
+    if (minutes === null) {
+      findings.push(finding({
+        message: `could not read the response-cache lifetime from ${CACHE_MODULE}`,
+        file: CACHE_MODULE,
+      }))
+    } else if (!new RegExp(`${minutes}\\W{0,4}minutes?`, 'i').test(privacy)) {
+      findings.push(finding({
+        message: `${PRIVACY} does not state the ${minutes}-minute response-cache lifetime`,
+        file: PRIVACY,
+        evidence: `${minutes} minutes`,
+      }))
+    }
+    if (!/app exits/i.test(privacy)) {
+      findings.push(finding({
+        message: `${PRIVACY} does not state that the response cache ends when the app exits`,
+        file: PRIVACY,
+      }))
+    }
+  }
+
+  const i18nSource = ctx.readText(I18N_CONFIG)
+  if (i18nSource === null) {
+    findings.push(finding({ message: `${I18N_CONFIG} is missing`, file: I18N_CONFIG }))
+    return
+  }
+  const key = readUiLanguageKey(i18nSource)
+  if (key === null) {
+    findings.push(finding({
+      message: `could not read the interface-language storage key from ${I18N_CONFIG}`,
+      file: I18N_CONFIG,
+    }))
+    return
+  }
+  if (!privacy.includes(key)) {
+    findings.push(finding({
+      message: `${PRIVACY} does not disclose the ${key} value the app persists`,
+      file: PRIVACY,
+      evidence: key,
+    }))
+  }
+}
+
+/**
+ * The supported-version policy.
+ *
+ * Every published asset disagrees with the current assertion set, so calling
+ * one "supported" promises a fix for a binary nothing here can vouch for. The
+ * policy has to take a position, and the position cannot be that a published
+ * release is supported.
+ */
+function checkSupportedVersions(ctx, findings) {
+  const security = ctx.readText(SECURITY)
+  if (security === null) {
+    // Governance owns whether the document exists.
+    return
+  }
+
+  if (!/supported version/i.test(security)) {
+    findings.push(finding({
+      message: `${SECURITY} states no supported-version position, so what is supported is left to the reader`,
+      file: SECURITY,
+    }))
+    return
+  }
+
+  for (const line of security.split('\n')) {
+    if (/published release[^.]{0,40}\bis supported\b/i.test(line) && !/\bno\b/i.test(line)) {
+      findings.push(finding({
+        message: `${SECURITY} calls a published release supported, but every published asset is historical and unverified`,
+        file: SECURITY,
+        evidence: line.trim(),
+      }))
+    }
+  }
 }
 
 export const docsTruthfulnessRule = {
@@ -177,6 +304,43 @@ export const docsTruthfulnessRule = {
       }
     }
 
+    // The runner is the single authority for running a gate group, so both
+    // documents have to name it. A document that only lists the individual
+    // commands is telling a contributor to run a second copy of the manifest.
+    for (const [file, text] of [[README, readme], [CONTRIBUTING, contributing]]) {
+      if (text === null) continue
+      for (const group of GATE_GROUPS) {
+        const command = gateRunnerCommand(group)
+        if (!text.includes(command)) {
+          findings.push(finding({
+            message: `${file} does not name "${command}", which is the only authority for running that gate group`,
+            file,
+            evidence: command,
+          }))
+        }
+      }
+    }
+
+    // A link to the releases page is a download invitation unless the page's
+    // assets are classified, and they are historical and non-distributable.
+    if (/\/releases\b/.test(readme)) {
+      if (!/\bhistorical\b/i.test(readme)) {
+        findings.push(finding({
+          message: `${README} links the releases page without classifying the assets as historical`,
+          file: README,
+        }))
+      }
+      if (!/not\W{0,2}distributable/i.test(readme)) {
+        findings.push(finding({
+          message: `${README} links the releases page without saying the assets are not distributable`,
+          file: README,
+        }))
+      }
+    }
+
+    checkPrivacyDisclosures(ctx, findings)
+    checkSupportedVersions(ctx, findings)
+
     for (const file of [README, ...listDocsFiles(ctx.root)]) {
       const text = ctx.readText(file)
       if (text === null) continue
@@ -185,6 +349,15 @@ export const docsTruthfulnessRule = {
           if (pattern.test(line) && !NEGATED_CONTEXT.test(line)) {
             findings.push(finding({
               message: `${file} claims a signing or distribution property this project does not have`,
+              file,
+              evidence: line.trim(),
+            }))
+          }
+        }
+        for (const pattern of FORBIDDEN_PACKAGING_CLAIMS) {
+          if (pattern.test(line) && !NEGATED_CONTEXT.test(line)) {
+            findings.push(finding({
+              message: `${file} claims a packaging or rollback property this project does not have`,
               file,
               evidence: line.trim(),
             }))
