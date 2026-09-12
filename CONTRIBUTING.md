@@ -40,11 +40,16 @@ node scripts/run-gates.mjs frontend
 node scripts/run-gates.mjs rust
 ```
 
-**That runner is the single authority.** It reads the commands and their order from
-[`scripts/gates.json`](scripts/gates.json), and CI and the packaging workflow invoke exactly the
-same script, so what you run locally cannot drift from what CI runs. Do not keep a hand-copied list
-of the individual commands anywhere: the release contract asserts that the manifest is the complete
-required gate list in the required order, so the manifest is the only place to read or change one.
+**Run them through that script, never by hand.** CI and the packaging workflow invoke exactly the
+same runner, so what you run locally cannot drift from what CI runs.
+
+What a gate *is* lives in two files that have to agree:
+[`scripts/release-contract/lib/gate-contract.mjs`](scripts/release-contract/lib/gate-contract.mjs)
+declares which gates are required and in which order, and
+[`scripts/gates.json`](scripts/gates.json) is the manifest the runner executes. The release contract
+asserts that each manifest group equals its declared list element for element, so adding, removing,
+or reordering a gate is a deliberate edit to **both** files and anything less fails a gate. Do not
+keep a hand-copied list of the individual commands anywhere else.
 
 The individual gates the `frontend` group runs are `npm ci`, `npm audit --audit-level=moderate`,
 `npm run lint`, `npm run lint:workflows`, `npm run typecheck`, `npm run verify:release-contract`,

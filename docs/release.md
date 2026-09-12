@@ -75,13 +75,23 @@ These are different, and conflating them would be the overclaim this document ex
 artifact uniqueness and naming, the executable path and permission bits, architecture, signature mode
 and the Hardened Runtime flag, the entitlement set and that its one key is boolean `true`, agreement
 between the bundled `Info.plist` and the manifests it is generated from, the configured CSP inside
-the executable, and DMG integrity through `hdiutil verify`. `scripts/verify-package.mjs` is the
-authoritative list; it has unit tests, and the README summarises it.
+the executable, DMG integrity through `hdiutil verify`, and a minimum size for each artifact: the
+`.app` payload must be at least **4 MiB** and the DMG at least **2 MiB**.
+`scripts/verify-package.mjs` is the authoritative list; it has unit tests, and the README summarises
+it.
+
+Those two figures are **floors**, derived from measurements of real arm64 artifacts recorded under
+`plans/260912-30-release-hardening/reports/`: a locally built 1.1.0 `.app` payload is 10,392,093
+bytes, the payload published under v1.1.0 is 13,168,031 bytes, and that release's DMG is 5,802,624
+bytes. Each floor sits at roughly a third of the smallest of those, which leaves a leaner future
+build room while still catching an artifact whose payload never landed. There is deliberately **no**
+upper bound on either artifact: a ceiling would be a distribution-size policy this project does not
+have.
 
 **Not asserted by the verifier**, and stated here so the boundary is not blurred: the SHA-256
-checksums are computed by a separate workflow step, no assertion anywhere checks an artifact
-**size**, and neither the verifier nor the workflow **launches or terminates** the app. A controlled
-launch and termination was carried out by hand against a locally built bundle and recorded under
+checksums are computed by a separate workflow step, and neither the verifier nor the workflow starts
+the app — no step launches or terminates it. A controlled launch and termination was carried out by
+hand against a locally built bundle and recorded under
 `plans/260912-30-release-hardening/reports/` — local evidence from a single machine, not a gate.
 
 **Not proven:** the *runner*. A `workflow_dispatch` workflow can only be dispatched once its
@@ -96,21 +106,36 @@ The assets already on the Releases page are **historical, unverified, and non-di
 was produced by the packaging path described above, which has never run, and none was checked by
 `scripts/verify-package.mjs`, which did not exist when they were built.
 
-An inspection of the asset published under the **v1.1.0** release found, concretely:
+A read-only inspection of the asset published under the **v1.1.0** release — downloaded with
+`gh release download`, with nothing uploaded, edited, replaced, or deleted — found the following. The
+raw tool output is recorded in
+`plans/260912-30-release-hardening/reports/review-fix2-260912-published-asset.txt`.
 
-| Property | What the published asset actually has | What the current path requires |
+**What it gets right**, so the list of failures below is not read as "everything":
+
+| Property | The published asset | The current assertion |
 |---|---|---|
-| Embedded version | `0.1.0` | `1.1.0`, and the verifier compares it against the manifests |
-| `LSMinimumSystemVersion` | `10.13` | `14.0` |
-| Signature | ad-hoc and linker-signed, **without** the Hardened Runtime | `Signature=adhoc` with a `runtime` flag, asserted |
-| Entitlements | none at all | exactly `com.apple.security.device.audio-input`, set to `true`, asserted |
-| `codesign --verify --deep --strict` | fails | must pass, asserted |
-| `spctl` assessment | fails | not claimed either way; no notarization exists |
+| Architecture | `arm64`, a single slice | `lipo -archs` must report exactly `arm64` |
+| Executable path | `Contents/MacOS/tran-app` | the executable must be at `Contents/MacOS/tran-app` |
+| Artifact size | a 13,168,031-byte payload and a 5,802,624-byte DMG | both are above the floors, though for a bundle nothing else here vouches for |
 
-So the published asset is not merely unverified — it disagrees with every current assertion that has
-since been written down. It is kept as a record of what was once published and nothing more. The
-README points people at building from source instead, and [SECURITY.md](../SECURITY.md) does not
-treat it as a supported release.
+**The assertions it fails**, each one named rather than summarised:
+
+| Assertion | What the published asset has |
+|---|---|
+| bundled version equals the manifests | embedded `0.1.0` against a `1.1.0` manifest set |
+| `LSMinimumSystemVersion` equals the configured floor | `10.13`, not `14.0` |
+| the Hardened Runtime is in force | `flags=0x20002(adhoc,linker-signed)`, no `runtime` flag |
+| the entitlement set is exactly `com.apple.security.device.audio-input`, set to `true` | no entitlements at all |
+| `codesign --verify --deep --strict` passes | fails: "code has no resources but signature indicates they must be present" |
+
+`spctl` assessment fails too, on the same missing resources. That is not an assertion the current
+path makes either way, because no notarization exists to assess.
+
+So the published asset fails the version, minimum-system-version, Hardened Runtime, entitlement, and
+strict-verification assertions, while satisfying the architecture and executable-path ones. It is
+kept as a record of what was once published and nothing more. The README points people at building
+from source instead, and [SECURITY.md](../SECURITY.md) does not treat it as a supported release.
 
 ## The public release decision
 
@@ -139,8 +164,19 @@ There is **no GitHub operation that revokes a released artifact**. Nothing recal
 has already downloaded, and no primitive "un-publishes" bytes retroactively. What GitHub does offer
 is withdrawal of *availability*, and that is what a rollback here actually consists of.
 
-Every step below names an operation the platform really has, and none of them replaces an artifact
-in place:
+Two kinds of operation have to be told apart, because conflating them is how a rollback procedure
+ends up contradicting itself:
+
+- **Permitted, and required by the steps below:** editing a published release's **metadata** — its
+  body and title — to record the problem, publishing a security advisory, converting the release
+  back to a **draft**, and deleting a specific affected **asset**. These change availability and the
+  record *around* an artifact; none of them alters an artifact's bytes.
+- **Forbidden, always:** moving or deleting a **tag**, replacing an **asset in place**, reusing an
+  asset filename, and reusing a version number. These destroy the record of what people actually
+  received, which is the one thing a rollback must not do.
+
+Every step below names an operation the platform really has, and all of them stay on the permitted
+side:
 
 1. **Record what is wrong first, while the release is still visible.** Put the affected version, the
    problem, and what to do instead at the top of the release body, and open a security advisory
@@ -163,9 +199,10 @@ in place:
    re-verify with `npm run verify:package`, and publish under a **new** version and a new artifact
    filename.
 
-Never reuse a version number, never replace a published asset, and never overwrite or move a tag.
-Withdrawing a release removes availability; rewriting one would destroy the record, which is the
-one thing a rollback must not do.
+Never reuse a version number, never replace a published asset in place, and never overwrite or move
+a tag. Withdrawing a release removes availability; rewriting an artifact would destroy the record.
+Editing the release **body** to say what went wrong is the opposite: it is how the record gets
+written, and step 1 requires it.
 
 ## The accepted filename discontinuity
 
@@ -178,8 +215,10 @@ That is now fixed going forward: with the authorities aligned, a rebuild produce
 
 **The published assets are not renamed or replaced.** The v1.1.0 release page will always disagree
 with a future 1.1.0 rebuild about the filename. That discontinuity is accepted and recorded here
-rather than repaired, because editing a published release or replacing a published asset would mutate
-an immutable public artifact — which the rollback rule above forbids outright.
+rather than repaired, because renaming or replacing a published asset would mutate an immutable
+public artifact, which the rollback rules above forbid outright. Recording the mismatch in the
+release body, by contrast, is a permitted metadata edit — it is the same operation step 1 of a
+rollback requires.
 
 ## The shared gate list
 
@@ -190,11 +229,14 @@ node scripts/run-gates.mjs frontend
 node scripts/run-gates.mjs rust
 ```
 
-That runner is the **only** authority for running a group. The commands and their order live in
-`scripts/gates.json`, which nothing else copies, and the release contract asserts that the manifest
-is the complete required list in the required order — so removing `npm run typecheck` from it fails
-a gate rather than silently shrinking every surface at once. The README describes what each
-individual gate asserts.
+Every surface runs a group through that script; nothing keeps a second copy of the commands.
+
+What a gate *is* lives in two files that have to agree:
+`scripts/release-contract/lib/gate-contract.mjs` declares which gates are required and in which
+order, and `scripts/gates.json` is the manifest the runner executes. The release contract asserts
+that each manifest group equals its declared list element for element, so removing `npm run
+typecheck` from either file fails a gate rather than silently shrinking every surface at once, and
+adding a gate is a deliberate edit to both. The README describes what each individual gate asserts.
 
 `actionlint` is pinned by version **and** SHA-256 in `scripts/actionlint.sha256`, for both
 `darwin_arm64` and `linux_amd64`, so the gate is verifiable on a developer machine and on the runner.

@@ -1,6 +1,7 @@
 # Lingo Leap
 
-Local-AI translation and grammar correction app powered by Ollama. Distributed for **macOS on Apple silicon (arm64)**.
+Local-AI translation and grammar correction app powered by Ollama. Built and verified for **macOS on
+Apple silicon (arm64)**. There is no distributable download.
 
 <p align="center">
   <img src="assets/logo.png" alt="Lingo Leap" width="200">
@@ -62,9 +63,9 @@ Local-AI translation and grammar correction app powered by Ollama. Distributed f
    **historical and unverified**: they predate the checks described here, and none of them was
    produced by the current packaging path. They are ad-hoc signed; they are **not** notarized and
    carry **no** Developer ID identity. They are **not distributable** and are kept only as a record
-   of what was once published — [docs/release.md](docs/release.md) records exactly how that asset
-   disagrees with every assertion the current path makes. A signed and notarized build is a future
-   decision, not something that exists today
+   of what was once published — [docs/release.md](docs/release.md) records exactly which of the
+   current path's assertions that asset fails, and which two it satisfies.
+   A signed and notarized build is a future decision, not something that exists today
 
 ## Platform support
 
@@ -170,11 +171,21 @@ an independent GitHub approval without making owner-authored pull requests unmer
 
 ### Running the gates
 
-`node scripts/run-gates.mjs <group>` is the **only** authority for running a gate group. It reads
-the commands and their order from `scripts/gates.json`, and CI, the packaging workflow, and a local
-run all invoke exactly that script, so no surface can quietly fall behind another. The release
-contract asserts that the manifest is the complete, ordered gate list, so a manifest that has lost
-a gate fails a gate instead of passing quietly.
+`node scripts/run-gates.mjs <group>` is how every surface runs a gate group: CI, the packaging
+workflow, and a local run all invoke exactly that script, so none of them can quietly fall behind
+another.
+
+What a gate *is* lives in two files that have to agree, and changing a gate means changing both on
+purpose:
+
+| File | Role |
+| ---- | ---- |
+| `scripts/release-contract/lib/gate-contract.mjs` | the canonical declaration of which gates are required, in which order |
+| `scripts/gates.json` | the manifest the runner executes |
+
+The release contract asserts that each manifest group equals its declared list element for element,
+so a missing gate, an extra gate, a repeated gate, and a reordered gate each fail a gate instead of
+passing quietly.
 
 | Check      | Run it locally                          |
 | ---------- | --------------------------------------- |
@@ -183,8 +194,8 @@ a gate fails a gate instead of passing quietly.
 
 The `frontend` group is a locked install, a dependency audit, lint, workflow lint, typecheck, the
 release contract, the Vite build, unit tests, and coverage thresholds; the `rust` group is a locked
-`cargo check` of the Tauri crate. `scripts/gates.json` is where those commands are written down —
-the list below describes what each one asserts and is not a second copy to run by hand:
+`cargo check` of the Tauri crate. Those commands are written down in the two files above — the list
+below describes what each one asserts and is not a second copy to run by hand:
 
 | Gate                              | What it asserts                                                                 |
 | --------------------------------- | ------------------------------------------------------------------------------- |
@@ -250,15 +261,18 @@ is the same command the workflow invokes, and it runs locally against a real bun
   `src-tauri/tauri.conf.json`, and both usage-description strings equal the values in
   `src-tauri/Info.plist` — every expected value is read from those files rather than hardcoded;
 - the configured CSP string is present in the executable;
-- `hdiutil verify` passes on the DMG and its filename carries the agreed version.
+- `hdiutil verify` passes on the DMG and its filename carries the agreed version;
+- the `.app` payload is at least **4 MiB** and the DMG at least **2 MiB**, so an empty or truncated
+  artifact is reported rather than signed off. Both figures are floors derived from measured real
+  builds; no upper bound is asserted, because a ceiling would be a distribution-size policy this
+  project does not have.
 
 Three things are **separate workflow steps, not verifier assertions**, and the verifier would pass
 without them: the SHA-256 checksums of the DMG and the archived `.app`, the `.app` tarball itself,
-and the run summary. Nothing anywhere asserts an artifact **size**, and neither the workflow nor the
-verifier **launches or terminates** the app. A controlled launch and termination was performed by
-hand against a locally built bundle and recorded under
-`plans/260912-30-release-hardening/reports/`; it is local evidence from one machine, not an
-automated gate.
+and the run summary. Neither the workflow nor the verifier starts the app: no step launches or
+terminates it. A controlled launch and termination was performed by hand against a locally built
+bundle and recorded under `plans/260912-30-release-hardening/reports/`; it is local evidence from
+one machine, not an automated gate.
 
 See [docs/release.md](docs/release.md).
 
