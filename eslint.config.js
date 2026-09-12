@@ -22,4 +22,19 @@ export default defineConfig([
       'react-hooks/rules-of-hooks': 'error',
     },
   },
+  // The release-contract checker and the workflow-lint wrapper are gates, and a
+  // gate that is not linted is not a gate. Same severity posture as src, with
+  // Node globals instead of browser ones.
+  {
+    files: ['scripts/**/*.mjs'],
+    extends: [js.configs.recommended],
+    languageOptions: {
+      ecmaVersion: 'latest',
+      sourceType: 'module',
+      globals: { ...globals.node, ...globals.vitest },
+    },
+    rules: {
+      'no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
+    },
+  },
 ])

@@ -5,8 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
-    "lint": "eslint src --max-warnings 0",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src scripts --max-warnings 0",
+    "lint:workflows": "bash scripts/lint-workflows.sh",
+    "verify:release-contract": "node scripts/release-contract/cli.mjs",
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
