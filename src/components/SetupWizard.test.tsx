@@ -1,7 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, act } from '@testing-library/react'
 import { SetupWizard } from './SetupWizard'
-import { useSettingsStore } from '../stores/settingsStore'
+import { useSettingsStore, DEFAULT_OLLAMA_HOST } from '../stores/settingsStore'
+import enSetup from '../locales/en/setup.json'
+import jaSetup from '../locales/ja/setup.json'
+import koSetup from '../locales/ko/setup.json'
+import viSetup from '../locales/vi/setup.json'
 
 // Mock useOllama hook
 const mockCheckConnection = vi.fn()
@@ -55,6 +59,11 @@ vi.mock('react-i18next', () => ({
         'instructions.step1': 'Download and install Ollama from',
         'instructions.downloadTranslation': 'Download translation model:',
         'instructions.downloadGrammar': 'Download grammar model:',
+        'ollama.hostLabel': 'Ollama host',
+        'ollama.hostHint': 'The endpoint the app connects to',
+        'ollama.hostInvalid': 'Enter an http or https URL',
+        'buttons.saveHost': 'Save and retry',
+        'buttons.restoreDefaultHost': 'Restore default',
       }
       return translations[key] || key
     },
@@ -76,6 +85,7 @@ describe('SetupWizard', () => {
       isSetupComplete: false,
       translationModel: 'gemma3:4b',
       correctionModel: 'gemma3:4b',
+      ollamaHost: DEFAULT_OLLAMA_HOST,
     })
 
     // Reset mock state
@@ -336,5 +346,126 @@ describe('SetupWizard', () => {
 
       expect(screen.getAllByText('Not Found').length).toBeGreaterThan(0)
     })
+  })
+})
+
+// A host is persisted, and the wizard is what the app shows whenever the host
+// does not answer. Without an editable host here, a saved typo locks the user
+// out of the whole application with no way back.
+describe('SetupWizard host recovery', () => {
+  beforeEach(() => {
+    useSettingsStore.setState({ ollamaHost: 'http://127.0.0.1:1' })
+    mockOllamaState.isConnected = false
+    mockOllamaState.isChecking = false
+    mockCheckConnection.mockClear()
+  })
+
+  it('shows the persisted host in an editable field', () => {
+    render(<SetupWizard />)
+
+    expect(screen.getByLabelText('Ollama host')).toHaveValue('http://127.0.0.1:1')
+  })
+
+  it('persists an edited host', () => {
+    render(<SetupWizard />)
+
+    fireEvent.change(screen.getByLabelText('Ollama host'), {
+      target: { value: 'http://localhost:11434' },
+    })
+    fireEvent.click(screen.getByText('Save and retry'))
+
+    expect(useSettingsStore.getState().ollamaHost).toBe('http://localhost:11434')
+  })
+
+  it('trims surrounding whitespace before persisting', () => {
+    render(<SetupWizard />)
+
+    fireEvent.change(screen.getByLabelText('Ollama host'), {
+      target: { value: '  http://localhost:11434  ' },
+    })
+    fireEvent.click(screen.getByText('Save and retry'))
+
+    expect(useSettingsStore.getState().ollamaHost).toBe('http://localhost:11434')
+  })
+
+  it('rechecks the connection when the host is saved unchanged', () => {
+    render(<SetupWizard />)
+
+    fireEvent.click(screen.getByText('Save and retry'))
+
+    expect(mockCheckConnection).toHaveBeenCalled()
+  })
+
+  it('restores the shipped default host in one click', () => {
+    render(<SetupWizard />)
+
+    fireEvent.click(screen.getByText('Restore default'))
+
+    expect(useSettingsStore.getState().ollamaHost).toBe(DEFAULT_OLLAMA_HOST)
+    expect(screen.getByLabelText('Ollama host')).toHaveValue(DEFAULT_OLLAMA_HOST)
+  })
+
+  it.each(['', '   ', 'localhost:11434', 'ftp://localhost:11434', 'not a url'])(
+    'refuses to persist %s and says why',
+    value => {
+      render(<SetupWizard />)
+
+      fireEvent.change(screen.getByLabelText('Ollama host'), { target: { value } })
+      fireEvent.click(screen.getByText('Save and retry'))
+
+      expect(screen.getByText('Enter an http or https URL')).toBeInTheDocument()
+      expect(useSettingsStore.getState().ollamaHost).toBe('http://127.0.0.1:1')
+    }
+  )
+
+  it('clears the validation message once a valid host is saved', () => {
+    render(<SetupWizard />)
+    const field = screen.getByLabelText('Ollama host')
+
+    fireEvent.change(field, { target: { value: 'nope' } })
+    fireEvent.click(screen.getByText('Save and retry'))
+    fireEvent.change(field, { target: { value: 'http://localhost:11434' } })
+    fireEvent.click(screen.getByText('Save and retry'))
+
+    expect(screen.queryByText('Enter an http or https URL')).not.toBeInTheDocument()
+  })
+
+  it('keeps the host editable once the connection succeeds', () => {
+    mockOllamaState.isConnected = true
+    render(<SetupWizard />)
+
+    expect(screen.getByLabelText('Ollama host')).toBeInTheDocument()
+  })
+
+  it('shows the host the store holds after an external change', () => {
+    const { rerender } = render(<SetupWizard />)
+
+    act(() => {
+      useSettingsStore.setState({ ollamaHost: 'http://192.168.1.10:11434' })
+    })
+    rerender(<SetupWizard />)
+
+    expect(screen.getByLabelText('Ollama host')).toHaveValue('http://192.168.1.10:11434')
+  })
+})
+
+describe('SetupWizard host recovery strings', () => {
+  it.each([
+    ['en', enSetup],
+    ['ja', jaSetup],
+    ['ko', koSetup],
+    ['vi', viSetup],
+  ])('localizes every host recovery string in %s', (_locale, bundle) => {
+    const ollama = (bundle as Record<string, unknown>).ollama as Record<string, string>
+    const buttons = (bundle as Record<string, unknown>).buttons as Record<string, string>
+
+    for (const key of ['hostLabel', 'hostHint', 'hostInvalid'] as const) {
+      expect(typeof ollama[key]).toBe('string')
+      expect(ollama[key].length).toBeGreaterThan(0)
+    }
+    for (const key of ['saveHost', 'restoreDefaultHost'] as const) {
+      expect(typeof buttons[key]).toBe('string')
+      expect(buttons[key].length).toBeGreaterThan(0)
+    }
   })
 })
