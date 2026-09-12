@@ -9,6 +9,7 @@ import { governanceRule } from './rules/governance.mjs'
 import { docsTruthfulnessRule } from './rules/docs-truthfulness.mjs'
 import { actionPinsRule } from './rules/action-pins.mjs'
 import { gateManifestRule } from './rules/gate-manifest.mjs'
+import { loggingHygieneRule } from './rules/logging-hygiene.mjs'
 
 // Exit codes are part of this tool's contract:
 //   0 every rule passed
@@ -30,6 +31,7 @@ export const rules = [
   docsTruthfulnessRule,
   actionPinsRule,
   gateManifestRule,
+  loggingHygieneRule,
 ]
 
 /**
