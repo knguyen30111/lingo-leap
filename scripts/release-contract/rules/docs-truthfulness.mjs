@@ -39,6 +39,7 @@ const CACHE_MODULE = 'src/lib/cache.ts'
 const I18N_CONFIG = 'src/i18n/config.ts'
 const RELEASE_DOC = 'docs/release.md'
 const PACKAGING_WORKFLOW = '.github/workflows/package-macos.yml'
+const GITIGNORE = '.gitignore'
 
 // The two surfaces that together decide what a gate is. Neither is the sole
 // authority: the contract module declares the required list, the manifest is
@@ -90,7 +91,8 @@ const FORBIDDEN_PACKAGING_CLAIMS = [
 //
 // The second pattern stops at a semicolon as well as a full stop, so a sentence
 // that attributes a hand-run launch to something other than an assertion is not
-// swept up by the verb in its first clause.
+// swept up by the verb in its first clause. The clause-by-clause denial check
+// below narrows it further.
 const FORBIDDEN_LAUNCH_CLAIMS = [
   /\b(and|or) launches\b/i,
   /\b(verif(?:y|ies|ied)|assert(?:s|ed)?|prove[sd]?|confirm(?:s|ed)?)\b[^.;]{0,60}\blaunch(?:es|ed)?\b/i,
@@ -99,9 +101,16 @@ const FORBIDDEN_LAUNCH_CLAIMS = [
 // Sole-authority wording about gates. The required list and the manifest the
 // runner executes are two files that must agree, so calling either one of them
 // the only place a gate is read or changed sends a contributor to half of it.
+//
+// The last pattern is the same claim in the other direction: the contract
+// module and the manifest deliberately carry the gate list twice, and the
+// release contract asserts the two agree, so saying nothing keeps a second copy
+// describes a repository this is not. What has no second copy is the *running*
+// of a group, which every surface delegates to the runner.
 const FORBIDDEN_SOLE_GATE_AUTHORITY = [
   /\b(only|single|sole)\b[^.]{0,40}\bauthority\b/i,
   /\bthe (only|single|sole) place to (read|change|edit|update)\b/i,
+  /\bnothing\b[^.]{0,40}\b(keeps?|holds?|has|carries)\b[^.]{0,30}\bsecond copy\b/i,
 ]
 
 // Sweeping claims about a published asset. The historical bundle does satisfy
@@ -113,6 +122,24 @@ const FORBIDDEN_SWEEPING_ASSET_CLAIMS = [
   /\bfails every\b/i,
   /\bdisagrees with every\b/i,
 ]
+
+// The two floors, each with the wording that identifies its artifact. The
+// figures are rendered from the verifier's constants, so changing a constant
+// changes what a document has to say.
+const SIZE_FLOORS = [
+  [MIN_APP_PAYLOAD_BYTES, '.app payload', String.raw`\.app\b`],
+  [MIN_DMG_BYTES, 'DMG', String.raw`\bDMG\b`],
+]
+
+// The wording that makes a figure a minimum rather than a measurement. Without
+// it, prose that merely records how large the last build was satisfies a check
+// that only looks for the number.
+const FLOOR_WORDING = String.raw`(?:at least|a minimum of|minimum|floors?|no (?:smaller|less) than)`
+
+// Anything that would put the figure and the artifact in different claims. A
+// gap that may not cross another artifact name or another size stops a document
+// that promises the payload the DMG's floor from satisfying both checks at once.
+const FLOOR_GAP = String.raw`(?:(?!\bMiB\b|\.app\b|\bDMG\b)[^.]){0,80}`
 
 // A size denial. These are not subject to the negation exemption below, because
 // the denial IS the negated form and the verifier now asserts both floors.
@@ -164,6 +191,77 @@ export function documentSection(markdown, heading) {
 export function mebibytes(bytes) {
   const value = bytes / (1024 * 1024)
   return `${Number.isInteger(value) ? value : value.toFixed(1)} MiB`
+}
+
+function escapeRegExp(text) {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+/**
+ * Whether `text` states `figure` as a floor for the artifact `artifactSource`
+ * matches, in either of the two orders a document naturally writes it: the
+ * artifact first ("the .app payload must be at least 4 MiB") or the figure
+ * first ("a 4 MiB floor for the .app payload").
+ *
+ * The gap between the two may not cross another artifact name or another size,
+ * so the figure belonging to the other artifact cannot stand in for this one.
+ */
+export function statesFloor(text, artifactSource, figure) {
+  const size = String.raw`\*{0,2}${escapeRegExp(figure)}`
+  const artifactFirst = new RegExp(
+    `${artifactSource}${FLOOR_GAP}\\b${FLOOR_WORDING}\\b${FLOOR_GAP}${size}`, 'i')
+  const figureFirst = new RegExp(
+    `${size}${FLOOR_GAP}\\b${FLOOR_WORDING}\\b${FLOOR_GAP}${artifactSource}`, 'i')
+  return artifactFirst.test(text) || figureFirst.test(text)
+}
+
+/**
+ * Directory entries `.gitignore` excludes, as plain path prefixes. Globs and
+ * file entries are skipped: a prefix is what a citation can be tested against.
+ */
+export function ignoredDirectories(gitignoreText) {
+  return gitignoreText
+    .split('\n')
+    .map(line => line.trim())
+    .filter(line => line !== '' && !line.startsWith('#'))
+    .filter(line => line.endsWith('/') && !/[*?![\]]/.test(line))
+    .map(line => line.replace(/^\//, ''))
+}
+
+// Where one claim on a line stops governing the next. A denial reaches across
+// the commas of a list — "not notarized, stapled, or Developer ID signed" denies
+// all three — but a contrastive conjunction or a semicolon starts a claim the
+// denial no longer covers, which is exactly the bypass "They are NOT notarized,
+// but the verifier confirms the app launches" relied on. Commas are deliberately
+// not separators, because that is how an enumeration under one denial is written.
+const CLAIM_SEPARATOR = /;|\b(?:but|while|although|though|however|yet|whereas)\b/gi
+
+/**
+ * The segments of a line, as `[start, end)` offsets into it: the stretches
+ * between the separators above, each of which carries its own denial or none.
+ */
+export function claimSegments(line) {
+  const segments = []
+  let start = 0
+  for (const match of line.matchAll(CLAIM_SEPARATOR)) {
+    segments.push([start, match.index])
+    start = match.index + match[0].length
+  }
+  segments.push([start, line.length])
+  return segments
+}
+
+/**
+ * The text of every segment a match spanning `[start, end)` touches, which is
+ * where a denial has to stand for that match to be excused. A claim may straddle
+ * a separator, so the segments it touches are joined rather than the match being
+ * attributed to one of them.
+ */
+export function claimContext(line, start, end) {
+  return claimSegments(line)
+    .filter(([from, to]) => from < end && to > start)
+    .map(([from, to]) => line.slice(from, to))
+    .join(' ')
 }
 
 export function readModelDefault(storeText, field) {
@@ -353,21 +451,50 @@ function checkGateAuthority(ctx, findings) {
 /**
  * The artifact-size floors, read from the verifier so a changed constant makes
  * the documents follow.
+ *
+ * Each figure has to be attached to its own artifact and stated as a minimum.
+ * Looking for the numbers alone would accept a document that swaps them, and
+ * would accept measurement prose left behind after the floor itself was deleted.
  */
 function checkSizeFloors(ctx, findings) {
   for (const file of [README, RELEASE_DOC]) {
     const text = ctx.readText(file)
     if (text === null) continue
-    for (const [bytes, label] of [
-      [MIN_APP_PAYLOAD_BYTES, '.app payload'],
-      [MIN_DMG_BYTES, 'DMG'],
-    ]) {
+    for (const [bytes, label, artifact] of SIZE_FLOORS) {
       const figure = mebibytes(bytes)
-      if (!text.includes(figure)) {
+      if (!statesFloor(text, artifact, figure)) {
         findings.push(finding({
           message: `${file} does not state the ${figure} ${label} floor the verifier asserts`,
           file,
           evidence: figure,
+        }))
+      }
+    }
+  }
+}
+
+/**
+ * Paths a document sends a reader to that the repository does not carry.
+ *
+ * Working notes and build output are excluded by `.gitignore`, so a citation
+ * under one of those directories is a reference nobody who clones the
+ * repository can open. The directories are read from `.gitignore` rather than
+ * listed here, so excluding a new one makes this follow.
+ */
+function checkCitedPaths(ctx, findings, files) {
+  const gitignore = ctx.readText(GITIGNORE)
+  if (gitignore === null) return
+
+  for (const directory of ignoredDirectories(gitignore)) {
+    const citation = new RegExp(`${escapeRegExp(directory)}[A-Za-z0-9._/-]+`, 'g')
+    for (const file of files) {
+      const text = ctx.readText(file)
+      if (text === null) continue
+      for (const match of new Set(text.match(citation) ?? [])) {
+        findings.push(finding({
+          message: `${file} cites ${match}, which ${GITIGNORE} excludes, so a reader of the repository cannot open it`,
+          file,
+          evidence: match,
         }))
       }
     }
@@ -618,6 +745,7 @@ export const docsTruthfulnessRule = {
     checkSizeFloors(ctx, findings)
     checkHistoricalAssets(ctx, findings)
     checkRollback(ctx, findings)
+    checkCitedPaths(ctx, findings, [README, CONTRIBUTING, ...listDocsFiles(ctx.root)])
 
     // The packaging workflow's echoed status text is read exactly like a
     // document: it is prose a reader trusts about the run in front of them, and
@@ -633,7 +761,11 @@ export const docsTruthfulnessRule = {
           [FORBIDDEN_SWEEPING_ASSET_CLAIMS, 'claims a published asset fails every assertion, instead of naming the ones it fails'],
         ]) {
           for (const pattern of patterns) {
-            if (pattern.test(line) && !NEGATED_CONTEXT.test(line)) {
+            // The claim is matched against the whole line, so one that straddles
+            // a clause boundary is still caught; the denial that would excuse it
+            // has to stand in the clauses the match actually touches.
+            const match = pattern.exec(line)
+            if (match && !NEGATED_CONTEXT.test(claimContext(line, match.index, match.index + match[0].length))) {
               findings.push(finding({ message: `${file} ${message}`, file, evidence: line.trim() }))
             }
           }
