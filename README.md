@@ -134,8 +134,23 @@ an independent GitHub approval without making owner-authored pull requests unmer
 
 | Check      | What it runs                                                                              | Run it locally                                                                         |
 | ---------- | ----------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| `frontend` | locked install, dependency audit, lint, TypeScript, Vite build, unit tests, coverage thresholds | `npm ci && npm audit --audit-level=moderate && npm run lint && npm run build && npm run test:coverage` |
+| `frontend` | locked install, dependency audit, lint, workflow lint, typecheck, release contract, Vite build, unit tests, coverage thresholds | `npm ci && npm audit --audit-level=moderate && npm run lint && npm run lint:workflows && npm run typecheck && npm run verify:release-contract && npm run build && npm run test:coverage` |
 | `rust`     | locked Rust check of the Tauri crate                                                      | `cargo check --locked --manifest-path src-tauri/Cargo.toml`                            |
+
+Three of those gates are individually invocable, and each fails the build on its own:
+
+| Gate                             | What it asserts                                                                 | Run it locally                     |
+| -------------------------------- | ------------------------------------------------------------------------------- | ---------------------------------- |
+| `npm run typecheck`              | `tsc --noEmit`, so a type error is reported as a type error rather than as a build failure | `npm run typecheck`                |
+| `npm run lint:workflows`         | `actionlint`, fetched from a release pinned by version and SHA-256 in `scripts/actionlint.sha256` and verified before it is extracted or executed | `npm run lint:workflows`           |
+| `npm run verify:release-contract` | the machine-checkable release rules under `scripts/release-contract/`           | `npm run verify:release-contract`  |
+
+`build` is the Vite production build only. Type checking is `typecheck`, so the two cannot silently
+re-merge and hide a type error behind a bundler change; the release contract asserts that separation.
+
+The `actionlint` digest committed in `scripts/actionlint.sha256` is the authority and is never
+regenerated from a download. A checksum mismatch is a supply-chain finding: the archive is not
+extracted and the binary is not executed.
 
 Node is pinned by `.nvmrc`; run `nvm use` before the commands above so local results match CI.
 

@@ -43,7 +43,16 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      - name: TypeScript and frontend build
+      - name: Workflow lint
+        run: npm run lint:workflows
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Release contract
+        run: npm run verify:release-contract
+
+      - name: Frontend build
         run: npm run build
 
       - name: Unit tests and coverage thresholds
