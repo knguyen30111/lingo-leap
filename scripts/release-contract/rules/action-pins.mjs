@@ -4,12 +4,14 @@ import { finding } from '../lib/findings.mjs'
 //
 // LIMITATION, stated deliberately: this rule reads workflow files as TEXT with
 // targeted patterns, because no YAML parser is available without adding a
-// dependency. It therefore cannot see everything a parser would — a `uses:`
-// inside a quoted string, for instance, is indistinguishable from a real one by
-// shape alone, so such cases are excluded conservatively. `actionlint` is the
-// compensating control: it parses the workflow schema properly, checks
-// expressions and `runs-on` labels, and shellchecks `run:` blocks, and it is a
-// required gate.
+// dependency. Quoted scalars ARE parsed — quoting an action reference must not
+// exempt it from the pin requirement — but two cases stay outside the
+// comparison because nothing about them is decidable from text: a reference
+// that contains a `${{ }}` expression, and a value this reader cannot unquote
+// unambiguously. Both are listed as notes rather than skipped silently.
+// `actionlint` is the compensating control: it parses the workflow schema
+// properly, checks expressions and `runs-on` labels, and shellchecks `run:`
+// blocks, and it is a required gate.
 
 const WORKFLOW_DIR = '.github/workflows'
 const CI_WORKFLOW = `${WORKFLOW_DIR}/ci.yml`
@@ -55,24 +57,86 @@ export function runCommands(text) {
   return commands
 }
 
-/** Every `uses:` value in a file, ignoring commented-out lines. */
-export function usesEntries(text) {
-  const entries = []
+/**
+ * One `uses:` right-hand side, as `{value, comment}`, or null when it cannot be
+ * read unambiguously.
+ *
+ * Quoting is unwrapped rather than treated as an exemption: `'owner/repo@v1'`
+ * is the same mutable reference as `owner/repo@v1`, and the pin requirement has
+ * to apply to both. A `${{ }}` expression, an unterminated quote, or trailing
+ * text that is not a comment all return null, because guessing at those would
+ * either invent a finding or hide one.
+ */
+export function parseUsesValue(rest) {
+  if (rest.includes('${{')) return null
+
+  const quote = rest[0]
+  if (quote !== '"' && quote !== "'") {
+    const [value, ...commentParts] = rest.split('#')
+    const trimmed = value.trim()
+    if (trimmed === '') return null
+    return { value: trimmed, comment: commentParts.length ? commentParts.join('#').trim() : null }
+  }
+
+  let value = ''
+  let i = 1
+  let closed = false
+  while (i < rest.length) {
+    const char = rest[i]
+    if (quote === '"' && char === '\\' && i + 1 < rest.length) {
+      value += rest[i + 1]
+      i += 2
+      continue
+    }
+    if (char === quote) {
+      // YAML escapes a single quote inside a single-quoted scalar by doubling it.
+      if (quote === "'" && rest[i + 1] === "'") {
+        value += "'"
+        i += 2
+        continue
+      }
+      closed = true
+      i += 1
+      break
+    }
+    value += char
+    i += 1
+  }
+  if (!closed) return null
+
+  const tail = rest.slice(i).trim()
+  if (tail === '') return { value, comment: null }
+  if (!tail.startsWith('#')) return null
+  const comment = tail.slice(1).trim()
+  return { value, comment: comment === '' ? null : comment }
+}
+
+/** The right-hand side of every `uses:` line, ignoring commented-out lines. */
+function usesLines(text) {
+  const lines = []
   text.split('\n').forEach((raw, index) => {
     if (/^\s*#/.test(raw)) return
     const match = raw.match(/^\s*-?\s*uses:\s*(.+?)\s*$/)
     if (!match) return
-    const rest = match[1]
-    // A quoted value cannot be told from a real one by shape; actionlint covers it.
-    if (/^['"]/.test(rest)) return
-    const [value, ...commentParts] = rest.split('#')
-    entries.push({
-      line: index + 1,
-      value: value.trim(),
-      comment: commentParts.length ? commentParts.join('#').trim() : null,
-    })
+    lines.push({ line: index + 1, value: match[1] })
   })
+  return lines
+}
+
+/** Every `uses:` value in a file, ignoring commented-out lines. */
+export function usesEntries(text) {
+  const entries = []
+  for (const { line, value } of usesLines(text)) {
+    const parsed = parseUsesValue(value)
+    if (parsed === null) continue
+    entries.push({ line, value: parsed.value, comment: parsed.comment })
+  }
   return entries
+}
+
+/** The `uses:` lines this reader declined to judge, so the skip is visible. */
+export function unparsedUsesLines(text) {
+  return usesLines(text).filter(({ value }) => parseUsesValue(value) === null)
 }
 
 /** The 1-indexed line of the block that declares a named job, or -1. */
@@ -98,6 +162,11 @@ function checkPins(ctx, findings) {
   for (const file of ctx.listWorkflowFiles()) {
     const text = ctx.readText(file)
     if (text === null) continue
+    for (const { line, value } of unparsedUsesLines(text)) {
+      ctx.info?.(
+        `action-pins: left ${file}:${line} to actionlint — the reference is an expression or cannot be unquoted: ${value}`
+      )
+    }
     for (const entry of usesEntries(text)) {
       if (!PINNED_USES.test(entry.value)) {
         findings.push(finding({
@@ -349,6 +418,53 @@ function checkVerifierInvocation(ctx, findings) {
   }
 }
 
+/**
+ * The names uploaded artifacts carry.
+ *
+ * A bundle signed with `signingIdentity: "-"` is signed — what it lacks is a
+ * Developer ID identity — so "unsigned" misstates the posture in both
+ * directions at once, and the artifact name is where most people read it.
+ */
+function checkArtifactNaming(ctx, findings) {
+  for (const file of ctx.listWorkflowFiles()) {
+    const lines = ctx.readLines(file)
+    if (lines === null) continue
+    lines.forEach((line, index) => {
+      // The rest of the line, not just its first token: a real artifact name
+      // carries `${{ }}` expressions whose inner spaces would otherwise end
+      // the capture and silently skip the whole check.
+      const match = line.match(/^\s*name:\s*(lingo-leap.*?)\s*$/)
+      if (!match) return
+      const name = match[1]
+      if (/(^|-)unsigned(-|$)/.test(name) && !name.includes('identity-unsigned')) {
+        findings.push(finding({
+          message: `${file} names an artifact "unsigned", but the bundle is ad-hoc signed with no Developer ID identity`,
+          file,
+          line: index + 1,
+          evidence: name,
+        }))
+        return
+      }
+      if (!name.includes('adhoc-signed')) {
+        findings.push(finding({
+          message: `${file} names an artifact without saying it is ad-hoc signed`,
+          file,
+          line: index + 1,
+          evidence: name,
+        }))
+      }
+      if (!name.includes('identity-unsigned')) {
+        findings.push(finding({
+          message: `${file} names an artifact that does not say the signing identity is absent`,
+          file,
+          line: index + 1,
+          evidence: name,
+        }))
+      }
+    })
+  }
+}
+
 function checkActionlintPin(ctx, findings) {
   const script = ctx.readText(LINT_WORKFLOWS)
   if (script === null) {
@@ -391,6 +507,7 @@ export const actionPinsRule = {
     checkDependabot(ctx, findings)
     checkGateParity(ctx, findings)
     checkVerifierInvocation(ctx, findings)
+    checkArtifactNaming(ctx, findings)
     checkActionlintPin(ctx, findings)
     return findings
   },

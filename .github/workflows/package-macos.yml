@@ -23,6 +23,7 @@ jobs:
       - name: Artifact status
         run: |
           echo "These artifacts are ad-hoc signed with the Hardened Runtime in force."
+          echo "They carry NO Developer ID identity: the signing identity is ad-hoc, not a team."
           echo "They are NOT notarized, carry NO secure timestamp, and are NOT for distribution."
           echo "They exist only to verify that the bundle builds, signs, and launches."
 
@@ -105,7 +106,7 @@ jobs:
       - name: Upload DMG
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: lingo-leap-verification-unsigned-dmg-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          name: lingo-leap-verification-adhoc-signed-identity-unsigned-dmg-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: src-tauri/target/release/bundle/dmg/*.dmg
           retention-days: 14
           if-no-files-found: error
@@ -113,7 +114,7 @@ jobs:
       - name: Upload app bundle archive
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: lingo-leap-verification-unsigned-app-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          name: lingo-leap-verification-adhoc-signed-identity-unsigned-app-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: lingo-leap-app.tar.gz
           retention-days: 14
           if-no-files-found: error
@@ -121,7 +122,7 @@ jobs:
       - name: Upload checksums
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: lingo-leap-verification-checksums-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          name: lingo-leap-verification-adhoc-signed-identity-unsigned-checksums-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: SHA256SUMS
           retention-days: 14
           if-no-files-found: error
