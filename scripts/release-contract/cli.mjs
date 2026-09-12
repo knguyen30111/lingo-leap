@@ -5,6 +5,8 @@ import { cspRule } from './rules/csp.mjs'
 import { nativeAuthorityRule } from './rules/native-authority.mjs'
 import { entitlementsRule } from './rules/entitlements.mjs'
 import { releaseIdentityRule } from './rules/release-identity.mjs'
+import { governanceRule } from './rules/governance.mjs'
+import { docsTruthfulnessRule } from './rules/docs-truthfulness.mjs'
 
 // Exit codes are part of this tool's contract:
 //   0 every rule passed
@@ -16,7 +18,15 @@ export const EXIT_OK = 0
 export const EXIT_FINDINGS = 1
 export const EXIT_CHECKER_ERROR = 2
 
-export const rules = [nodePinRule, cspRule, nativeAuthorityRule, entitlementsRule, releaseIdentityRule]
+export const rules = [
+  nodePinRule,
+  cspRule,
+  nativeAuthorityRule,
+  entitlementsRule,
+  releaseIdentityRule,
+  governanceRule,
+  docsTruthfulnessRule,
+]
 
 /**
  * @param {object} options
