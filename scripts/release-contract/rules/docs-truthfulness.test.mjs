@@ -1321,6 +1321,41 @@ describe('docs-truthfulness: floor vocabulary is not the same as a floor', () =>
     expect(messages()).not.toContain(`README.md does not state the ${DMG}`)
   })
 
+  // A document that writes the figure before the wording puts the denial in
+  // front of the figure, because the figure and the wording are one phrase and
+  // the denial governs the whole of it.
+  it.each([
+    `There is no ${APP} floor for the .app payload and no ${DMG} floor for the DMG.`,
+    `This is not a ${APP} floor for the .app payload and not a ${DMG} floor for the DMG.`,
+    `The verifier lacks a ${APP} minimum for the .app payload and lacks a ${DMG} minimum for the DMG.`,
+  ])('reports a denial standing in front of the figure: %s', line => {
+    seed({ readme: readmeStating(line) })
+
+    expect(messages()).toContain(`README.md does not state the ${APP} .app payload floor`)
+    expect(messages()).toContain(`README.md does not state the ${DMG} DMG floor`)
+  })
+
+  it.each([
+    `The verifier asserts a ${APP} floor for the .app payload and a ${DMG} floor for the DMG.`,
+    `The verifier asserts a ${APP} minimum for the .app payload and a ${DMG} minimum for the DMG.`,
+    `A ${APP} floor applies to the .app payload and a ${DMG} floor applies to the DMG.`,
+  ])('accepts the figure-first floor stated positively: %s', line => {
+    seed({ readme: readmeStating(line) })
+
+    expect(messages()).not.toContain(`README.md does not state the ${APP}`)
+    expect(messages()).not.toContain(`README.md does not state the ${DMG}`)
+  })
+
+  it('reads a denial in front of the figure as a denial of the floor it precedes', () => {
+    const artifact = String.raw`\.app\b`
+
+    expect(statesFloor(`There is no ${APP} floor for the .app payload.`, artifact, APP)).toBe(false)
+    expect(statesFloor(`This is not a ${APP} floor for the .app payload.`, artifact, APP)).toBe(false)
+    expect(statesFloor(`The verifier lacks a ${APP} minimum for the .app payload.`, artifact, APP)).toBe(false)
+    expect(statesFloor(`The verifier asserts a ${APP} floor for the .app payload.`, artifact, APP)).toBe(true)
+    expect(statesFloor(`The verifier asserts a ${APP} minimum for the .app payload.`, artifact, APP)).toBe(true)
+  })
+
   it('reads a lower-bound phrasing as a floor and a missing minimum as its denial', () => {
     const artifact = String.raw`\.app\b`
 
