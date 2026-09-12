@@ -132,12 +132,6 @@ describe('docs-truthfulness rule', () => {
     expect(messages()).toContain(`promises a ${artifact} artifact`)
   })
 
-  it('reports a workflow that still triggers on a v* tag', () => {
-    seed({ workflow: "on:\n  workflow_dispatch:\n  push:\n    tags:\n      - 'v*'\n" })
-
-    expect(messages()).toContain('still triggers on a v* tag')
-  })
-
   it('reports a README describing a v* tag trigger', () => {
     seed({ readme: `${GOOD_README}\nPackaging runs on a \`v*\` tag.\n` })
 

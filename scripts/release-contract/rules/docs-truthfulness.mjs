@@ -23,7 +23,6 @@ const README = 'README.md'
 const CONTRIBUTING = 'CONTRIBUTING.md'
 const SETTINGS_STORE = 'src/stores/settingsStore.ts'
 const PACKAGE_MANIFEST = 'package.json'
-const PACKAGE_WORKFLOW = '.github/workflows/package-macos.yml'
 
 const FORBIDDEN_ARTIFACTS = ['.deb', '.rpm', '.AppImage']
 
@@ -128,19 +127,9 @@ export const docsTruthfulnessRule = {
       }
     }
 
-    // The docs side of the tag-trigger removal; the workflow side is asserted
-    // by the action-pins rule.
-    const workflow = ctx.readText(PACKAGE_WORKFLOW)
-    if (workflow !== null) {
-      const tagTrigger = workflow.match(/^\s*-\s*['"]?v\*['"]?\s*$/m)
-      if (tagTrigger) {
-        findings.push(finding({
-          message: `${PACKAGE_WORKFLOW} still triggers on a v* tag`,
-          file: PACKAGE_WORKFLOW,
-          evidence: tagTrigger[0].trim(),
-        }))
-      }
-    }
+    // The docs side of the tag-trigger removal. The workflow file itself is
+    // asserted by the action-pins rule, which owns that change; checking it
+    // here as well would report the same defect twice.
     if (/on a `?v\*`? tag|tag push triggers|triggered by a `?v\*`? tag/i.test(readme)) {
       findings.push(finding({
         message: `${README} describes a v* tag packaging trigger that no longer exists`,

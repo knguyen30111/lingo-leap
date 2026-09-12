@@ -1,6 +1,6 @@
 # Lingo Leap
 
-Local-AI translation and grammar correction app powered by Ollama. Available for **macOS**.
+Local-AI translation and grammar correction app powered by Ollama. Distributed for **macOS on Apple silicon (arm64)**.
 
 <p align="center">
   <img src="assets/logo.png" alt="Lingo Leap" width="200">
@@ -17,7 +17,10 @@ Local-AI translation and grammar correction app powered by Ollama. Available for
   provided by the browser and platform (Web Speech API), may use a network service, and always
   listens through the system default microphone
 - **Language Swap** - One-click swap between source and target languages
-- **Local AI** - Translation and grammar correction run locally via Ollama
+- **Local AI** - Translation and grammar correction run against the configured Ollama endpoint,
+  which is `http://localhost:11434` by default and therefore stays on your machine. The endpoint
+  is configurable, so a remote host you set receives the text being translated — see
+  [docs/privacy.md](docs/privacy.md)
 - **Liquid Glass UI** - Modern design with light/dark/system themes
 - **Refined Settings** - Organized settings panel with grouped sections
 - **Menu Bar Integration** - Quick access from system tray
@@ -28,11 +31,12 @@ Local-AI translation and grammar correction app powered by Ollama. Available for
 
 ## Requirements
 
-- **macOS** 14.0+ — the floor the required Ollama itself supports
+- **macOS** 14.0+ on Apple silicon (arm64). The floor follows the required Ollama's own macOS 14+
+  minimum
 - [Ollama](https://ollama.com) installed and running
 - Required models:
   - `aya:8b` - Translation
-  - `qwen3:4b` - Grammar correction
+  - `qwen2.5:7b` - Grammar correction
 
 ## Quick Start
 
@@ -46,13 +50,23 @@ Local-AI translation and grammar correction app powered by Ollama. Available for
 
    ```bash
    ollama pull aya:8b
-   ollama pull qwen3:4b
+   ollama pull qwen2.5:7b
    ```
 
 3. **Download and run Lingo Leap**
-   - **macOS**: Download `.dmg`, drag to Applications
-   - **Linux**: Download `.deb` (Debian/Ubuntu), `.rpm` (Fedora), or `.AppImage`
+   - **macOS (arm64)**: download the `.dmg` and drag the app to Applications
    - Get the latest release from [Releases](https://github.com/knguyen30111/lingo-leap/releases)
+   - Published bundles are ad-hoc signed, so Gatekeeper does not accept them on first launch;
+     open the app from its context menu the first time. A Developer ID signed build is a future
+     decision, not something that exists today — see [docs/release.md](docs/release.md)
+
+## Platform support
+
+| Platform | Status |
+| -------- | ------ |
+| macOS 14.0+, arm64 | the only supported distributed binary |
+| Linux | best-effort **source development** only, via the Docker workflow below. No release artifact is built or published |
+| Windows | unsupported |
 
 ## Development
 
@@ -170,16 +184,17 @@ Excluded surfaces are tests, declarations, the test harness, exact type-only and
 A new file therefore moves the reported percentages as soon as it is added, and an entry point
 that no test exercises reads as uncovered rather than going silently unmeasured.
 
-macOS packaging is **not** a pull-request check. It runs on demand through the
-`package-macos` workflow (manual dispatch, or a `v*` tag) and produces an arm64
-`.dmg` and `.app`. Those bundles are ad-hoc signed and not notarized, so Gatekeeper
-rejects them; signing is tracked separately. Build one locally with
-`CI=true npm run tauri:build` — the `CI=true` prefix is what lets the DMG step run
-without a GUI session.
+macOS packaging is **not** a pull-request check. It runs **only** on manual dispatch through the
+`package-macos` workflow and produces an arm64 `.dmg` and `.app`. It is **verification-only**: the
+bundles are ad-hoc signed with the Hardened Runtime in force, are not notarized, and are not for
+distribution. Build one locally with `CI=true npm run tauri:build` — the `CI=true` prefix is what
+lets the DMG step run without a GUI session.
 
-A packaging run counts as passed only when the operator records the run URL and conclusion,
-both artifact names and sizes, the arm64-only architecture, the ad-hoc signing status, and the
-`rustc`/`node` versions from the run's `Record toolchain` step.
+The workflow has **never run**, and it cannot be dispatched until its definition reaches the
+default branch. What is proven today is the assertion set, not the runner: the package verifier
+under `scripts/` is the same script the workflow invokes, and it runs locally against a real bundle
+to assert the architecture, signature mode, entitlements, DMG integrity, checksums, artifact names
+and sizes, and a controlled launch and termination. See [docs/release.md](docs/release.md).
 
 ## Configuration
 
@@ -201,4 +216,15 @@ Access settings via the gear icon:
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE).
+
+## Project documents
+
+| Document | What it covers |
+| -------- | -------------- |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | branch model, local gates, commit conventions |
+| [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) | community standards and how to raise a concern |
+| [SECURITY.md](SECURITY.md) | how to report a vulnerability, and what is in scope |
+| [docs/system-architecture.md](docs/system-architecture.md) | processes, permission surface, CSP, data flow, signing posture |
+| [docs/privacy.md](docs/privacy.md) | what leaves your machine and what does not |
+| [docs/release.md](docs/release.md) | version authorities, packaging status, rollback |
