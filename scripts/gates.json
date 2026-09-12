@@ -1,0 +1,15 @@
+{
+  "frontend": [
+    "npm ci",
+    "npm audit --audit-level=moderate",
+    "npm run lint",
+    "npm run lint:workflows",
+    "npm run typecheck",
+    "npm run verify:release-contract",
+    "npm run build",
+    "npm run test:coverage"
+  ],
+  "rust": [
+    "cargo check --locked --manifest-path src-tauri/Cargo.toml"
+  ]
+}

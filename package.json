@@ -10,6 +10,7 @@
     "lint": "eslint src scripts --max-warnings 0",
     "lint:workflows": "bash scripts/lint-workflows.sh",
     "verify:release-contract": "node scripts/release-contract/cli.mjs",
+    "verify:package": "node scripts/verify-package.mjs",
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
