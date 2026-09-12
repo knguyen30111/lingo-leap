@@ -4,8 +4,16 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { createRepo } from '../lib/repo.mjs'
-import { docsTruthfulnessRule, readModelDefault, namedNpmScripts } from './docs-truthfulness.mjs'
+import {
+  docsTruthfulnessRule,
+  readModelDefault,
+  namedNpmScripts,
+  readmeSummary,
+  documentSection,
+  mebibytes,
+} from './docs-truthfulness.mjs'
 import { GATE_GROUPS, gateRunnerCommand, documentedNpmGateCommands } from '../lib/gate-contract.mjs'
+import { MIN_APP_PAYLOAD_BYTES, MIN_DMG_BYTES, EXPECTED_EXECUTABLE } from '../../verify-package.mjs'
 
 let fixture
 
@@ -27,8 +35,26 @@ const GATES = documentedNpmGateCommands()
 
 const RUNNERS = GATE_GROUPS.map(gateRunnerCommand)
 
+// The two surfaces that together define a gate, named the way the documents
+// have to name them.
+const GATE_AUTHORITY_LINE =
+  'The required gates live in `scripts/release-contract/lib/gate-contract.mjs`; '
+  + '`scripts/gates.json` is the manifest the runner executes, and the two must agree.'
+
+// The floors are read from the verifier, so a changed constant changes what the
+// documents have to say.
+const SIZE_FLOOR_LINE =
+  `The verifier asserts a ${mebibytes(MIN_APP_PAYLOAD_BYTES)} floor for the .app payload `
+  + `and a ${mebibytes(MIN_DMG_BYTES)} floor for the DMG.`
+
+const GOOD_SUMMARY =
+  'Local-AI translation app. Built and verified for **macOS on Apple silicon (arm64)**. '
+  + 'There is no distributable download.'
+
 const GOOD_README = [
   '# Lingo Leap',
+  '',
+  GOOD_SUMMARY,
   '',
   '- **macOS** 14.0+ on Apple silicon',
   '- Models: `aya:8b` for translation, `qwen2.5:7b` for correction',
@@ -37,6 +63,10 @@ const GOOD_README = [
   '',
   ...RUNNERS.map(r => `- \`${r}\``),
   ...GATES.map(g => `- \`${g}\``),
+  '',
+  GATE_AUTHORITY_LINE,
+  '',
+  SIZE_FLOOR_LINE,
   '',
   'Packaging is manual dispatch only and is not for distribution.',
   '',
@@ -47,6 +77,35 @@ const GOOD_CONTRIBUTING = [
   '',
   ...RUNNERS.map(r => `- \`${r}\``),
   ...GATES.map(g => `- \`${g}\``),
+  '',
+  GATE_AUTHORITY_LINE,
+  '',
+].join('\n')
+
+// A release document carrying every claim the rule requires of it: the gate
+// surfaces, the size floors, a historical-asset section precise about what the
+// published bundle actually is, and a rollback that separates a permitted
+// metadata edit from a forbidden byte replacement.
+const GOOD_RELEASE = [
+  '# Release',
+  '',
+  GATE_AUTHORITY_LINE,
+  '',
+  SIZE_FLOOR_LINE,
+  '',
+  '### Historical published assets',
+  '',
+  'The published bundle is arm64 and carries its executable at the expected',
+  `\`Contents/MacOS/${EXPECTED_EXECUTABLE}\` path. It fails the version, minimum-system-version,`,
+  'Hardened Runtime, entitlement, and strict-verification assertions.',
+  '',
+  '## Rollback',
+  '',
+  '1. Record the problem at the top of the release body and open an advisory.',
+  '2. Convert the release back to a draft, or delete the affected assets.',
+  '3. Keep the tag: do not delete the tag and do not move it.',
+  '',
+  'Never replace a published asset in place and never move a tag.',
   '',
 ].join('\n')
 
@@ -90,6 +149,22 @@ const STORE = [
   '',
 ].join('\n')
 
+// The packaging workflow's own echoed status text is prose a reader trusts, so
+// it is checked exactly like a document.
+const GOOD_WORKFLOW = [
+  'on:',
+  '  workflow_dispatch:',
+  'jobs:',
+  '  bundle:',
+  '    steps:',
+  '      - name: Artifact status',
+  '        run: |',
+  '          echo "These artifacts are ad-hoc signed with the Hardened Runtime in force."',
+  '          echo "They are NOT notarized and are NOT for distribution."',
+  '          echo "They exist only to verify that the bundle builds, signs, and passes the package verifier."',
+  '',
+].join('\n')
+
 function seed(overrides = {}) {
   write('README.md', overrides.readme ?? GOOD_README)
   write('CONTRIBUTING.md', overrides.contributing ?? GOOD_CONTRIBUTING)
@@ -107,7 +182,7 @@ function seed(overrides = {}) {
   write('src/lib/cache.ts', overrides.cache ?? CACHE_SOURCE)
   write('src/i18n/config.ts', overrides.i18n ?? I18N_SOURCE)
   write('SECURITY.md', overrides.security ?? GOOD_SECURITY)
-  write('.github/workflows/package-macos.yml', overrides.workflow ?? 'on:\n  workflow_dispatch:\n')
+  write('.github/workflows/package-macos.yml', overrides.workflow ?? GOOD_WORKFLOW)
   if (overrides.docs) {
     for (const [name, body] of Object.entries(overrides.docs)) write(`docs/${name}`, body)
   }
@@ -252,7 +327,7 @@ describe('docs-truthfulness helpers', () => {
   })
 })
 
-describe('docs-truthfulness: the gate runner is the only authority', () => {
+describe('docs-truthfulness: the gate surfaces a document has to name', () => {
   it.each(GATE_GROUPS)('reports a README that never names the %s runner invocation', group => {
     seed({ readme: GOOD_README.replace(`\`${gateRunnerCommand(group)}\``, '`run the gates`') })
 
@@ -281,9 +356,9 @@ describe('docs-truthfulness: the overclaims this issue removed', () => {
   it.each([
     ['a Docker workflow that does not exist', 'The Docker workflow builds the toolchain.'],
     ['a revoke primitive GitHub does not have', 'Revoke the affected release.'],
-    ['sizes the verifier never checks', 'It asserts artifact names and sizes.'],
+    ['a size ceiling nothing asserts', 'The verifier enforces a maximum artifact size.'],
     ['a launch the workflow never performs', 'The workflow launches and terminates the app.'],
-    ['a size limit nothing enforces', 'Artifact size enforcement happens in the workflow.'],
+    ['a distribution size cap that does not exist', 'A size cap keeps the DMG downloadable.'],
     ['checksums the verifier does not compute', 'The verifier asserts the SHA-256 checksum.'],
   ])('reports %s', (_label, line) => {
     seed({ readme: `${GOOD_README}\n${line}\n` })
@@ -294,7 +369,7 @@ describe('docs-truthfulness: the overclaims this issue removed', () => {
   it.each([
     'There is no Docker workflow: nothing builds that image.',
     'GitHub offers no primitive that revokes a published asset.',
-    'Nothing anywhere asserts an artifact size.',
+    'No upper bound on artifact size is asserted anywhere.',
     'Neither the workflow nor the verifier launches or terminates the app.',
   ])('leaves the denial "%s" alone', line => {
     seed({ readme: `${GOOD_README}\n${line}\n` })
@@ -405,5 +480,295 @@ describe('docs-truthfulness: the supported-version policy', () => {
     seed({ security: '# Security Policy\n\nReport bugs.\n' })
 
     expect(messages()).toContain('SECURITY.md states no supported-version position')
+  })
+})
+
+describe('docs-truthfulness: the summary line under the README title', () => {
+  it('accepts a summary that says the platform is built and verified for', () => {
+    seed()
+
+    expect(run()).toEqual([])
+  })
+
+  // The exact wording this removed: the app is not distributed for anything.
+  it('reports a summary that presents the app as distributed', () => {
+    const summary = 'Local-AI translation app. Distributed for **macOS on Apple silicon (arm64)**.'
+    seed({ readme: GOOD_README.replace(GOOD_SUMMARY, summary) })
+
+    expect(messages()).toContain('README.md presents the app as distributed')
+  })
+
+  it('reports a summary that claims neither building nor verification', () => {
+    seed({ readme: GOOD_README.replace(GOOD_SUMMARY, 'Local-AI translation app for macOS.') })
+
+    expect(messages()).toContain('README.md does not say the platform is one the app is built and verified for')
+  })
+
+  it('reads the summary as the first non-empty line under the title', () => {
+    expect(readmeSummary('# Title\n\nFirst line.\n\nSecond line.\n')).toBe('First line.')
+  })
+
+  it('reads no summary from a document with no title', () => {
+    expect(readmeSummary('just prose\n')).toBeNull()
+  })
+})
+
+describe('docs-truthfulness: what the packaging workflow echoes', () => {
+  it('accepts a status step that claims only building, signing, and verification', () => {
+    seed()
+
+    expect(run()).toEqual([])
+  })
+
+  // The exact line the workflow used to print. Nothing in the workflow launches
+  // the bundle, so the claim was untrue of the run a reader was looking at.
+  it('reports the workflow claiming the bundle launches', () => {
+    const workflow = GOOD_WORKFLOW.replace(
+      'builds, signs, and passes the package verifier.',
+      'builds, signs, and launches.'
+    )
+    seed({ workflow })
+
+    expect(messages()).toContain('.github/workflows/package-macos.yml claims the bundle is launched')
+  })
+
+  it('reports the workflow claiming a launch is verified', () => {
+    const workflow = GOOD_WORKFLOW.replace(
+      'echo "These artifacts are ad-hoc signed with the Hardened Runtime in force."',
+      'echo "Each artifact is asserted to launch cleanly."'
+    )
+    seed({ workflow })
+
+    expect(messages()).toContain('.github/workflows/package-macos.yml claims the bundle is launched')
+  })
+
+  it('reports a signing overclaim echoed by the workflow', () => {
+    const workflow = GOOD_WORKFLOW.replace(
+      'echo "They are NOT notarized and are NOT for distribution."',
+      'echo "They are notarized and ready for distribution."'
+    )
+    seed({ workflow })
+
+    expect(messages()).toContain('.github/workflows/package-macos.yml claims a signing or distribution property')
+  })
+
+  it('leaves a document denial of the launch claim alone', () => {
+    seed({ readme: `${GOOD_README}\nNeither the workflow nor the verifier launches or terminates the app.\n` })
+
+    expect(messages()).not.toContain('claims the bundle is launched')
+  })
+
+  it('leaves a hand-run launch recorded as local evidence alone', () => {
+    const line = 'A launch and termination was run by hand and recorded; no gate asserts it.'
+    seed({ readme: `${GOOD_README}\n${line}\n` })
+
+    expect(messages()).not.toContain('claims the bundle is launched')
+  })
+})
+
+describe('docs-truthfulness: the gate contract and the gate manifest', () => {
+  it.each([
+    ['README.md', readme => ({ readme })],
+    ['CONTRIBUTING.md', contributing => ({ contributing })],
+  ])('reports %s calling one surface the sole gate authority', (file, build) => {
+    const base = file === 'README.md' ? GOOD_README : GOOD_CONTRIBUTING
+    const claimed = `${base}\nThat runner is the **only** authority for running a gate group.\n`
+    seed(build(claimed))
+
+    expect(messages()).toContain(`${file} calls one surface the sole gate authority`)
+  })
+
+  it('reports a document calling the manifest the only place to change a gate', () => {
+    seed({ contributing: `${GOOD_CONTRIBUTING}\nThe manifest is the only place to change a gate.\n` })
+
+    expect(messages()).toContain('CONTRIBUTING.md calls one surface the sole gate authority')
+  })
+
+  it.each(['README.md', 'CONTRIBUTING.md'])('reports %s that never names the gate contract module', file => {
+    const base = file === 'README.md' ? GOOD_README : GOOD_CONTRIBUTING
+    const stripped = base.replace('`scripts/release-contract/lib/gate-contract.mjs`', 'somewhere')
+    seed(file === 'README.md' ? { readme: stripped } : { contributing: stripped })
+
+    expect(messages()).toContain(
+      `${file} does not name scripts/release-contract/lib/gate-contract.mjs, which is where the required gates are declared`
+    )
+  })
+
+  it.each(['README.md', 'CONTRIBUTING.md'])('reports %s that never names the gate manifest', file => {
+    const base = file === 'README.md' ? GOOD_README : GOOD_CONTRIBUTING
+    const stripped = base.replace('`scripts/gates.json`', 'a manifest')
+    seed(file === 'README.md' ? { readme: stripped } : { contributing: stripped })
+
+    expect(messages()).toContain(
+      `${file} does not name scripts/gates.json, which is the manifest the runner executes`
+    )
+  })
+
+  it('requires the release document to name both surfaces as well', () => {
+    const stripped = GOOD_RELEASE.replace('`scripts/gates.json`', 'a manifest')
+    seed({ docs: { 'release.md': stripped } })
+
+    expect(messages()).toContain('docs/release.md does not name scripts/gates.json')
+  })
+})
+
+describe('docs-truthfulness: the artifact size floors the verifier asserts', () => {
+  it.each(['README.md', 'docs/release.md'])('reports %s denying that any size is asserted', file => {
+    const line = 'Nothing anywhere asserts an artifact size.'
+    seed(file === 'README.md'
+      ? { readme: `${GOOD_README}\n${line}\n` }
+      : { docs: { 'release.md': `${GOOD_RELEASE}\n${line}\n` } })
+
+    expect(messages()).toContain(`${file} says no assertion checks an artifact size`)
+  })
+
+  it('reports a README that states neither size floor', () => {
+    seed({ readme: GOOD_README.replace(SIZE_FLOOR_LINE, 'The verifier checks the bundle.') })
+
+    expect(messages()).toContain(`README.md does not state the ${mebibytes(MIN_APP_PAYLOAD_BYTES)} .app payload floor`)
+    expect(messages()).toContain(`README.md does not state the ${mebibytes(MIN_DMG_BYTES)} DMG floor`)
+  })
+
+  it('reports a release document that states neither size floor', () => {
+    seed({ docs: { 'release.md': GOOD_RELEASE.replace(SIZE_FLOOR_LINE, 'The verifier checks the bundle.') } })
+
+    expect(messages()).toContain('docs/release.md does not state the')
+  })
+
+  it('renders a byte count as mebibytes', () => {
+    expect(mebibytes(4 * 1024 * 1024)).toBe('4 MiB')
+    expect(mebibytes(2 * 1024 * 1024)).toBe('2 MiB')
+  })
+})
+
+describe('docs-truthfulness: how precisely a published asset is described', () => {
+  it('accepts a release document that names which assertions the asset fails', () => {
+    seed({ docs: { 'release.md': GOOD_RELEASE } })
+
+    expect(run()).toEqual([])
+  })
+
+  it.each([
+    'So the published asset disagrees with every current assertion that has since been written down.',
+    'It disagrees with every assertion the current path makes.',
+    'The published bundle fails every assertion in the verifier.',
+  ])('reports the sweeping claim: %s', line => {
+    seed({ docs: { 'release.md': `${GOOD_RELEASE}\n${line}\n` } })
+
+    expect(messages()).toContain('docs/release.md claims a published asset fails every assertion')
+  })
+
+  it('reports the same sweeping claim in the README', () => {
+    seed({ readme: `${GOOD_README}\nIt disagrees with every assertion the current path makes.\n` })
+
+    expect(messages()).toContain('README.md claims a published asset fails every assertion')
+  })
+
+  // The asset does satisfy two assertions, so the description has to say so.
+  it('reports a historical-asset section that never says the asset is arm64', () => {
+    seed({ docs: { 'release.md': GOOD_RELEASE.replace('is arm64 and', 'is something and') } })
+
+    expect(messages()).toContain('docs/release.md does not record that the published asset is arm64')
+  })
+
+  it('reports a historical-asset section that never names the expected executable path', () => {
+    const stripped = GOOD_RELEASE.replace(`\`Contents/MacOS/${EXPECTED_EXECUTABLE}\` path`, 'right place')
+    seed({ docs: { 'release.md': stripped } })
+
+    expect(messages()).toContain(
+      `docs/release.md does not record that the published asset carries its executable at Contents/MacOS/${EXPECTED_EXECUTABLE}`
+    )
+  })
+
+  it('reports a release document with no historical-asset section at all', () => {
+    const stripped = GOOD_RELEASE.replace('### Historical published assets', '### Other notes')
+    seed({ docs: { 'release.md': stripped } })
+
+    expect(messages()).toContain('docs/release.md has no historical published assets section')
+  })
+
+  it('reads a section up to the next heading', () => {
+    const doc = '# T\n\n## One\n\nalpha\n\n## Two\n\nbeta\n'
+
+    expect(documentSection(doc, /^##\s+One\b/i)).toContain('alpha')
+    expect(documentSection(doc, /^##\s+One\b/i)).not.toContain('beta')
+    expect(documentSection(doc, /^##\s+Missing\b/i)).toBeNull()
+  })
+})
+
+describe('docs-truthfulness: what a rollback may and may not do', () => {
+  it('accepts a rollback that separates a metadata edit from a byte replacement', () => {
+    seed({ docs: { 'release.md': GOOD_RELEASE } })
+
+    expect(run()).toEqual([])
+  })
+
+  // The contradiction: the rollback procedure starts by editing the release
+  // body, so a later sentence cannot call editing a release forbidden. The
+  // claim is wrapped across lines in the real document, so the scan joins them.
+  it('reports a document that forbids the release-body edit its own rollback requires', () => {
+    const contradiction = [
+      GOOD_RELEASE,
+      'The discontinuity is accepted rather than repaired, because editing a published release or',
+      'replacing a published asset would mutate an immutable public artifact — which the rollback',
+      'rule above forbids outright.',
+      '',
+    ].join('\n')
+    seed({ docs: { 'release.md': contradiction } })
+
+    expect(messages()).toContain('docs/release.md treats editing a published release as forbidden')
+  })
+
+  it('reports a document that forbids recording the problem in the release body', () => {
+    seed({ docs: { 'release.md': `${GOOD_RELEASE}\nNever edit the release body of a published release.\n` } })
+
+    expect(messages()).toContain('docs/release.md treats editing a published release as forbidden')
+  })
+
+  it('reports a rollback that never names the draft withdrawal', () => {
+    const stripped = GOOD_RELEASE.replace('Convert the release back to a draft, or delete', 'Remove')
+    seed({ docs: { 'release.md': stripped } })
+
+    expect(messages()).toContain('docs/release.md does not name converting the release back to a draft')
+  })
+
+  it('reports a rollback that never names the advisory', () => {
+    const stripped = GOOD_RELEASE.replace(' and open an advisory', '')
+    seed({ docs: { 'release.md': stripped } })
+
+    expect(messages()).toContain('docs/release.md does not name the advisory')
+  })
+
+  it('reports a rollback that never names the release body', () => {
+    const stripped = GOOD_RELEASE.replace('at the top of the release body', 'somewhere')
+    seed({ docs: { 'release.md': stripped } })
+
+    expect(messages()).toContain('docs/release.md does not name the release body')
+  })
+
+  it('reports a rollback that does not forbid moving the tag', () => {
+    const stripped = GOOD_RELEASE
+      .replace('3. Keep the tag: do not delete the tag and do not move it.', '3. Keep the tag.')
+      .replace('Never replace a published asset in place and never move a tag.',
+        'Never replace a published asset in place.')
+    seed({ docs: { 'release.md': stripped } })
+
+    expect(messages()).toContain('docs/release.md does not forbid moving the tag')
+  })
+
+  it('reports a rollback that does not forbid replacing a published asset', () => {
+    const stripped = GOOD_RELEASE.replace(
+      'Never replace a published asset in place and never move a tag.',
+      'Never move a tag.'
+    )
+    seed({ docs: { 'release.md': stripped } })
+
+    expect(messages()).toContain('docs/release.md does not forbid replacing a published asset in place')
+  })
+
+  it('reports a release document with no rollback section', () => {
+    seed({ docs: { 'release.md': GOOD_RELEASE.replace('## Rollback', '## Notes') } })
+
+    expect(messages()).toContain('docs/release.md has no rollback section')
   })
 })
