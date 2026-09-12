@@ -6,16 +6,30 @@ import { REQUIRED_GATES, GATE_GROUPS } from '../lib/gate-contract.mjs'
 // consumers of a manifest that has quietly lost `npm run typecheck` is a pair
 // of surfaces agreeing on the wrong thing, which is the failure this rule
 // exists to make impossible.
+//
+// The comparison is therefore element-for-element equality against
+// `REQUIRED_GATES`. A missing command, an undeclared command, a repeated
+// command, and a permutation are reported separately so the finding names the
+// actual defect, but no arrangement other than the exact list passes.
 
 const GATES_MANIFEST = 'scripts/gates.json'
 
-/** True when `subsequence` appears inside `commands` in the same relative order. */
-export function isOrderedSubsequence(commands, subsequence) {
-  let cursor = 0
-  for (const command of commands) {
-    if (command === subsequence[cursor]) cursor += 1
-  }
-  return cursor === subsequence.length
+/**
+ * True when `commands` is the required list element for element.
+ *
+ * Equality, not containment or ordered inclusion: a list that merely contains
+ * the required commands in the right relative order can still run a gate twice
+ * or carry a command the contract never named, and both of those are manifests
+ * the runner would execute differently from the contract.
+ */
+export function isExactGateList(commands, required) {
+  return commands.length === required.length
+    && commands.every((command, index) => command === required[index])
+}
+
+/** Every command appearing more than once, each reported once, in first-seen order. */
+export function duplicateCommands(commands) {
+  return [...new Set(commands.filter((command, index) => commands.indexOf(command) !== index))]
 }
 
 function checkGroup(group, commands, findings) {
@@ -38,8 +52,10 @@ function checkGroup(group, commands, findings) {
     }))
   }
 
+  const undeclared = []
   for (const command of commands) {
-    if (!required.includes(command)) {
+    if (!required.includes(command) && !undeclared.includes(command)) {
+      undeclared.push(command)
       findings.push(finding({
         message: `${GATES_MANIFEST} group "${group}" runs "${command}", which the gate contract does not require`,
         file: GATES_MANIFEST,
@@ -48,9 +64,23 @@ function checkGroup(group, commands, findings) {
     }
   }
 
-  // Order matters on its own: an audit or a lint that runs after the build has
-  // already produced an artifact is not the gate the contract describes.
-  if (missing.length === 0 && !isOrderedSubsequence(commands, required)) {
+  // A repeated command is its own defect. Every required gate is still present
+  // and still in the right relative order, so nothing above sees it, yet the
+  // runner executes a gate the contract names once twice.
+  const duplicates = duplicateCommands(commands)
+  for (const command of duplicates) {
+    findings.push(finding({
+      message: `${GATES_MANIFEST} group "${group}" runs "${command}" more than once`,
+      file: GATES_MANIFEST,
+      evidence: command,
+    }))
+  }
+
+  // What is left once nothing is missing, extra, or repeated is a permutation:
+  // an audit or a lint that runs after the build has already produced an
+  // artifact is not the gate the contract describes.
+  const accounted = missing.length > 0 || undeclared.length > 0 || duplicates.length > 0
+  if (!accounted && !isExactGateList(commands, required)) {
     findings.push(finding({
       message: `${GATES_MANIFEST} group "${group}" runs the required gates out of order`,
       file: GATES_MANIFEST,
