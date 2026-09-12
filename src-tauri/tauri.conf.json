@@ -42,6 +42,7 @@
     ],
     "macOS": {
       "entitlements": "Entitlements.plist",
+      "hardenedRuntime": true,
       "exceptionDomain": "",
       "frameworks": [],
       "providerShortName": null,
