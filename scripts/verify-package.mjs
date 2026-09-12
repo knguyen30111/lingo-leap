@@ -21,6 +21,27 @@ export const EXIT_USAGE = 2
 export const EXPECTED_ENTITLEMENTS = ['com.apple.security.device.audio-input']
 export const EXPECTED_EXECUTABLE = 'tran-app'
 
+// Minimum artifact sizes, in bytes.
+//
+// Every other assertion here passes happily on a zero-length or truncated
+// artifact: the filenames are still right, the plist the bundler wrote is still
+// right, and a freshly signed stub still reports `adhoc,runtime`. A floor is the
+// only assertion that sees a build whose payload did not actually land.
+//
+// The floors are derived from measurements of real arm64 artifacts this
+// repository produced, recorded under plans/260912-30-release-hardening/reports/:
+// the .app payload of a 1.1.0 bundle built under CI=true is 10,392,093 bytes and
+// the payload of the historical bundle published under v1.1.0 is 13,168,031
+// bytes, while that release's DMG is 5,802,624 bytes. Each floor is set at
+// roughly a third of the smallest of those, which leaves a leaner future build
+// ample room while still being millions of bytes above an empty or header-only
+// file.
+//
+// They are floors only. No upper bound is asserted, because a ceiling would be
+// a distribution-size policy this project does not have and cannot justify.
+export const MIN_APP_PAYLOAD_BYTES = 4 * 1024 * 1024
+export const MIN_DMG_BYTES = 2 * 1024 * 1024
+
 // The bundled prompt strings are compared against the plist the repository
 // ships, so the text macOS shows a user cannot drift from the tracked source.
 export const EXPECTED_USAGE_DESCRIPTIONS = [
@@ -139,6 +160,17 @@ const run = (cmd, args) => {
   }
 }
 
+/** Every regular file under `dir`, recursively. Symlinks are not followed. */
+function listFilesRecursively(dir) {
+  const found = []
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name)
+    if (entry.isDirectory()) found.push(...listFilesRecursively(full))
+    else if (entry.isFile()) found.push(full)
+  }
+  return found
+}
+
 function plistValue(plistPath, key, exec = run) {
   const result = exec('/usr/libexec/PlistBuddy', ['-c', `Print :${key}`, plistPath])
   return result.status === 0 ? result.stdout.trim() : null
@@ -158,6 +190,8 @@ export function verifyPackage(bundleRoot, deps = {}) {
     isExecutable = p => {
       try { fs.accessSync(p, fs.constants.X_OK); return true } catch { return false }
     },
+    listFiles = listFilesRecursively,
+    fileSize = p => fs.statSync(p).size,
     repoRoot = process.cwd(),
   } = deps
 
@@ -182,6 +216,23 @@ export function verifyPackage(bundleRoot, deps = {}) {
 
   const appPath = path.join(macosDir, apps[0])
   const dmgPath = path.join(dmgDir, dmgs[0])
+
+  // Size first, because a truncated artifact is the one defect every structural
+  // assertion below would report as healthy.
+  const appBytes = listFiles(appPath).reduce((total, file) => total + fileSize(file), 0)
+  if (appBytes < MIN_APP_PAYLOAD_BYTES) {
+    fail(
+      `the .app payload is ${appBytes} bytes, below the ${MIN_APP_PAYLOAD_BYTES}-byte floor, so the bundle is empty or truncated`,
+      appPath
+    )
+  }
+  const dmgBytes = fileSize(dmgPath)
+  if (dmgBytes < MIN_DMG_BYTES) {
+    fail(
+      `the DMG is ${dmgBytes} bytes, below the ${MIN_DMG_BYTES}-byte floor, so the image is empty or truncated`,
+      dmgPath
+    )
+  }
 
   // The Cargo package name, not the product name. A verifier looking for
   // Contents/MacOS/<productName> would fail on a correct bundle.
