@@ -9,7 +9,10 @@ import {
   parseCodesignFlags,
   parseSignatureMode,
   parseEntitlementKeys,
+  parseEntitlements,
+  parsePlistStrings,
   EXPECTED_ENTITLEMENTS,
+  EXPECTED_USAGE_DESCRIPTIONS,
 } from './verify-package.mjs'
 
 // Recorded output from a real `codesign -dv --verbose=4` run against a bundle
@@ -40,6 +43,22 @@ const ENTITLEMENTS_BRACKETED = [
 const ENTITLEMENTS_XML =
   '<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict>' +
   '<key>com.apple.security.device.audio-input</key><true/></dict></plist>'
+
+const MIC_DESCRIPTION = 'Lingo Leap needs microphone access for voice input'
+const SPEECH_DESCRIPTION = 'Lingo Leap uses speech recognition to convert your voice to text'
+
+const SOURCE_INFO_PLIST = [
+  '<?xml version="1.0" encoding="UTF-8"?>',
+  '<plist version="1.0">',
+  '<dict>',
+  '  <key>NSMicrophoneUsageDescription</key>',
+  `  <string>${MIC_DESCRIPTION}</string>`,
+  '  <key>NSSpeechRecognitionUsageDescription</key>',
+  `  <string>${SPEECH_DESCRIPTION}</string>`,
+  '</dict>',
+  '</plist>',
+  '',
+].join('\n')
 
 describe('parsers', () => {
   it('reads a single architecture', () => {
@@ -80,11 +99,67 @@ describe('parsers', () => {
     expect(parseEntitlementKeys(ENTITLEMENTS_XML)).toEqual(EXPECTED_ENTITLEMENTS)
   })
 
+  // A key present with a false or malformed value grants nothing, so a
+  // verifier that only looked for the key would report it as satisfied.
+  it('reads the boolean value from the bracketed dict form', () => {
+    expect(parseEntitlements(ENTITLEMENTS_BRACKETED)).toEqual({
+      'com.apple.security.device.audio-input': true,
+    })
+  })
+
+  it('reads the boolean value from the XML form', () => {
+    expect(parseEntitlements(ENTITLEMENTS_XML)).toEqual({
+      'com.apple.security.device.audio-input': true,
+    })
+  })
+
+  it('reads a false bracketed value as false rather than as present', () => {
+    const text = ENTITLEMENTS_BRACKETED.replace('[Bool] true', '[Bool] false')
+
+    expect(parseEntitlements(text)).toEqual({ 'com.apple.security.device.audio-input': false })
+  })
+
+  it('reads a false XML value as false', () => {
+    const text = ENTITLEMENTS_XML.replace('<true/>', '<false/>')
+
+    expect(parseEntitlements(text)).toEqual({ 'com.apple.security.device.audio-input': false })
+  })
+
+  it('reads a non-boolean XML value as the string it is', () => {
+    const text = ENTITLEMENTS_XML.replace('<true/>', '<string>true</string>')
+
+    expect(parseEntitlements(text)).toEqual({ 'com.apple.security.device.audio-input': 'true' })
+  })
+
+  it('reads a bracketed key whose value leaf is absent as null', () => {
+    const text = ENTITLEMENTS_BRACKETED.replace('\n\t\t[Bool] true', '')
+
+    expect(parseEntitlements(text)).toEqual({ 'com.apple.security.device.audio-input': null })
+  })
+
   it('reads every key when more than one is present', () => {
     const text = ENTITLEMENTS_BRACKETED + '\n\t[Key] com.apple.security.cs.allow-jit\n\t[Value]\n\t\t[Bool] true'
     expect(parseEntitlementKeys(text)).toEqual([
       'com.apple.security.cs.allow-jit',
       'com.apple.security.device.audio-input',
+    ])
+  })
+
+  it('reads usage descriptions out of the source Info.plist', () => {
+    expect(parsePlistStrings(SOURCE_INFO_PLIST)).toEqual({
+      NSMicrophoneUsageDescription: MIC_DESCRIPTION,
+      NSSpeechRecognitionUsageDescription: SPEECH_DESCRIPTION,
+    })
+  })
+
+  it('returns no entries for a plist with no string values', () => {
+    expect(parsePlistStrings('<plist><dict></dict></plist>')).toEqual({})
+  })
+
+  it('names the usage descriptions the bundle has to carry', () => {
+    expect(EXPECTED_USAGE_DESCRIPTIONS).toEqual([
+      'NSMicrophoneUsageDescription',
+      'NSSpeechRecognitionUsageDescription',
     ])
   })
 })
@@ -134,6 +209,12 @@ function buildFixture(overrides = {}) {
       bundle: { macOS: { minimumSystemVersion: '14.0' } },
     })
   )
+  if (overrides.sourceInfoPlist !== false) {
+    fs.writeFileSync(
+      path.join(fixture, 'src-tauri', 'Info.plist'),
+      overrides.sourceInfoPlist ?? SOURCE_INFO_PLIST
+    )
+  }
   fs.writeFileSync(
     path.join(fixture, 'package.json'),
     JSON.stringify({ version: overrides.manifestVersion ?? VERSION })
@@ -148,8 +229,8 @@ function toolDouble(overrides = {}) {
     CFBundleShortVersionString: VERSION,
     CFBundleVersion: VERSION,
     LSMinimumSystemVersion: '14.0',
-    NSMicrophoneUsageDescription: 'mic',
-    NSSpeechRecognitionUsageDescription: 'speech',
+    NSMicrophoneUsageDescription: MIC_DESCRIPTION,
+    NSSpeechRecognitionUsageDescription: SPEECH_DESCRIPTION,
     ...(overrides.plist ?? {}),
   }
   return (cmd, args) => {
@@ -273,6 +354,62 @@ describe('verifyPackage', () => {
         .toContain(`Info.plist is missing ${key}`)
     }
   )
+
+  // Presence alone would let the bundled prompt text drift away from the
+  // source of truth the repository ships.
+  it.each(['NSMicrophoneUsageDescription', 'NSSpeechRecognitionUsageDescription'])(
+    'reports a bundled %s that does not match the source Info.plist',
+    key => {
+      expect(messages(run(buildFixture(), { plist: { [key]: 'something else' } })))
+        .toContain(`Info.plist ${key} does not match src-tauri/Info.plist`)
+    }
+  )
+
+  it('reports a source Info.plist that declares no usage description', () => {
+    const root = buildFixture({ sourceInfoPlist: '<plist><dict></dict></plist>' })
+
+    expect(messages(run(root)))
+      .toContain('src-tauri/Info.plist declares no NSMicrophoneUsageDescription')
+  })
+
+  it('reports an absent source Info.plist rather than skipping the comparison', () => {
+    const root = buildFixture({ sourceInfoPlist: false })
+
+    expect(messages(run(root))).toContain('src-tauri/Info.plist is missing')
+  })
+
+  // The entitlement has to be granted, not merely listed.
+  it('reports the expected entitlement present but set to false', () => {
+    const entitlements = ENTITLEMENTS_BRACKETED.replace('[Bool] true', '[Bool] false')
+
+    expect(messages(run(buildFixture(), { entitlements })))
+      .toContain('com.apple.security.device.audio-input must be set to true')
+  })
+
+  it('reports the expected entitlement present but set to false in the XML form', () => {
+    const entitlements = ENTITLEMENTS_XML.replace('<true/>', '<false/>')
+
+    expect(messages(run(buildFixture(), { entitlements })))
+      .toContain('com.apple.security.device.audio-input must be set to true')
+  })
+
+  it('reports the expected entitlement present with a string value instead of a boolean', () => {
+    const entitlements = ENTITLEMENTS_XML.replace('<true/>', '<string>true</string>')
+
+    expect(messages(run(buildFixture(), { entitlements })))
+      .toContain('com.apple.security.device.audio-input must be set to true')
+  })
+
+  it('reports the expected entitlement present with no value leaf at all', () => {
+    const entitlements = ENTITLEMENTS_BRACKETED.replace('\n\t\t[Bool] true', '')
+
+    expect(messages(run(buildFixture(), { entitlements })))
+      .toContain('com.apple.security.device.audio-input must be set to true')
+  })
+
+  it('accepts the XML form of a granted entitlement', () => {
+    expect(run(buildFixture(), { entitlements: ENTITLEMENTS_XML })).toEqual([])
+  })
 
   it('reports manifests that disagree about the version', () => {
     expect(messages(run(buildFixture({ manifestVersion: '1.0.0' }))))
