@@ -1,13 +1,11 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import type { CorrectionLevel } from '../types'
 import {
   wrapPrompt,
   buildCorrectionPrompt,
   buildChangesExtractionPrompt,
   buildTranslationPrompt,
 } from './prompt-builder'
-
-// Suppress console.log during tests
-vi.spyOn(console, 'log').mockImplementation(() => {})
 
 describe('wrapPrompt', () => {
   describe('with qwen model', () => {
@@ -319,5 +317,81 @@ STRICT: NEVER explain, define, or describe. Single words = single word output. J
       expect(result.prompt).toBe(SHIPPED_EXTRACTION_PROMPT)
       expect(result.system).toBeUndefined()
     })
+  })
+})
+
+// The builders compose the user's whole text into a prompt string. The
+// suppression that used to sit at the top of this file was what let routine
+// per-correction metadata reach the console unnoticed, so the contract is that
+// building a prompt is silent and the suite no longer hides it.
+describe('console hygiene', () => {
+  const TEXT_SENTINEL = 'ZZ-TEXT-SENTINEL-ZZ'
+  const LEVELS: CorrectionLevel[] = ['fix', 'improve', 'rewrite']
+  const LANGUAGES = ['auto', 'en', 'ja', 'vi', 'ko']
+  const MODELS = ['qwen2.5:7b', 'aya:8b', 'gemma:2b']
+
+  let spies: Record<'log' | 'debug' | 'info' | 'warn' | 'error', ReturnType<typeof vi.spyOn>>
+
+  beforeEach(() => {
+    spies = {
+      log: vi.spyOn(console, 'log').mockImplementation(() => {}),
+      debug: vi.spyOn(console, 'debug').mockImplementation(() => {}),
+      info: vi.spyOn(console, 'info').mockImplementation(() => {}),
+      warn: vi.spyOn(console, 'warn').mockImplementation(() => {}),
+      error: vi.spyOn(console, 'error').mockImplementation(() => {}),
+    }
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  function allCalls(): unknown[][] {
+    return Object.values(spies).flatMap(spy => spy.mock.calls as unknown[][])
+  }
+
+  it('builds a correction prompt silently for every level, language, and model', () => {
+    for (const level of LEVELS) {
+      for (const language of LANGUAGES) {
+        for (const model of MODELS) {
+          const result = buildCorrectionPrompt(TEXT_SENTINEL, language, level, model)
+
+          expect(typeof result.prompt).toBe('string')
+          expect(result.prompt).toContain(TEXT_SENTINEL)
+        }
+      }
+    }
+
+    expect(allCalls()).toEqual([])
+  })
+
+  it('builds an extraction prompt silently', () => {
+    for (const model of MODELS) {
+      const result = buildChangesExtractionPrompt(TEXT_SENTINEL, 'corrected', 'en', 'ja', model)
+
+      expect(typeof result.prompt).toBe('string')
+      expect(result.prompt).toContain(TEXT_SENTINEL)
+    }
+
+    expect(allCalls()).toEqual([])
+  })
+
+  it('builds a translation prompt silently', () => {
+    for (const model of MODELS) {
+      const result = buildTranslationPrompt(TEXT_SENTINEL, 'en', 'ja', model)
+
+      expect(typeof result.prompt).toBe('string')
+      expect(result.prompt).toContain(TEXT_SENTINEL)
+    }
+
+    expect(allCalls()).toEqual([])
+  })
+
+  it('wraps a prompt silently', () => {
+    for (const model of MODELS) {
+      expect(wrapPrompt('system', TEXT_SENTINEL, model).prompt).toContain(TEXT_SENTINEL)
+    }
+
+    expect(allCalls()).toEqual([])
   })
 })

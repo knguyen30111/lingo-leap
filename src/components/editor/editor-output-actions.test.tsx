@@ -192,10 +192,13 @@ describe('EditorOutputActions copy', () => {
   })
 
   it('logs a failed copy and does not enter the copied state', async () => {
+    // The rejection carries the text the user asked to copy, so the diagnostic
+    // has to survive without the payload reaching the console.
+    const COPY_ERROR_SENTINEL = 'ZZ-COPY-ERROR-SENTINEL-ZZ'
     vi.mocked(copyOutput).mockResolvedValue({
       copied: false,
       hidden: false,
-      copyError: new Error('Copy failed'),
+      copyError: new Error(COPY_ERROR_SENTINEL),
     })
     const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     renderActions({ outputText: 'Xin chào' })
@@ -203,8 +206,14 @@ describe('EditorOutputActions copy', () => {
     fireEvent.click(screen.getByText('Copy'))
 
     await waitFor(() => {
-      expect(consoleSpy).toHaveBeenCalledWith('Failed to copy:', expect.any(Error))
+      expect(consoleSpy).toHaveBeenCalledTimes(1)
     })
+    const args = consoleSpy.mock.calls[0] as unknown[]
+    expect(args).toHaveLength(1)
+    expect(typeof args[0]).toBe('string')
+    expect(args[0] as string).not.toContain(COPY_ERROR_SENTINEL)
+    expect(args[0] as string).not.toContain('Xin chào')
+
     expect(screen.queryByText('Copied')).not.toBeInTheDocument()
     // Not merely "no Copied label": the button keeps its exact idle class list and icon.
     expectCopyButton('idle')
