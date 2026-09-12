@@ -1,18 +1,15 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "enables the default permissions",
+  "description": "the native authority the frontend actually uses: window event listening, hide, always-on-top, and a clipboard write",
   "windows": [
     "main"
   ],
   "permissions": [
-    "core:default",
-    "shell:allow-open",
-    "global-shortcut:allow-register",
-    "global-shortcut:allow-unregister",
-    "clipboard-manager:allow-read-text",
-    "clipboard-manager:allow-write-text",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "core:window:allow-hide",
     "core:window:allow-set-always-on-top",
-    "core:window:allow-hide"
+    "clipboard-manager:allow-write-text"
   ]
 }
