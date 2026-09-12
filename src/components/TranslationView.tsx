@@ -1,23 +1,13 @@
-import { useState, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
-import { copyOutput } from '../lib/copy-output'
 import { useAppStore } from '../stores/appStore'
-import { useSettingsStore } from '../stores/settingsStore'
 import { useTranslation as useTranslationHook } from '../hooks/useTranslation'
-import { useSpeechToText } from '../hooks/useSpeechToText'
 import { SUPPORTED_LANGUAGES, getLanguageNativeName } from '../lib/language'
 import { LanguageSelector } from './LanguageSelector'
-import { MicButton } from './MicButton'
-import { SpeechPreview } from './SpeechPreview'
-import { ClearInputButton } from './ClearInputButton'
+import { EditorInputPanel } from './editor/editor-input-panel'
+import { EditorOutputBody } from './editor/editor-output-body'
+import { EditorOutputActions } from './editor/editor-output-actions'
 
-const SPEECH_LANGS = [
-  { code: 'en', label: 'EN' },
-  { code: 'ja', label: 'JA' },
-  { code: 'vi', label: 'VI' },
-  { code: 'zh', label: 'ZH' },
-  { code: 'ko', label: 'KO' },
-]
+const SKELETON_WIDTHS = ['w-full', 'w-5/6', 'w-4/6', 'w-3/4']
 
 export function TranslationView() {
   const { t } = useTranslation(['common', 'messages'])
@@ -29,40 +19,7 @@ export function TranslationView() {
     latestDetectedSourceLang,
     targetLang, setTargetLang
   } = useAppStore()
-  const { speechLang, setSpeechLang } = useSettingsStore()
   const { translate } = useTranslationHook()
-  const [copied, setCopied] = useState(false)
-
-  // Callback to append speech text to input
-  const handleTextReady = useCallback((text: string) => {
-    const current = useAppStore.getState().inputText
-    setInputText(current ? current + ' ' + text : text)
-  }, [setInputText])
-
-  // Speech-to-text hook with continuous mode
-  const {
-    isListening,
-    isSupported,
-    transcript,
-    interimTranscript,
-    silenceDetected,
-    error: speechError,
-    toggleListening,
-  } = useSpeechToText({
-    lang: speechLang,
-    onTextReady: handleTextReady,
-  })
-
-  const handleCopy = async () => {
-    if (!outputText) return
-    const result = await copyOutput(outputText)
-    if (!result.copied) {
-      console.error('Failed to copy:', result.copyError)
-      return
-    }
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
-  }
 
   const handleRegenerate = () => {
     if (inputText.trim()) {
@@ -82,95 +39,36 @@ export function TranslationView() {
     ? `${t('autoDetect')} (${getLanguageNativeName(latestDetectedSourceLang)})`
     : t('autoDetect')
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    // Cmd+Enter (Mac) or Ctrl+Enter (Windows/Linux) to translate
-    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
-      e.preventDefault()
-      handleRegenerate()
-    }
-  }
-
   return (
     <div className="flex flex-col h-full">
       {/* Main Layout - Input | Swap | Output */}
       <div className="flex-1 flex gap-2 p-4 overflow-hidden">
         {/* Left: Input */}
-        <div className="flex-1 flex flex-col glass-card overflow-hidden relative">
-          {/* Source Language Header */}
-          <div className="px-3 py-2 border-b border-[var(--border-color)] flex items-center justify-between">
-            <select
-              value={sourceLang}
-              onChange={(e) => setSourceLang(e.target.value)}
-              className="select-glass text-sm"
-            >
-              {SUPPORTED_LANGUAGES.map((lang) => (
-                <option key={lang.code} value={lang.code}>
-                  {lang.code === 'auto' ? autoSourceLabel : lang.nativeName}
-                </option>
-              ))}
-            </select>
-          </div>
-          <ClearInputButton
-            onClick={handleClearInput}
-            visible={inputText.length > 0}
-          />
-          <textarea
-            value={inputText}
-            onChange={(e) => setInputText(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder={t('messages:placeholders.enterTextTranslate')}
-            className="
-              flex-1 p-4 pr-10 bg-transparent resize-none
-              text-[var(--text-primary)] text-base leading-relaxed
-              placeholder:text-[var(--text-tertiary)]
-              focus:outline-none
-            "
-          />
-          <div className="px-3 py-1.5 border-t border-[var(--border-color)] flex items-center justify-between">
-            {/* Left: Mic button with language selector */}
-            <div className="flex items-center">
-              <div className="relative">
-                <div className="button-group">
-                  <MicButton
-                    isListening={isListening}
-                    isSupported={isSupported}
-                    silenceDetected={silenceDetected}
-                    onClick={toggleListening}
-                    disabled={isLoading}
-                  />
-                  {isSupported && (
-                    <select
-                      value={speechLang}
-                      onChange={(e) => setSpeechLang(e.target.value)}
-                      className="speech-lang-select"
-                      title="Speech language"
-                      aria-label="Speech language"
-                    >
-                      {SPEECH_LANGS.map(({ code, label }) => (
-                        <option key={code} value={code}>{label}</option>
-                      ))}
-                    </select>
-                  )}
-                </div>
-                <SpeechPreview
-                  isVisible={isListening}
-                  transcript={transcript}
-                  interimTranscript={interimTranscript}
-                />
-              </div>
-              {/* A failed attempt stays retryable - report it next to the control */}
-              {speechError && (
-                <span role="alert" className="ml-2 text-[10px] text-[var(--error)]">
-                  {speechError}
-                </span>
-              )}
+        <EditorInputPanel
+          className="flex-1 flex flex-col glass-card overflow-hidden relative"
+          header={
+            /* Source Language Header */
+            <div className="px-3 py-2 border-b border-[var(--border-color)] flex items-center justify-between">
+              <select
+                value={sourceLang}
+                onChange={(e) => setSourceLang(e.target.value)}
+                className="select-glass text-sm"
+              >
+                {SUPPORTED_LANGUAGES.map((lang) => (
+                  <option key={lang.code} value={lang.code}>
+                    {lang.code === 'auto' ? autoSourceLabel : lang.nativeName}
+                  </option>
+                ))}
+              </select>
             </div>
-            {/* Right: Char count */}
-            <span className="text-[10px] text-[var(--text-tertiary)]">
-              {inputText.length} {t('chars')}
-            </span>
-          </div>
-        </div>
+          }
+          value={inputText}
+          onChange={setInputText}
+          onClear={handleClearInput}
+          onSubmit={handleRegenerate}
+          placeholder={t('messages:placeholders.enterTextTranslate')}
+          speechDisabled={isLoading}
+        />
 
         {/* Center: Swap Button */}
         <div className="flex items-center justify-center">
@@ -193,99 +91,23 @@ export function TranslationView() {
               ))}
             </select>
           </div>
-          <div className="flex-1 p-4 overflow-auto">
-            {isLoading ? (
-              <div className="space-y-3 animate-pulse">
-                <div className="h-4 bg-[var(--glass-bg)] rounded w-full"></div>
-                <div className="h-4 bg-[var(--glass-bg)] rounded w-5/6"></div>
-                <div className="h-4 bg-[var(--glass-bg)] rounded w-4/6"></div>
-                <div className="h-4 bg-[var(--glass-bg)] rounded w-3/4"></div>
-              </div>
-            ) : error ? (
-              <div className="text-[var(--error)] text-sm">{error}</div>
-            ) : outputText ? (
-              <div className="text-[var(--text-primary)] text-base leading-relaxed whitespace-pre-wrap">
-                {outputText}
-              </div>
-            ) : (
-              <div className="text-[var(--text-tertiary)] text-sm">
-                {t('messages:placeholders.translationAppears')}
-              </div>
-            )}
-          </div>
-          {/* Action footer */}
-          <div className="px-3 py-2 border-t border-[var(--border-color)] flex items-center justify-between">
-            {isLoading ? (
-              <>
-                <div className="flex items-center gap-1.5">
-                  <span className="relative flex h-2 w-2">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[var(--accent-blue)] opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-[var(--accent-blue)]"></span>
-                  </span>
-                  <span className="text-xs text-[var(--accent-blue)]">{t('translating')}</span>
-                </div>
-                <div />
-              </>
-            ) : outputText ? (
-              <>
-                <div className="flex items-center gap-1.5 text-[var(--success)]">
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                  </svg>
-                  <span className="text-xs">{t('done')}</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={handleRegenerate}
-                    className="flex items-center gap-1.5 px-3 py-1 text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--glass-bg)] border border-[var(--border-color)] rounded-md transition-colors"
-                    title={t('reTranslate')}
-                  >
-                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                    </svg>
-                    <span>{t('reTranslate')}</span>
-                  </button>
-                  <button
-                    onClick={handleCopy}
-                    className={`flex items-center gap-1.5 px-3 py-1 text-xs font-medium border rounded-md transition-colors ${
-                      copied
-                        ? 'text-[var(--success)] border-[var(--success)] bg-[var(--success)]/10'
-                        : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--glass-bg)] border-[var(--border-color)]'
-                    }`}
-                    title={t('copy')}
-                  >
-                    {copied ? (
-                      <>
-                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                        </svg>
-                        <span>{t('copied')}</span>
-                      </>
-                    ) : (
-                      <>
-                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                        </svg>
-                        <span>{t('copy')}</span>
-                      </>
-                    )}
-                  </button>
-                </div>
-              </>
-            ) : (
-              <>
-                <div />
-                <button
-                  onClick={handleRegenerate}
-                  disabled={!inputText.trim()}
-                  className="flex items-center gap-1.5 px-3 py-1 text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--glass-bg)] border border-[var(--border-color)] rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  title="Translate (⌘+Enter)"
-                >
-                  {t('translate')}
-                </button>
-              </>
-            )}
-          </div>
+          <EditorOutputBody
+            isLoading={isLoading}
+            error={error}
+            outputText={outputText}
+            placeholder={t('messages:placeholders.translationAppears')}
+            skeletonWidths={SKELETON_WIDTHS}
+          />
+          <EditorOutputActions
+            isLoading={isLoading}
+            loadingLabel={t('translating')}
+            outputText={outputText}
+            onRegenerate={handleRegenerate}
+            regenerateLabel={t('reTranslate')}
+            submitLabel={t('translate')}
+            submitTitle="Translate (⌘+Enter)"
+            submitDisabled={!inputText.trim()}
+          />
         </div>
       </div>
     </div>
