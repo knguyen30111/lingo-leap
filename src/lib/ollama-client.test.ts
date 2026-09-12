@@ -59,6 +59,64 @@ describe('OllamaClient', () => {
         'http://a:1111/api/generate',
       ])
     })
+
+    // The webview policy permits http: and https: in connect-src precisely
+    // because the endpoint is user-configurable. That allowance is only worth
+    // having if the client really does honour an arbitrary host, so these pin
+    // the behaviour the policy depends on: no rewriting, no scheme
+    // substitution, and no loopback fallback.
+    describe.each([
+      ['http', 'http://ollama.example.internal:11434'],
+      ['https', 'https://ollama.example.com'],
+    ])('a configured %s host reaches every endpoint unchanged', (_scheme, host) => {
+      it('requests /api/tags against that host', async () => {
+        mockFetch.mockResolvedValueOnce({ ok: true })
+
+        await new OllamaClient(host).checkHealth()
+
+        expect(mockFetch.mock.calls[0][0]).toBe(`${host}/api/tags`)
+      })
+
+      it('requests /api/generate against that host', async () => {
+        mockFetch.mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({ response: 'ok' }),
+        })
+
+        await new OllamaClient(host).generate({ model: 'm', prompt: 'p' })
+
+        expect(mockFetch.mock.calls[0][0]).toBe(`${host}/api/generate`)
+      })
+
+      it('requests /api/pull against that host', async () => {
+        const encoder = new TextEncoder()
+        let read = false
+        mockFetch.mockResolvedValueOnce({
+          ok: true,
+          body: {
+            getReader: () => ({
+              read: async () => {
+                if (read) return { done: true, value: undefined }
+                read = true
+                return { done: false, value: encoder.encode(JSON.stringify({ status: 'done' }) + '\n') }
+              },
+            }),
+          },
+        })
+
+        await new OllamaClient(host).pullModel('m')
+
+        expect(mockFetch.mock.calls[0][0]).toBe(`${host}/api/pull`)
+      })
+
+      it('reports that host verbatim and never falls back to loopback', () => {
+        const configured = new OllamaClient(host)
+
+        expect(configured.getBaseUrl()).toBe(host)
+        expect(configured.getBaseUrl()).not.toContain('localhost')
+        expect(configured.getBaseUrl()).not.toContain('127.0.0.1')
+      })
+    })
   })
 
   describe('checkHealth', () => {

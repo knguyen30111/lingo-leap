@@ -1,6 +1,7 @@
 import { createRepo, repoRootFromArgv } from './lib/repo.mjs'
 import { formatRuleFindings } from './lib/findings.mjs'
 import { nodePinRule } from './rules/node-pin.mjs'
+import { cspRule } from './rules/csp.mjs'
 
 // Exit codes are part of this tool's contract:
 //   0 every rule passed
@@ -12,7 +13,7 @@ export const EXIT_OK = 0
 export const EXIT_FINDINGS = 1
 export const EXIT_CHECKER_ERROR = 2
 
-export const rules = [nodePinRule]
+export const rules = [nodePinRule, cspRule]
 
 /**
  * @param {object} options
