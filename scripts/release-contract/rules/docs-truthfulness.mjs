@@ -141,6 +141,14 @@ const FLOOR_WORDING = String.raw`(?:at least|a minimum of|minimum|floors?|no (?:
 // that promises the payload the DMG's floor from satisfying both checks at once.
 const FLOOR_GAP = String.raw`(?:(?!\bMiB\b|\.app\b|\bDMG\b)[^.]){0,80}`
 
+// Wording that turns a stated minimum into a denial that one exists. Unlike the
+// sweep's markers below, it cannot contain "requires": requiring a minimum is
+// precisely what a floor claim says, so treating that as a denial would reject
+// the true sentence. What it has to catch is a document that writes the floor
+// vocabulary and the figure while saying the floor is not there.
+const FLOOR_DENIAL =
+  /\b(?:not|no|never|neither|nor|nothing|none|without|lacks?|lacking|absent|cannot)\b|n['\u2019]t\b/i
+
 // A size denial. These are not subject to the negation exemption below, because
 // the denial IS the negated form and the verifier now asserts both floors.
 const FORBIDDEN_SIZE_DENIALS = [
@@ -212,7 +220,12 @@ export function statesFloor(text, artifactSource, figure) {
     `${artifactSource}${FLOOR_GAP}\\b${FLOOR_WORDING}\\b${FLOOR_GAP}${size}`, 'i')
   const figureFirst = new RegExp(
     `${size}${FLOOR_GAP}\\b${FLOOR_WORDING}\\b${FLOOR_GAP}${artifactSource}`, 'i')
-  return artifactFirst.test(text) || figureFirst.test(text)
+  for (const pattern of [artifactFirst, figureFirst]) {
+    for (const [start, end] of matchRanges(pattern, text)) {
+      if (!FLOOR_DENIAL.test(claimContext(text, start, end))) return true
+    }
+  }
+  return false
 }
 
 /**
@@ -228,13 +241,17 @@ export function ignoredDirectories(gitignoreText) {
     .map(line => line.replace(/^\//, ''))
 }
 
-// Where one claim on a line stops governing the next. A denial reaches across
-// the commas of a list — "not notarized, stapled, or Developer ID signed" denies
-// all three — but a contrastive conjunction or a semicolon starts a claim the
-// denial no longer covers, which is exactly the bypass "They are NOT notarized,
-// but the verifier confirms the app launches" relied on. Commas are deliberately
-// not separators, because that is how an enumeration under one denial is written.
-const CLAIM_SEPARATOR = /;|\b(?:but|while|although|though|however|yet|whereas)\b/gi
+// Where one claim stops governing the next: the end of a sentence, a semicolon
+// or colon that introduces a new statement, a dash that interrupts one, and the
+// conjunctions English uses to contrast. A denial reaches across the commas of a
+// list — "not notarized, stapled, or Developer ID signed" denies all three — so
+// commas are deliberately not separators, because that is how an enumeration
+// under one denial is written.
+//
+// A full stop only separates when something follows it, which keeps `.app`,
+// `release.md`, and `1.1.0` inside the claim they belong to.
+const CLAIM_SEPARATOR =
+  /[.;:](?=\s|$)|[\u2014\u2013]|\b(?:but|while|although|though|however|yet|whereas)\b/gi
 
 /**
  * The segments of a line, as `[start, end)` offsets into it: the stretches
@@ -262,6 +279,39 @@ export function claimContext(line, start, end) {
     .filter(([from, to]) => from < end && to > start)
     .map(([from, to]) => line.slice(from, to))
     .join(' ')
+}
+
+/**
+ * Every place `pattern` matches `text`, as `[start, end)` offsets.
+ *
+ * All of them matter: a denied claim earlier in a line must not hide an
+ * affirmative one written after it, and reading only the first match is what
+ * let "the bundle is not notarized; the DMG is notarized" through. The global
+ * copy is built here rather than kept on the pattern, so no `lastIndex` from
+ * one line survives into the next.
+ */
+export function matchRanges(pattern, text) {
+  const flags = pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`
+  return [...text.matchAll(new RegExp(pattern.source, flags))]
+    .map(match => [match.index, match.index + match[0].length])
+}
+
+/**
+ * Whether `line` makes the claim `pattern` describes without denying it.
+ *
+ * Each claim is read twice. Once inside the single segment that carries it,
+ * which is where its own denial has to stand — that is what catches a claim
+ * written after a denial of the opposite. And once against the whole line, so a
+ * claim that straddles a separator is still caught, excused only by a denial in
+ * the segments it actually touches.
+ */
+export function claimsWithoutDenial(pattern, line) {
+  for (const [from, to] of claimSegments(line)) {
+    const segment = line.slice(from, to)
+    if (matchRanges(pattern, segment).length > 0 && !NEGATED_CONTEXT.test(segment)) return true
+  }
+  return matchRanges(pattern, line)
+    .some(([start, end]) => !NEGATED_CONTEXT.test(claimContext(line, start, end)))
 }
 
 export function readModelDefault(storeText, field) {
@@ -486,15 +536,93 @@ function checkCitedPaths(ctx, findings, files) {
   if (gitignore === null) return
 
   for (const directory of ignoredDirectories(gitignore)) {
-    const citation = new RegExp(`${escapeRegExp(directory)}[A-Za-z0-9._/-]+`, 'g')
+    const escaped = escapeRegExp(directory)
+    // A file beneath the directory, and the directory itself when a document
+    // points at it as a path rather than naming it in prose: inside a code span,
+    // or as a link destination. The trailing slash is what separates those two
+    // cases — the README's `node_modules` build-cache sentence names a directory
+    // without sending anybody to one.
+    const underneath = new RegExp(`${escaped}[A-Za-z0-9._/-]+`, 'g')
+    const bare = new RegExp(`\`${escaped}\`|\\]\\((?:\\.{0,2}/)?${escaped}\\)`)
+
     for (const file of files) {
       const text = ctx.readText(file)
       if (text === null) continue
-      for (const match of new Set(text.match(citation) ?? [])) {
+      const cited = new Set(text.match(underneath) ?? [])
+      if (bare.test(text)) cited.add(directory)
+      for (const match of cited) {
         findings.push(finding({
           message: `${file} cites ${match}, which ${GITIGNORE} excludes, so a reader of the repository cannot open it`,
           file,
           evidence: match,
+        }))
+      }
+    }
+  }
+}
+
+/**
+ * A shell block a document publishes, which a reader copies and runs whole.
+ *
+ * Two things make such a block a false instruction. It can expand a variable
+ * nothing in it defines, in which case the command measures whatever the
+ * reader's shell happened to hold — nothing, usually. And it can define its own
+ * inputs without `set -euo pipefail`, in which case a failed discovery step
+ * still exits 0 and prints an empty line, which reads like a measurement.
+ *
+ * Names the block cannot define are exempt: they come from the environment the
+ * reader already has.
+ */
+const SHELL_FENCE = /^```(?:sh|bash|zsh)\n([\s\S]*?)^```/gm
+const SHELL_ENVIRONMENT = new Set(['HOME', 'PATH', 'PWD', 'SHELL', 'TMPDIR', 'USER', 'LANG', 'CI'])
+const FAIL_FAST = 'set -euo pipefail'
+
+export function shellBlocks(markdown) {
+  return [...markdown.matchAll(SHELL_FENCE)].map(match => match[1])
+}
+
+/** The variable names a block assigns, from an assignment or a loop. */
+export function shellDefinitions(block) {
+  const names = new Set()
+  for (const pattern of [
+    /^\s*(?:export |local |readonly |typeset )?([A-Za-z_][A-Za-z0-9_]*)=/gm,
+    /\bfor\s+([A-Za-z_][A-Za-z0-9_]*)\s+in\b/g,
+    /\bread\s+(?:-r\s+)?([A-Za-z_][A-Za-z0-9_]*)\b/g,
+  ]) {
+    for (const match of block.matchAll(pattern)) names.add(match[1])
+  }
+  return names
+}
+
+/** The variable names a block expands, positional parameters excluded. */
+export function shellExpansions(block) {
+  return new Set([...block.matchAll(/\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?/g)].map(match => match[1]))
+}
+
+function checkShellBlocks(ctx, findings, files) {
+  for (const file of files) {
+    const text = ctx.readText(file)
+    if (text === null) continue
+    for (const block of shellBlocks(text)) {
+      const defined = shellDefinitions(block)
+      const expanded = shellExpansions(block)
+      for (const name of expanded) {
+        if (defined.has(name) || SHELL_ENVIRONMENT.has(name)) continue
+        findings.push(finding({
+          message: `${file} documents a shell block that expands $${name} without defining it, so the command a reader copies measures nothing`,
+          file,
+          evidence: `$${name}`,
+        }))
+      }
+      // A block that both defines and uses its own inputs is a script, and a
+      // script that does not stop at the first failure reports success for a
+      // measurement it never took.
+      const isScript = [...expanded].some(name => defined.has(name))
+      if (isScript && !block.includes(FAIL_FAST)) {
+        findings.push(finding({
+          message: `${file} documents a shell block that defines and expands variables without \`${FAIL_FAST}\`, so a failed step still reports success`,
+          file,
+          evidence: FAIL_FAST,
         }))
       }
     }
@@ -746,6 +874,7 @@ export const docsTruthfulnessRule = {
     checkHistoricalAssets(ctx, findings)
     checkRollback(ctx, findings)
     checkCitedPaths(ctx, findings, [README, CONTRIBUTING, ...listDocsFiles(ctx.root)])
+    checkShellBlocks(ctx, findings, [README, CONTRIBUTING, ...listDocsFiles(ctx.root)])
 
     // The packaging workflow's echoed status text is read exactly like a
     // document: it is prose a reader trusts about the run in front of them, and
@@ -761,11 +890,10 @@ export const docsTruthfulnessRule = {
           [FORBIDDEN_SWEEPING_ASSET_CLAIMS, 'claims a published asset fails every assertion, instead of naming the ones it fails'],
         ]) {
           for (const pattern of patterns) {
-            // The claim is matched against the whole line, so one that straddles
-            // a clause boundary is still caught; the denial that would excuse it
-            // has to stand in the clauses the match actually touches.
-            const match = pattern.exec(line)
-            if (match && !NEGATED_CONTEXT.test(claimContext(line, match.index, match.index + match[0].length))) {
+            // Every occurrence is read, and each against the claim that carries
+            // it: a line that denies something and then asserts it makes the
+            // assertion, whichever of the two a reader meets first.
+            if (claimsWithoutDenial(pattern, line)) {
               findings.push(finding({ message: `${file} ${message}`, file, evidence: line.trim() }))
             }
           }
