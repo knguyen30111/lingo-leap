@@ -6,7 +6,7 @@
     "disabled": "Đã tắt"
   },
   "errors": {
-    "ollamaConnection": "Không thể kết nối Ollama. Đảm bảo Ollama đang chạy tại localhost:11434"
+    "ollamaConnection": "Không thể kết nối Ollama tại {{host}}. Đảm bảo Ollama đang chạy hoặc đổi máy chủ trong Cài đặt."
   },
   "placeholders": {
     "enterTextTranslate": "Nhập văn bản cần dịch...",

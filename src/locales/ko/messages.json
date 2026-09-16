@@ -6,7 +6,7 @@
     "disabled": "비활성화됨"
   },
   "errors": {
-    "ollamaConnection": "Ollama에 연결할 수 없습니다. localhost:11434에서 Ollama가 실행 중인지 확인하세요"
+    "ollamaConnection": "{{host}}에서 Ollama에 연결할 수 없습니다. Ollama가 실행 중인지 확인하거나 설정에서 호스트를 변경하세요."
   },
   "placeholders": {
     "enterTextTranslate": "번역할 텍스트를 입력하세요...",

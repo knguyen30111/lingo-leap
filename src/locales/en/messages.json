@@ -6,7 +6,7 @@
     "disabled": "Disabled"
   },
   "errors": {
-    "ollamaConnection": "Cannot connect to Ollama. Make sure it is running on localhost:11434"
+    "ollamaConnection": "Cannot connect to Ollama at {{host}}. Make sure Ollama is running, or change the host in Settings."
   },
   "placeholders": {
     "enterTextTranslate": "Enter text to translate...",

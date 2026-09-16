@@ -6,7 +6,7 @@
     "disabled": "無効"
   },
   "errors": {
-    "ollamaConnection": "Ollamaに接続できません。localhost:11434でOllamaが実行中か確認してください"
+    "ollamaConnection": "{{host}} のOllamaに接続できません。Ollamaが実行中か確認するか、設定でホストを変更してください"
   },
   "placeholders": {
     "enterTextTranslate": "翻訳するテキストを入力...",
