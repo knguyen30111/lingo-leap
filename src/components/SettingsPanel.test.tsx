@@ -330,12 +330,12 @@ describe('SettingsPanel', () => {
     render(<SettingsPanel onClose={onClose} />)
 
     const modal = screen.getByText('Settings').closest('.settings-modal')
-    if (modal) {
-      const event = new MouseEvent('click', { bubbles: true })
-      const stopPropagation = vi.spyOn(event, 'stopPropagation')
-      modal.dispatchEvent(event)
-      // The stopPropagation is called internally
-    }
+    expect(modal).not.toBeNull()
+
+    fireEvent.click(modal!)
+
+    // Clicks inside the modal must not bubble out and dismiss it
+    expect(onClose).not.toHaveBeenCalled()
   })
 
   it('renders version in footer', () => {

@@ -38,11 +38,11 @@ describe('useCorrection', () => {
     useAppStore.setState({
       inputText: 'Hello wrold',
       outputText: '',
-      correctionLevel: 'light',
+      correctionLevel: 'fix',
       isLoading: false,
       error: null,
       changes: [],
-      changesLoading: false,
+      isChangesLoading: false,
     })
 
     useSettingsStore.setState({
@@ -199,10 +199,10 @@ describe('useCorrection', () => {
     const { result } = renderHook(() => useCorrection())
 
     act(() => {
-      result.current.setLevel('heavy')
+      result.current.setLevel('rewrite')
     })
 
-    expect(useAppStore.getState().correctionLevel).toBe('heavy')
+    expect(useAppStore.getState().correctionLevel).toBe('rewrite')
   })
 
   it('cancel stops ongoing correction', async () => {
@@ -254,7 +254,7 @@ describe('useCorrection', () => {
     const { result } = renderHook(() => useCorrection())
 
     await act(async () => {
-      await result.current.correct(undefined, 'heavy')
+      await result.current.correct(undefined, 'rewrite')
     })
 
     expect(ollamaClient.generate).toHaveBeenCalled()
