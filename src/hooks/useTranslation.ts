@@ -36,6 +36,7 @@ export function useTranslation() {
       abortRef.current.abort()
     }
     abortRef.current = new AbortController()
+    const signal = abortRef.current.signal
 
     setLoading(true)
     setError(null)
@@ -65,12 +66,12 @@ export function useTranslation() {
       let result = ''
 
       if (useStreaming) {
-        for await (const chunk of service.translateStream(textToProcess, detectedSource, targetLang)) {
+        for await (const chunk of service.translateStream(textToProcess, detectedSource, targetLang, signal)) {
           result = chunk
           setOutputText(result)
         }
       } else {
-        const response = await service.translate(textToProcess, detectedSource, targetLang)
+        const response = await service.translate(textToProcess, detectedSource, targetLang, signal)
         result = response.translated
         setOutputText(result)
       }

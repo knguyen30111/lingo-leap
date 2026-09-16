@@ -29,7 +29,7 @@ export function TranslationView() {
     targetLang, setTargetLang
   } = useAppStore()
   const { speechLang, setSpeechLang } = useSettingsStore()
-  const { translate } = useTranslationHook()
+  const { translate, cancel } = useTranslationHook()
   const [copied, setCopied] = useState(false)
 
   // Callback to append speech text to input
@@ -62,10 +62,34 @@ export function TranslationView() {
     }
   }
 
+  // Primary action: may serve a cached result for identical input.
+  const handleSubmit = () => {
+    if (isLoading) return
+    if (inputText.trim()) {
+      translate()
+    }
+  }
+
+  // Explicit user request for a fresh result, so the cache is bypassed.
   const handleRegenerate = () => {
+    if (isLoading) return
     if (inputText.trim()) {
       translate(undefined, { skipCache: true })
     }
+  }
+
+  // A finished translation is only valid for the pair it was produced with, so
+  // changing either language must drop it rather than relabel it.
+  const handleSourceLangChange = (lang: string) => {
+    setSourceLang(lang)
+    setOutputText('')
+    setError(null)
+  }
+
+  const handleTargetLangChange = (lang: string) => {
+    setTargetLang(lang)
+    setOutputText('')
+    setError(null)
   }
 
   const handleClearInput = () => {
@@ -78,7 +102,7 @@ export function TranslationView() {
     // Cmd+Enter (Mac) or Ctrl+Enter (Windows/Linux) to translate
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
       e.preventDefault()
-      handleRegenerate()
+      handleSubmit()
     }
   }
 
@@ -92,7 +116,7 @@ export function TranslationView() {
           <div className="px-3 py-2 border-b border-[var(--border-color)] flex items-center justify-between">
             <select
               value={sourceLang}
-              onChange={(e) => setSourceLang(e.target.value)}
+              onChange={(e) => handleSourceLangChange(e.target.value)}
               className="select-glass text-sm"
             >
               {SUPPORTED_LANGUAGES.map((lang) => (
@@ -168,7 +192,7 @@ export function TranslationView() {
           <div className="px-3 py-2 border-b border-[var(--border-color)] flex items-center justify-between">
             <select
               value={targetLang}
-              onChange={(e) => setTargetLang(e.target.value)}
+              onChange={(e) => handleTargetLangChange(e.target.value)}
               className="select-glass text-sm"
             >
               {SUPPORTED_LANGUAGES.filter(l => l.code !== 'auto').map((lang) => (
@@ -209,7 +233,13 @@ export function TranslationView() {
                   </span>
                   <span className="text-xs text-[var(--accent-blue)]">{t('translating')}</span>
                 </div>
-                <div />
+                <button
+                  onClick={cancel}
+                  className="px-3 py-1 text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--glass-bg)] border border-[var(--border-color)] rounded-md transition-colors"
+                  title={t('cancel')}
+                >
+                  {t('cancel')}
+                </button>
               </>
             ) : outputText ? (
               <>
@@ -261,7 +291,7 @@ export function TranslationView() {
               <>
                 <div />
                 <button
-                  onClick={handleRegenerate}
+                  onClick={handleSubmit}
                   disabled={!inputText.trim()}
                   className="flex items-center gap-1.5 px-3 py-1 text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--glass-bg)] border border-[var(--border-color)] rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   title="Translate (⌘+Enter)"

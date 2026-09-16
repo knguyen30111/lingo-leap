@@ -76,7 +76,7 @@ export function useCorrection() {
         temperature: 0.1,
         num_ctx: 2048,
       },
-    }).then(response => {
+    }, currentAbort.signal).then(response => {
       // Check if aborted
       if (currentAbort.signal.aborted) {
         console.log('[Changes] Extraction aborted')
@@ -178,6 +178,7 @@ export function useCorrection() {
       abortRef.current.abort()
     }
     abortRef.current = new AbortController()
+    const signal = abortRef.current.signal
 
     // Cancel any ongoing changes extraction
     if (changesAbortRef.current) {
@@ -229,7 +230,7 @@ export function useCorrection() {
             temperature: 0.3,
             num_ctx: 2048,
           },
-        })) {
+        }, signal)) {
           result += chunk
           const cleaned = cleanModelOutput(result)
           setOutputText(cleaned)
@@ -243,7 +244,7 @@ export function useCorrection() {
             temperature: 0.3,
             num_ctx: 2048,
           },
-        })
+        }, signal)
         result = cleanModelOutput(response)
         setOutputText(result)
       }
@@ -288,9 +289,16 @@ export function useCorrection() {
     if (abortRef.current) {
       abortRef.current.abort()
       abortRef.current = null
-      setLoading(false)
     }
-  }, [setLoading])
+    // The background changes pass outlives the correction request, so it has to
+    // be stopped too or it would keep streaming into a cancelled result.
+    if (changesAbortRef.current) {
+      changesAbortRef.current.abort()
+      changesAbortRef.current = null
+    }
+    setLoading(false)
+    setChangesLoading(false)
+  }, [setLoading, setChangesLoading])
 
   const setLevel = useCallback((level: CorrectionLevel) => {
     setCorrectionLevel(level)

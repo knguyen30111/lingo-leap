@@ -43,11 +43,12 @@ export class OllamaClient {
 
   // === Generation ===
 
-  async generate(request: OllamaGenerateRequest): Promise<string> {
+  async generate(request: OllamaGenerateRequest, signal?: AbortSignal): Promise<string> {
     const response = await fetch(`${this.baseUrl}/api/generate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ...request, stream: false }),
+      signal,
     })
 
     if (!response.ok) {
@@ -61,7 +62,7 @@ export class OllamaClient {
   async generateFromPrompt(
     promptResult: PromptResult,
     modelName: string,
-    options: { temperature?: number; num_ctx?: number } = {}
+    options: { temperature?: number; num_ctx?: number; signal?: AbortSignal } = {}
   ): Promise<string> {
     return this.generate({
       model: modelName,
@@ -71,16 +72,17 @@ export class OllamaClient {
         temperature: options.temperature ?? 0.3,
         num_ctx: options.num_ctx ?? 2048,
       },
-    })
+    }, options.signal)
   }
 
   // === Streaming ===
 
-  async *generateStream(request: OllamaGenerateRequest): AsyncGenerator<string> {
+  async *generateStream(request: OllamaGenerateRequest, signal?: AbortSignal): AsyncGenerator<string> {
     const response = await fetch(`${this.baseUrl}/api/generate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ...request, stream: true }),
+      signal,
     })
 
     if (!response.ok) {
@@ -117,7 +119,7 @@ export class OllamaClient {
   async *streamFromPrompt(
     promptResult: PromptResult,
     modelName: string,
-    options: { temperature?: number; num_ctx?: number } = {}
+    options: { temperature?: number; num_ctx?: number; signal?: AbortSignal } = {}
   ): AsyncGenerator<string> {
     yield* this.generateStream({
       model: modelName,
@@ -127,7 +129,7 @@ export class OllamaClient {
         temperature: options.temperature ?? 0.3,
         num_ctx: options.num_ctx ?? 2048,
       },
-    })
+    }, options.signal)
   }
 
   // === JSON Generation with Retry ===
@@ -135,7 +137,8 @@ export class OllamaClient {
   async generateJSON<T>(
     promptResult: PromptResult,
     modelName: string,
-    maxRetries: number = 2
+    maxRetries: number = 2,
+    signal?: AbortSignal
   ): Promise<T> {
     let lastError: Error | null = null
 
@@ -143,10 +146,14 @@ export class OllamaClient {
       try {
         const response = await this.generateFromPrompt(promptResult, modelName, {
           temperature: 0.1, // Lower for JSON consistency
+          signal,
         })
         return this.parseJSON<T>(response)
       } catch (err) {
         lastError = err instanceof Error ? err : new Error(String(err))
+        // A cancelled request is not a parse failure - retrying would restart
+        // work the caller just asked to stop.
+        if (lastError.name === 'AbortError') throw lastError
         if (attempt < maxRetries) {
           console.warn(`JSON parse retry ${attempt + 1}/${maxRetries}`)
         }

@@ -30,12 +30,13 @@ export class TranslationService {
   async translate(
     text: string,
     sourceLang: string,
-    targetLang: string
+    targetLang: string,
+    signal?: AbortSignal
   ): Promise<TranslationResult> {
     const detectedSource = sourceLang === 'auto' ? detectLanguage(text) : sourceLang
     const prompt = buildTranslationPrompt(text, detectedSource, targetLang, this.modelName)
 
-    const response = await ollamaClient.generateFromPrompt(prompt, this.modelName)
+    const response = await ollamaClient.generateFromPrompt(prompt, this.modelName, { signal })
     const modelType = getModelType(this.modelName)
     const translated = cleanModelOutput(response, modelType)
 
@@ -50,14 +51,15 @@ export class TranslationService {
   async *translateStream(
     text: string,
     sourceLang: string,
-    targetLang: string
+    targetLang: string,
+    signal?: AbortSignal
   ): AsyncGenerator<string> {
     const detectedSource = sourceLang === 'auto' ? detectLanguage(text) : sourceLang
     const prompt = buildTranslationPrompt(text, detectedSource, targetLang, this.modelName)
     const modelType = getModelType(this.modelName)
 
     let accumulated = ''
-    for await (const chunk of ollamaClient.streamFromPrompt(prompt, this.modelName)) {
+    for await (const chunk of ollamaClient.streamFromPrompt(prompt, this.modelName, { signal })) {
       accumulated += chunk
       yield cleanModelOutput(accumulated, modelType)
     }

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { MainWindow } from '../components/MainWindow'
 import { useAppStore } from '../stores/appStore'
 import { useSettingsStore } from '../stores/settingsStore'
@@ -42,6 +42,7 @@ vi.mock('react-i18next', () => ({
         regenerate: 'Regenerate',
         copy: 'Copy',
         copied: 'Copied',
+        cancel: 'Cancel',
         generate: 'Generate',
         noChanges: 'No changes',
         changesAppear: 'Changes will appear here',
@@ -162,7 +163,7 @@ describe('App Integration', () => {
       }
 
       // Verify translate was called
-      expect(mockTranslate).toHaveBeenCalledWith(undefined, { skipCache: true })
+      expect(mockTranslate).toHaveBeenCalledWith()
     })
 
     it('translates with keyboard shortcut', async () => {
@@ -222,7 +223,7 @@ describe('App Integration', () => {
       fireEvent.click(screen.getByText('Generate'))
 
       // Verify correct was called
-      expect(mockCorrect).toHaveBeenCalledWith(undefined, undefined, { skipCache: true })
+      expect(mockCorrect).toHaveBeenCalledWith()
     })
 
     it('corrects with keyboard shortcut', () => {
