@@ -10,11 +10,15 @@ export function SpeechPreview({ isVisible, transcript, interimTranscript }: Spee
   const isFinal = Boolean(transcript && !interimTranscript)
 
   return (
+    // The panel is only faded out with opacity, so without aria-hidden it stays
+    // in the accessibility tree and screen readers announce "Listening..." even
+    // while the microphone is idle.
     <div
       className={`speech-preview ${isVisible ? 'visible' : ''}`}
       role="status"
       aria-live="polite"
       aria-atomic="true"
+      aria-hidden={!isVisible}
     >
       <div className={`speech-preview-text ${isEmpty ? 'empty' : ''} ${isFinal ? 'final' : ''}`}>
         {displayText || 'Start speaking...'}
