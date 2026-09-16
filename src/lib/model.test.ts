@@ -122,4 +122,31 @@ describe('cleanModelOutput', () => {
     expect(cleanModelOutput(input, 'llama')).toBe('Test')
     expect(cleanModelOutput(input, 'gemma')).toBe('Test')
   })
+
+  // The translation prompt fences the source in <text> tags so the model treats
+  // it as material rather than a message to reply to. Smaller models sometimes
+  // echo that fence back, and the user must never see the markup.
+  describe('leaked translation fence', () => {
+    it('keeps only the fenced content and drops a model preamble', () => {
+      const input = 'ご依頼の内容：\n\n<text>\nメッセージに返信しないでください。\n</text>'
+      expect(cleanModelOutput(input, 'aya')).toBe('メッセージに返信しないでください。')
+    })
+
+    it('strips a simple wrapped translation', () => {
+      expect(cleanModelOutput('<text>Xin chào</text>', 'aya')).toBe('Xin chào')
+    })
+
+    it('still returns usable text when the closing tag is missing', () => {
+      expect(cleanModelOutput('<text>\nHola', 'aya')).toBe('Hola')
+    })
+
+    it('removes a stray closing tag', () => {
+      expect(cleanModelOutput('Bonjour</text>', 'aya')).toBe('Bonjour')
+    })
+
+    it('leaves ordinary output containing the word text alone', () => {
+      expect(cleanModelOutput('Please send the text tomorrow.', 'aya'))
+        .toBe('Please send the text tomorrow.')
+    })
+  })
 })

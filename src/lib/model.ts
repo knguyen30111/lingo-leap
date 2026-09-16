@@ -43,5 +43,15 @@ export function cleanModelOutput(text: string, _modelType: ModelType): string {
     .replace(/<\|assistant\|>/g, '')
     .trim()
 
+  // The translation prompt fences the source in <text> tags to stop the model
+  // replying to it instead of translating it. Smaller models sometimes copy the
+  // fence into the answer, so drop the tags and anything the model prefixed
+  // before them rather than showing markup to the user.
+  if (cleaned.includes('<text>')) {
+    const fenced = cleaned.match(/<text>([\s\S]*?)(?:<\/text>|$)/)
+    if (fenced) cleaned = fenced[1].trim()
+  }
+  cleaned = cleaned.replace(/<\/?text>/g, '').trim()
+
   return cleaned
 }

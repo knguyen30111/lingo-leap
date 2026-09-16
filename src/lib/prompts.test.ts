@@ -1,42 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import {
-  getTranslationPrompt,
-  getCorrectionPrompt,
-  getChangesExtractionPrompt,
-} from './prompts'
+import { getCorrectionPrompt, getChangesExtractionPrompt } from './prompts'
 
-describe('getTranslationPrompt', () => {
-  it('builds prompt with specific languages', () => {
-    const result = getTranslationPrompt('Hello world', 'en', 'ja')
-
-    expect(result).toContain('English')
-    expect(result).toContain('Japanese')
-    expect(result).toContain('Hello world')
-  })
-
-  it('handles auto-detect source language', () => {
-    const result = getTranslationPrompt('Hello world', 'auto', 'ja')
-
-    expect(result).toContain('detected language')
-    expect(result).not.toContain('auto')
-  })
-
-  it('uses Aya format with special tokens', () => {
-    const result = getTranslationPrompt('test', 'en', 'ja')
-
-    expect(result).toContain('<|system|>')
-    expect(result).toContain('<|user|>')
-    expect(result).toContain('<|assistant|>')
-    expect(result).toContain('<|end|>')
-  })
-
-  it('includes translation rules', () => {
-    const result = getTranslationPrompt('test', 'en', 'ja')
-
-    expect(result).toContain('translator')
-    expect(result).toContain('ONLY the translation')
-  })
-})
 
 describe('getCorrectionPrompt', () => {
   describe('fix level', () => {
@@ -70,8 +34,7 @@ describe('getCorrectionPrompt', () => {
       const result = getCorrectionPrompt('Good text.', 'en', 'improve')
 
       expect(result).toContain('editor')
-      expect(result).toContain('stronger alternatives')
-      expect(result).toContain('readability')
+      expect(result).toContain('Cut words that carry no meaning')
       expect(result).toContain('Improve')
     })
 
@@ -89,8 +52,7 @@ describe('getCorrectionPrompt', () => {
 
       expect(result).toContain('writer')
       expect(result).toContain('Restructure')
-      expect(result).toContain('sophisticated vocabulary')
-      expect(result).toContain('professional')
+      expect(result).toContain('plain, everyday words')
       expect(result).toContain('Rewrite')
     })
 
@@ -110,6 +72,45 @@ describe('getCorrectionPrompt', () => {
     expect(result).toContain('Single words')
   })
 })
+
+  // The levels must differ in how much they restructure, not in how formal they
+  // sound: instructing the model to reach for grander words is what produced
+  // "highly productive" and "numerous initiatives" from a casual note.
+  describe('register and language guard rails', () => {
+    const levels = ['fix', 'improve', 'rewrite'] as const
+
+    it.each(levels)('does not ask %s to inflate the register', (level) => {
+      const result = getCorrectionPrompt('some text', 'en', level)
+
+      expect(result).not.toContain('sophisticated')
+      expect(result).not.toContain('stronger alternatives')
+      expect(result).not.toContain('professional')
+      expect(result).not.toContain('engaging and polished')
+    })
+
+    it.each(levels)('tells %s to preserve the register and avoid padding', (level) => {
+      const result = getCorrectionPrompt('some text', 'en', level)
+
+      expect(result).toContain('casual stays casual')
+      expect(result).toContain('never swap a common word for a rarer one')
+      expect(result).toContain('Do not pad')
+    })
+
+    it.each(levels)('locks %s to the language of the input', (level) => {
+      const result = getCorrectionPrompt('some text', 'ja', level)
+
+      expect(result).toContain('the output MUST be Japanese only')
+      expect(result).toContain('NEVER translate the text into another language')
+    })
+
+    // Phrasing a style rule as "in plain, direct language" reads to Qwen as a
+    // choice of output language and made it answer in Chinese on 4 of 6 runs.
+    it.each(levels)('keeps the word "language" out of the style rules for %s', (level) => {
+      const result = getCorrectionPrompt('some text', 'en', level)
+
+      expect(result).not.toContain('direct language')
+    })
+  })
 
 describe('getChangesExtractionPrompt', () => {
   it('builds prompt with original and corrected text', () => {

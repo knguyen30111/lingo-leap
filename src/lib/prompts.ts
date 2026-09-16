@@ -2,23 +2,35 @@
 
 import { getLanguageName } from './language'
 
-export function getTranslationPrompt(
-  text: string,
-  sourceLang: string,
-  targetLang: string
-): string {
-  const source = sourceLang === 'auto' ? 'the detected language' : getLanguageName(sourceLang)
-  const target = getLanguageName(targetLang)
+// Shared guard rails for every correction level.
+//
+// Style: the levels are meant to differ in how much they restructure, not in how
+// formal they sound. Without these rules the model reads "improve" and "rewrite"
+// as licence to raise the register - swapping everyday words for rarer ones and
+// padding the result - and hands back text the user would never have written.
+//
+// Language: correcting text is not translating it, but a model asked to
+// restructure freely will occasionally answer in another language, so the target
+// language is restated at every level. Keep the word "language" out of the style
+// instructions themselves - phrasing a rule as "in plain, direct language" reads
+// to Qwen as a choice of language and makes it answer in Chinese (measured at
+// 4/6 runs; rewording to "everyday words" took it to 0/6).
+export const styleRules = (langName: string) => `LANGUAGE:
+- The text is ${langName} and the output MUST be ${langName} only
+- NEVER translate the text into another language
+- NEVER mix in words or characters from another language
 
-  // Optimized prompt for Aya 8B - concise and direct
-  return `<|system|>You are an expert translator. Translate accurately while preserving meaning, tone, and style.
-STRICT RULES: Output ONLY the translation. NEVER explain, define, describe, or answer questions about the text. Single words = single word output. Translate literally.<|end|>
-<|user|>Translate from ${source} to ${target}:
+STYLE:
+- Keep the author's register: casual stays casual, formal stays formal
+- Keep contractions and everyday words; never swap a common word for a rarer one
+- Do not add adjectives, adverbs, facts, or opinions that are not already there
+- Do not pad: the result must not be longer than the original unless a fix needs it
+- No stock openers such as "It is worth noting" or "In today's world"`
 
-${text}<|end|>
-<|assistant|>`
-}
-
+// Deliberately NOT fenced in <text> tags the way the translation prompt is.
+// Fencing was measured here and made things worse: over 15 runs the plain form
+// never answered "can you send me the report tomorrow?" while the fenced form
+// replied "Sure, ..." 3 times.
 export function getCorrectionPrompt(
   text: string,
   language: string,
@@ -30,6 +42,7 @@ export function getCorrectionPrompt(
   if (level === 'fix') {
     return `<|im_start|>system
 You are a ${langName} proofreader. Fix ONLY spelling mistakes and grammar errors. Keep the exact same words, style, and structure.
+${styleRules(langName)}
 STRICT: NEVER explain, define, or describe. Single words = single word output. Just correct, nothing else.<|im_end|>
 <|im_start|>user
 Fix errors in this ${langName} text:
@@ -43,9 +56,10 @@ ${text}<|im_end|>
     return `<|im_start|>system
 You are a ${langName} editor. Your task:
 1. Fix all spelling and grammar errors
-2. Replace weak words with stronger alternatives
-3. Improve sentence flow and readability
-4. Keep the original meaning
+2. Cut words that carry no meaning
+3. Split sentences that are hard to follow
+4. Keep the original meaning, and keep the original wording wherever it already works
+${styleRules(langName)}
 STRICT: Output improved text ONLY. NEVER explain, define, or describe. Single words = single word output.<|im_end|>
 <|im_start|>user
 Improve this ${langName} text:
@@ -57,11 +71,12 @@ ${text}<|im_end|>
 
   // level === 'rewrite'
   return `<|im_start|>system
-You are a ${langName} writer. Completely rewrite the text to sound natural and professional:
-1. Restructure sentences for better flow
-2. Use sophisticated vocabulary
-3. Make it engaging and polished
-4. Preserve the core message
+You are a ${langName} writer. Rewrite the text so it reads clearly and naturally:
+1. Restructure and reorder sentences freely
+2. Say the same thing in plain, everyday words
+3. Preserve the core message and every fact
+4. Write it the way the author would on a good day, not the way a press release would
+${styleRules(langName)}
 STRICT: Output rewritten text ONLY. NEVER explain, define, or describe. Single words = single word/phrase output.<|im_end|>
 <|im_start|>user
 Rewrite this ${langName} text:
