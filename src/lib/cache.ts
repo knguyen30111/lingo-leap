@@ -77,14 +77,18 @@ export function createTranslationKey(
   return `${model}:${sourceLang}:${targetLang}:${textHash}`
 }
 
+// The reasoning mode is part of the identity of a result: the same text at the
+// same level produces different output instantly than it does after a reasoning
+// pass, so the two must not share a cache entry.
 export function createCorrectionKey(
   text: string,
   language: string,
   level: string,
-  model: string
+  model: string,
+  reasoningMode: string = 'instant'
 ): string {
   const textHash = simpleHash(text)
-  return `${model}:${language}:${level}:${textHash}`
+  return `${model}:${language}:${level}:${reasoningMode}:${textHash}`
 }
 
 // Simple hash function for cache keys

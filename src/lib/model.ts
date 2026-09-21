@@ -35,13 +35,28 @@ export function supportsEmbeddedFormat(modelType: ModelType): boolean {
 }
 
 // Clean model-specific artifacts from output
-export function cleanModelOutput(text: string, _modelType: ModelType): string {
+export function cleanModelOutput(text: string, _modelType?: ModelType): string {
   let cleaned = text
     .replace(/<\|im_end\|>/g, '')
     .replace(/<\|im_start\|>assistant\n?/g, '')
     .replace(/<\|end\|>/g, '')
     .replace(/<\|assistant\|>/g, '')
     .trim()
+
+  // Hybrid reasoning models emit their chain of thought inline, wrapped in
+  // <think> tags, whenever the separate thinking channel is off. That reasoning
+  // is never the answer, so it is dropped here rather than shown as a result.
+  cleaned = cleaned
+    .replace(/<think>[\s\S]*?<\/think>/gi, '')
+    .replace(/^[\s\S]*?<\/think>/i, '')
+    .trim()
+
+  // Reasoning models sometimes present the answer the way a maths solution is
+  // presented, wrapping it in \boxed{} after a written explanation. Real prose
+  // never contains that token, so when it appears the braced content is the
+  // answer and everything around it is workings.
+  const boxed = cleaned.match(/\\boxed\{(?:\\text\{)?([\s\S]*?)\}?\}\s*$/)
+  if (boxed && boxed[1].trim()) cleaned = boxed[1].trim()
 
   // The translation prompt fences the source in <text> tags to stop the model
   // replying to it instead of translating it. Smaller models sometimes copy the

@@ -66,6 +66,8 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
     setTranslationModel,
     correctionModel,
     setCorrectionModel,
+    reasoningModel,
+    setReasoningModel,
     defaultTargetLang,
     setDefaultTargetLang,
     explanationLang,
@@ -266,6 +268,26 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                 ))}
                 {!models.find((m) => m.name === correctionModel) && (
                   <option value={correctionModel}>{correctionModel}</option>
+                )}
+              </select>
+            </SettingRow>
+
+            <SettingRow
+              label={t("ollama.reasoningModel")}
+              description={t("ollama.reasoningModelDesc")}
+            >
+              <select
+                value={reasoningModel}
+                onChange={(e) => setReasoningModel(e.target.value)}
+                className="select-glass w-full text-sm"
+              >
+                {models.map((model) => (
+                  <option key={model.name} value={model.name}>
+                    {model.name}
+                  </option>
+                ))}
+                {!models.find((m) => m.name === reasoningModel) && (
+                  <option value={reasoningModel}>{reasoningModel}</option>
                 )}
               </select>
             </SettingRow>

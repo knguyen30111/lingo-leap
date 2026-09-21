@@ -17,7 +17,9 @@
     "translationModel": "번역 모델",
     "translationModelDesc": "권장: aya:8b",
     "correctionModel": "교정 모델",
-    "correctionModelDesc": "권장: qwen2.5:7b"
+    "correctionModelDesc": "권장: qwen2.5:7b",
+    "reasoningModel": "추론 모델",
+    "reasoningModelDesc": "추론을 선택했을 때만 사용합니다. Ollama의 추론 기능을 지원하는 모델이어야 합니다(예: qwen3:4b)."
   },
   "streaming": {
     "label": "스트리밍 출력",

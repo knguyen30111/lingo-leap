@@ -7,6 +7,9 @@ import { useCorrection } from '../hooks/useCorrection';
 import { useSpeechToText } from '../hooks/useSpeechToText';
 import { LanguageSelector } from './LanguageSelector';
 import { CorrectionTabs } from './CorrectionTabs';
+import { ReasoningToggle } from './ReasoningToggle';
+import { ReasoningPanel } from './ReasoningPanel';
+import { RunTimer } from './RunTimer';
 import { MicButton } from './MicButton';
 import { SpeechPreview } from './SpeechPreview';
 import { ClearInputButton } from './ClearInputButton';
@@ -108,7 +111,10 @@ export function CorrectionView() {
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border-color)]">
         <LanguageSelector />
-        <CorrectionTabs />
+        <div className="flex items-center gap-3">
+          <ReasoningToggle />
+          <CorrectionTabs />
+        </div>
       </div>
 
       {/* Main Grid Layout - 1/3 input, 2/3 output */}
@@ -208,6 +214,7 @@ export function CorrectionView() {
                       <span className="text-xs text-[var(--accent-blue)]">
                         {t('processing')}
                       </span>
+                      <RunTimer />
                     </div>
                     <button
                       onClick={cancel}
@@ -234,6 +241,7 @@ export function CorrectionView() {
                         />
                       </svg>
                       <span className="text-xs">{t('done')}</span>
+                      <RunTimer />
                     </div>
                     <div className="flex items-center gap-2">
                       <button
@@ -399,6 +407,7 @@ export function CorrectionView() {
                   )}
                 </div>
               )}
+              <ReasoningPanel />
             </div>
           </div>
         </div>

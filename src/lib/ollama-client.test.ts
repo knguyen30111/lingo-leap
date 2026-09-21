@@ -652,3 +652,113 @@ describe('ollamaClient singleton', () => {
     expect(ollamaClient.getBaseUrl()).toBe('http://localhost:11434')
   })
 })
+
+describe('capability detection', () => {
+  beforeEach(() => mockFetch.mockReset())
+
+  it('reports the capabilities reported by /api/show', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ capabilities: ['completion', 'tools', 'thinking'] }),
+    })
+    const c = new OllamaClient('http://localhost:11434')
+
+    expect(await c.getCapabilities('qwen3:4b')).toEqual(['completion', 'tools', 'thinking'])
+    expect(await c.supportsThinking('qwen3:4b')).toBe(true)
+  })
+
+  it('reports no thinking support for a model without the capability', async () => {
+    mockFetch.mockResolvedValue({ ok: true, json: async () => ({ capabilities: ['completion'] }) })
+    const c = new OllamaClient('http://localhost:11434')
+
+    expect(await c.supportsThinking('aya:8b')).toBe(false)
+  })
+
+  it('caches a successful lookup so the toggle does not refetch', async () => {
+    mockFetch.mockResolvedValue({ ok: true, json: async () => ({ capabilities: ['thinking'] }) })
+    const c = new OllamaClient('http://localhost:11434')
+
+    await c.supportsThinking('qwen3:4b')
+    await c.supportsThinking('qwen3:4b')
+
+    expect(mockFetch).toHaveBeenCalledTimes(1)
+  })
+
+  // A transient outage must not permanently mark a model as incapable.
+  it('does not cache a failed lookup', async () => {
+    mockFetch.mockRejectedValueOnce(new Error('offline'))
+    const c = new OllamaClient('http://localhost:11434')
+    expect(await c.supportsThinking('qwen3:4b')).toBe(false)
+
+    mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ capabilities: ['thinking'] }) })
+    expect(await c.supportsThinking('qwen3:4b')).toBe(true)
+  })
+
+  it('treats a missing capabilities field as no capabilities', async () => {
+    mockFetch.mockResolvedValue({ ok: true, json: async () => ({}) })
+    const c = new OllamaClient('http://localhost:11434')
+
+    expect(await c.getCapabilities('old-model')).toEqual([])
+  })
+
+  it('drops cached capabilities when the host changes', async () => {
+    mockFetch.mockResolvedValue({ ok: true, json: async () => ({ capabilities: ['thinking'] }) })
+    const c = new OllamaClient('http://localhost:11434')
+    await c.supportsThinking('qwen3:4b')
+
+    c.setBaseUrl('http://other:11434')
+    await c.supportsThinking('qwen3:4b')
+
+    expect(mockFetch).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('thinking requests', () => {
+  beforeEach(() => mockFetch.mockReset())
+
+  it('sends think and surfaces reasoning chunks separately from the answer', async () => {
+    const lines = [
+      JSON.stringify({ thinking: 'the verb tense is wrong. ' }),
+      JSON.stringify({ thinking: 'so I fix it.' }),
+      JSON.stringify({ response: 'I went' }),
+      JSON.stringify({ response: ' to the store.' }),
+    ].join('\n') + '\n'
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      body: {
+        getReader: () => {
+          let sent = false
+          return {
+            read: async () =>
+              sent
+                ? { done: true, value: undefined }
+                : ((sent = true), { done: false, value: new TextEncoder().encode(lines) }),
+          }
+        },
+      },
+    })
+    const c = new OllamaClient('http://localhost:11434')
+    const reasoning: string[] = []
+    const answer: string[] = []
+    for await (const chunk of c.generateStream(
+      { model: 'qwen3:4b', prompt: 'fix it', think: true },
+      undefined,
+      (t) => reasoning.push(t)
+    )) {
+      answer.push(chunk)
+    }
+
+    expect(reasoning.join('')).toBe('the verb tense is wrong. so I fix it.')
+    expect(answer.join('')).toBe('I went to the store.')
+    expect(JSON.parse(mockFetch.mock.calls[0][1].body).think).toBe(true)
+  })
+
+  it('omits think entirely when it was not requested', async () => {
+    mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ response: 'ok' }) })
+    const c = new OllamaClient('http://localhost:11434')
+
+    await c.generateFromPrompt({ prompt: 'p' }, 'aya:8b')
+
+    expect(JSON.parse(mockFetch.mock.calls[0][1].body).think).toBeUndefined()
+  })
+})

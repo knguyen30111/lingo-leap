@@ -17,7 +17,9 @@
     "translationModel": "翻訳モデル",
     "translationModelDesc": "推奨: aya:8b",
     "correctionModel": "校正モデル",
-    "correctionModelDesc": "推奨: qwen2.5:7b"
+    "correctionModelDesc": "推奨: qwen2.5:7b",
+    "reasoningModel": "推論モデル",
+    "reasoningModelDesc": "「熟考」を選択したときのみ使用します。Ollama の推論機能に対応したモデル（例: qwen3:4b）が必要です。"
   },
   "streaming": {
     "label": "ストリーミング出力",

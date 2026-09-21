@@ -149,4 +149,48 @@ describe('cleanModelOutput', () => {
         .toBe('Please send the text tomorrow.')
     })
   })
+
+  // A hybrid reasoner such as qwen3 emits its chain of thought inline when the
+  // separate thinking channel is off. Measured on qwen3:4b, that turned a 706
+  // character correction into 7606 characters of visible reasoning.
+  describe('leaked chain of thought', () => {
+    it('drops a complete think block', () => {
+      expect(cleanModelOutput('<think>first I check the tense</think>I went to the store.', 'qwen'))
+        .toBe('I went to the store.')
+    })
+
+    it('drops reasoning that arrives without an opening tag', () => {
+      expect(cleanModelOutput('We are given a sentence.\nLet me reason.</think>\n\nI went.', 'qwen'))
+        .toBe('I went.')
+    })
+
+    it('drops multiple think blocks', () => {
+      expect(cleanModelOutput('<think>a</think>Hello <think>b</think>world', 'qwen'))
+        .toBe('Hello world')
+    })
+
+    it('leaves an answer that merely mentions thinking alone', () => {
+      expect(cleanModelOutput('I think we should go.', 'qwen')).toBe('I think we should go.')
+    })
+  })
+
+  // qwen3 sometimes answers like a maths solution: an explanation followed by
+  // the result in \boxed{}. The braces hold the answer, the prose is workings.
+  describe('boxed answer', () => {
+    it('keeps only the boxed text after an explanation', () => {
+      const input =
+        'The errors are: "stor" is misspelled.\n\n\\boxed{\\text{I went to the store yesterday.}}'
+      expect(cleanModelOutput(input, 'qwen')).toBe('I went to the store yesterday.')
+    })
+
+    it('handles a boxed answer without the text wrapper', () => {
+      expect(cleanModelOutput('Working...\n\\boxed{I went to the store.}', 'qwen'))
+        .toBe('I went to the store.')
+    })
+
+    it('leaves output without a boxed answer untouched', () => {
+      expect(cleanModelOutput('I went to the store yesterday.', 'qwen'))
+        .toBe('I went to the store yesterday.')
+    })
+  })
 })

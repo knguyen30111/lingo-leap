@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { changeLanguage, type UILanguageCode } from "../i18n";
+import type { ReasoningMode } from "../types";
 
 export type ThemeMode = "light" | "dark" | "system";
 
@@ -24,6 +25,10 @@ interface SettingsState {
   setAutoHideAfterCopy: (value: boolean) => void;
   useStreaming: boolean;
   setUseStreaming: (value: boolean) => void;
+  reasoningMode: ReasoningMode;
+  setReasoningMode: (mode: ReasoningMode) => void;
+  reasoningModel: string;
+  setReasoningModel: (model: string) => void;
   uiLanguage: UILanguageCode;
   setUILanguage: (lang: UILanguageCode) => void;
 
@@ -66,6 +71,16 @@ export const useSettingsStore = create<SettingsState>()(
       setAutoHideAfterCopy: (value) => set({ autoHideAfterCopy: value }),
       useStreaming: true,
       setUseStreaming: (value) => set({ useStreaming: value }),
+      // Instant by default: the shipped correction model cannot think, and a
+      // reasoning pass costs noticeably more time when one can.
+      reasoningMode: "instant",
+      setReasoningMode: (mode) => set({ reasoningMode: mode }),
+      // Thinking runs on its own model. A hybrid reasoner deliberates whether or
+      // not thinking is requested - qwen3:4b took 63s for an "instant" rewrite
+      // that qwen2.5:7b returned in 6s - so sharing one model would mean picking
+      // a reasoner destroys the instant path.
+      reasoningModel: "qwen3:4b",
+      setReasoningModel: (model) => set({ reasoningModel: model }),
       uiLanguage: "en",
       setUILanguage: (lang) => {
         changeLanguage(lang);
