@@ -6,7 +6,7 @@
     "disabled": "無効"
   },
   "errors": {
-    "ollamaConnection": "Ollamaに接続できません。localhost:11434でOllamaが実行中か確認してください"
+    "ollamaConnection": "{{host}} のOllamaに接続できません。Ollamaが実行中か確認するか、設定でホストを変更してください"
   },
   "placeholders": {
     "enterTextTranslate": "翻訳するテキストを入力...",
@@ -21,5 +21,15 @@
     "improveDesc": "文法とスタイル",
     "rewrite": "書き直し",
     "rewriteDesc": "完全に書き直し"
+  },
+  "reasoning": {
+    "label": "応答速度",
+    "instant": "即時",
+    "thinking": "熟考",
+    "unsupported": "{{model}} は推論に対応していません。設定で qwen3:4b などの推論対応モデルを選択してください。",
+    "thinkingNow": "推論中...",
+    "trace": "推論の過程",
+    "waiting": "モデルの応答を待っています...",
+    "notForFix": "「修正」では推論を使用しません。綴りと文法の機械的な処理のためです。「改善」または「書き直し」を選択してください。"
   }
 }

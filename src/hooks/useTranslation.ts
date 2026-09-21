@@ -14,6 +14,8 @@ export function useTranslation() {
     setSourceLang,
     setLoading,
     setError,
+    setRunStartedAt,
+    setLastRunMs,
   } = useAppStore()
 
   const { translationModel, ollamaHost, useStreaming } = useSettingsStore()
@@ -36,10 +38,14 @@ export function useTranslation() {
       abortRef.current.abort()
     }
     abortRef.current = new AbortController()
+    const signal = abortRef.current.signal
 
     setLoading(true)
     setError(null)
     setOutputText('')
+    const startedAt = Date.now()
+    setRunStartedAt(startedAt)
+    setLastRunMs(null)
 
     try {
       // Detect source language if auto
@@ -57,6 +63,8 @@ export function useTranslation() {
         const cached = translationCache.get(cacheKey)
         if (cached) {
           setOutputText(cached)
+          setLastRunMs(Date.now() - startedAt)
+          setRunStartedAt(null)
           setLoading(false)
           return cached
         }
@@ -65,12 +73,12 @@ export function useTranslation() {
       let result = ''
 
       if (useStreaming) {
-        for await (const chunk of service.translateStream(textToProcess, detectedSource, targetLang)) {
+        for await (const chunk of service.translateStream(textToProcess, detectedSource, targetLang, signal)) {
           result = chunk
           setOutputText(result)
         }
       } else {
-        const response = await service.translate(textToProcess, detectedSource, targetLang)
+        const response = await service.translate(textToProcess, detectedSource, targetLang, signal)
         result = response.translated
         setOutputText(result)
       }
@@ -78,12 +86,15 @@ export function useTranslation() {
       // Cache result
       translationCache.set(cacheKey, result)
 
+      setLastRunMs(Date.now() - startedAt)
+      setRunStartedAt(null)
       setLoading(false)
       return result
     } catch (err) {
       if (err instanceof Error && err.name === 'AbortError') return
       const errorMsg = err instanceof Error ? err.message : 'Translation failed'
       setError(errorMsg)
+      setRunStartedAt(null)
       setLoading(false)
       throw err
     }
@@ -98,15 +109,20 @@ export function useTranslation() {
     setSourceLang,
     setLoading,
     setError,
+    setRunStartedAt,
+    setLastRunMs,
   ])
 
   const cancel = useCallback(() => {
     if (abortRef.current) {
       abortRef.current.abort()
       abortRef.current = null
-      setLoading(false)
     }
-  }, [setLoading])
+    // Cleared unconditionally, matching useCorrection: if the loading state is
+    // somehow stuck without an in-flight request, cancel must still clear it.
+    setLoading(false)
+    setRunStartedAt(null)
+  }, [setLoading, setRunStartedAt])
 
   const translateText = useCallback(async (text: string) => {
     setInputText(text)

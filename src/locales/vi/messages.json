@@ -6,7 +6,7 @@
     "disabled": "Đã tắt"
   },
   "errors": {
-    "ollamaConnection": "Không thể kết nối Ollama. Đảm bảo Ollama đang chạy tại localhost:11434"
+    "ollamaConnection": "Không thể kết nối Ollama tại {{host}}. Đảm bảo Ollama đang chạy hoặc đổi máy chủ trong Cài đặt."
   },
   "placeholders": {
     "enterTextTranslate": "Nhập văn bản cần dịch...",
@@ -21,5 +21,15 @@
     "improveDesc": "Ngữ pháp và văn phong",
     "rewrite": "Viết lại",
     "rewriteDesc": "Viết lại hoàn toàn"
+  },
+  "reasoning": {
+    "label": "Tốc độ phản hồi",
+    "instant": "Tức thì",
+    "thinking": "Suy luận",
+    "unsupported": "{{model}} không hỗ trợ suy luận. Hãy chọn mô hình có khả năng suy luận như qwen3:4b trong Cài đặt.",
+    "thinkingNow": "Đang suy luận...",
+    "trace": "Quá trình suy luận",
+    "waiting": "Đang chờ mô hình...",
+    "notForFix": "Suy luận không dùng cho Sửa lỗi - đây là bước xử lý chính tả và ngữ pháp máy móc. Hãy chọn Cải thiện hoặc Viết lại."
   }
 }

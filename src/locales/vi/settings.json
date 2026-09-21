@@ -17,7 +17,9 @@
     "translationModel": "Mô hình dịch",
     "translationModelDesc": "Khuyến nghị: aya:8b",
     "correctionModel": "Mô hình sửa lỗi",
-    "correctionModelDesc": "Khuyến nghị: qwen2.5:7b"
+    "correctionModelDesc": "Khuyến nghị: qwen2.5:7b",
+    "reasoningModel": "Mô hình suy luận",
+    "reasoningModelDesc": "Chỉ dùng khi chọn Suy luận. Cần mô hình hỗ trợ khả năng suy luận của Ollama, ví dụ qwen3:4b."
   },
   "streaming": {
     "label": "Hiển thị trực tiếp",

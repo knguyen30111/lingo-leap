@@ -36,7 +36,7 @@ describe('useWindowVisibility', () => {
         closeRequestedCallback = callback
         return Promise.resolve(() => {})
       }),
-    } as ReturnType<typeof getCurrentWindow>)
+    } as unknown as ReturnType<typeof getCurrentWindow>)
 
     vi.mocked(listen).mockImplementation((event, callback) => {
       if (event === 'tauri://window-created') {

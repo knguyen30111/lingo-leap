@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useAppStore } from "../stores/appStore";
+import { useSettingsStore } from "../stores/settingsStore";
 import { useOllama } from "../hooks/useOllama";
 import { ModeSelector } from "./ModeSelector";
 import { TranslationView } from "./TranslationView";
@@ -11,6 +12,7 @@ export function MainWindow() {
   const { t } = useTranslation(["messages", "common"]);
   const { mode, isEnabled } = useAppStore();
   const { isConnected, isChecking, checkConnection } = useOllama();
+  const { ollamaHost } = useSettingsStore();
   const [showSettings, setShowSettings] = useState(false);
 
   return (
@@ -84,7 +86,7 @@ export function MainWindow() {
         {!isConnected && !isChecking && (
           <div className="p-3 bg-[var(--warning)]/10 border-b border-[var(--warning)]/20 flex items-center justify-between gap-3">
             <p className="text-sm text-[var(--warning)]">
-              {t("errors.ollamaConnection")}
+              {t("errors.ollamaConnection", { host: ollamaHost })}
             </p>
             <button
               onClick={checkConnection}

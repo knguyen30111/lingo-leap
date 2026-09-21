@@ -24,6 +24,7 @@ vi.mock('react-i18next', () => ({
         reTranslate: 'Re-translate',
         copy: 'Copy',
         copied: 'Copied',
+        cancel: 'Cancel',
         translate: 'Translate',
       }
       return translations[key] || key
@@ -33,9 +34,11 @@ vi.mock('react-i18next', () => ({
 
 // Mock useTranslation hook (translation logic)
 const mockTranslate = vi.fn()
+const mockCancel = vi.fn()
 vi.mock('../hooks/useTranslation', () => ({
   useTranslation: () => ({
     translate: mockTranslate,
+    cancel: mockCancel,
   }),
 }))
 
@@ -100,6 +103,7 @@ describe('TranslationView', () => {
       speechLang: 'en',
     })
     mockTranslate.mockClear()
+    mockCancel.mockClear()
   })
 
   afterEach(() => {
@@ -204,13 +208,15 @@ describe('TranslationView', () => {
     expect(screen.getByText('Translate')).not.toBeDisabled()
   })
 
-  it('calls translate with skipCache when translate clicked', () => {
+  it('calls translate through the cache when translate clicked', () => {
     useAppStore.setState({ inputText: 'Hello' })
     render(<TranslationView />)
 
     fireEvent.click(screen.getByText('Translate'))
 
-    expect(mockTranslate).toHaveBeenCalledWith(undefined, { skipCache: true })
+    // The primary action must be able to serve a cached result; only an
+    // explicit re-translate bypasses the cache.
+    expect(mockTranslate).toHaveBeenCalledWith()
   })
 
   it('calls translate on Cmd+Enter', () => {
@@ -220,7 +226,7 @@ describe('TranslationView', () => {
 
     fireEvent.keyDown(input, { key: 'Enter', metaKey: true })
 
-    expect(mockTranslate).toHaveBeenCalledWith(undefined, { skipCache: true })
+    expect(mockTranslate).toHaveBeenCalledWith()
   })
 
   it('calls translate on Ctrl+Enter', () => {
@@ -230,7 +236,7 @@ describe('TranslationView', () => {
 
     fireEvent.keyDown(input, { key: 'Enter', ctrlKey: true })
 
-    expect(mockTranslate).toHaveBeenCalledWith(undefined, { skipCache: true })
+    expect(mockTranslate).toHaveBeenCalledWith()
   })
 
   it('does not translate on Enter without modifier', () => {
@@ -271,6 +277,57 @@ describe('TranslationView', () => {
       await waitFor(() => {
         expect(screen.getByText('Copied')).toBeInTheDocument()
       })
+    })
+  })
+
+  // Regression: a finished translation is only valid for the language pair it
+  // was produced with. Leaving it on screen after a language change labelled a
+  // stale result as a completed translation of the newly selected language.
+  describe('Stale result handling on language change', () => {
+    it('clears the previous result when the target language changes', () => {
+      useAppStore.setState({ inputText: 'Hello', outputText: 'こんにちは', targetLang: 'ja' })
+      render(<TranslationView />)
+
+      const targetSelect = screen.getAllByRole('combobox')
+        .find((el) => (el as HTMLSelectElement).value === 'ja') as HTMLSelectElement
+      fireEvent.change(targetSelect, { target: { value: 'vi' } })
+
+      expect(useAppStore.getState().outputText).toBe('')
+      expect(useAppStore.getState().targetLang).toBe('vi')
+    })
+
+    it('clears the previous result when the source language changes', () => {
+      useAppStore.setState({ inputText: 'Hello', outputText: 'こんにちは', sourceLang: 'en' })
+      render(<TranslationView />)
+
+      const sourceSelect = screen.getAllByRole('combobox')
+        .find((el) => (el as HTMLSelectElement).value === 'en') as HTMLSelectElement
+      fireEvent.change(sourceSelect, { target: { value: 'fr' } })
+
+      expect(useAppStore.getState().outputText).toBe('')
+    })
+  })
+
+  // Regression: a long generation had no exit. The abort signal now reaches
+  // fetch, so the user can stop a run in progress.
+  describe('Cancelling a run in progress', () => {
+    it('offers a cancel control while translating', () => {
+      useAppStore.setState({ inputText: 'Hello', isLoading: true })
+      render(<TranslationView />)
+
+      fireEvent.click(screen.getByText('Cancel'))
+
+      expect(mockCancel).toHaveBeenCalled()
+    })
+
+    it('ignores a second submit while a translation is in flight', () => {
+      useAppStore.setState({ inputText: 'Hello', isLoading: true })
+      render(<TranslationView />)
+      const input = screen.getByPlaceholderText('Enter text to translate...')
+
+      fireEvent.keyDown(input, { key: 'Enter', metaKey: true })
+
+      expect(mockTranslate).not.toHaveBeenCalled()
     })
   })
 

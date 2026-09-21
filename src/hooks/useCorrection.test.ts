@@ -12,6 +12,7 @@ vi.mock('../lib/ollama-client', () => ({
     setBaseUrl: vi.fn(),
     generate: vi.fn(),
     generateStream: vi.fn(),
+    supportsThinking: vi.fn(),
   },
 }))
 
@@ -20,7 +21,7 @@ vi.mock('../lib/cache', () => ({
     get: vi.fn(),
     set: vi.fn(),
   },
-  createCorrectionKey: vi.fn((text, lang, level, model) => `${text}-${lang}-${level}-${model}`),
+  createCorrectionKey: vi.fn((text, lang, level, model, mode) => `${text}-${lang}-${level}-${model}-${mode}`),
 }))
 
 vi.mock('../lib/language', () => ({
@@ -38,11 +39,11 @@ describe('useCorrection', () => {
     useAppStore.setState({
       inputText: 'Hello wrold',
       outputText: '',
-      correctionLevel: 'light',
+      correctionLevel: 'fix',
       isLoading: false,
       error: null,
       changes: [],
-      changesLoading: false,
+      isChangesLoading: false,
     })
 
     useSettingsStore.setState({
@@ -56,6 +57,8 @@ describe('useCorrection', () => {
     // ollamaClient.generate is used both for main correction AND for extracting changes
     // Always return a Promise to prevent .then() errors
     vi.mocked(ollamaClient.generate).mockReset().mockResolvedValue('Hello world')
+    vi.mocked(ollamaClient.supportsThinking).mockReset().mockResolvedValue(false)
+    useSettingsStore.setState({ reasoningMode: 'instant' })
     vi.mocked(ollamaClient.generateStream).mockReset()
     vi.mocked(translationCache.get).mockReset()
     vi.mocked(translationCache.set).mockReset()
@@ -199,10 +202,10 @@ describe('useCorrection', () => {
     const { result } = renderHook(() => useCorrection())
 
     act(() => {
-      result.current.setLevel('heavy')
+      result.current.setLevel('rewrite')
     })
 
-    expect(useAppStore.getState().correctionLevel).toBe('heavy')
+    expect(useAppStore.getState().correctionLevel).toBe('rewrite')
   })
 
   it('cancel stops ongoing correction', async () => {
@@ -254,7 +257,7 @@ describe('useCorrection', () => {
     const { result } = renderHook(() => useCorrection())
 
     await act(async () => {
-      await result.current.correct(undefined, 'heavy')
+      await result.current.correct(undefined, 'rewrite')
     })
 
     expect(ollamaClient.generate).toHaveBeenCalled()
@@ -436,6 +439,101 @@ describe('useCorrection', () => {
       })
 
       expect(ollamaClient.generate).toHaveBeenCalled()
+    })
+  })
+
+  // Ollama fails the entire generation with "<model> does not support thinking"
+  // if think reaches a model without the capability, so the request must be
+  // gated on a capability check rather than on the user's preference alone.
+  describe('reasoning mode', () => {
+    it('does not request thinking in instant mode', async () => {
+      useSettingsStore.setState({ reasoningMode: 'instant', useStreaming: false })
+      const { result } = renderHook(() => useCorrection())
+
+      await act(async () => {
+        await result.current.correct('Hello wrold')
+      })
+
+      expect(ollamaClient.supportsThinking).not.toHaveBeenCalled()
+      // omitted, not false: think:false leaves a hybrid reasoner dumping its
+      // chain of thought into the answer instead of the thinking channel
+      expect(vi.mocked(ollamaClient.generate).mock.calls[0][0].think).toBeUndefined()
+    })
+
+    it('requests thinking when the model supports it', async () => {
+      vi.mocked(ollamaClient.supportsThinking).mockResolvedValue(true)
+      useSettingsStore.setState({ reasoningMode: 'thinking', useStreaming: false })
+      const { result } = renderHook(() => useCorrection())
+
+      await act(async () => {
+        await result.current.correct('Hello wrold', 'improve')
+      })
+
+      expect(vi.mocked(ollamaClient.generate).mock.calls[0][0].think).toBe(true)
+    })
+
+
+    // fix-with-reasoning answered with an explanation rather than the corrected
+    // sentence in every sampled run, so the level never requests it.
+    it('never requests thinking for the fix level', async () => {
+      vi.mocked(ollamaClient.supportsThinking).mockResolvedValue(true)
+      useSettingsStore.setState({ reasoningMode: 'thinking', useStreaming: false })
+      const { result } = renderHook(() => useCorrection())
+
+      await act(async () => {
+        await result.current.correct('Hello wrold', 'fix')
+      })
+
+      expect(vi.mocked(ollamaClient.generate).mock.calls[0][0].think).toBeUndefined()
+      expect(useAppStore.getState().outputText).toBe('Hello world')
+    })
+
+    it('falls back to an instant run when the model cannot think', async () => {
+      vi.mocked(ollamaClient.supportsThinking).mockResolvedValue(false)
+      useSettingsStore.setState({ reasoningMode: 'thinking', useStreaming: false })
+      const { result } = renderHook(() => useCorrection())
+
+      await act(async () => {
+        await result.current.correct('Hello wrold')
+      })
+
+      expect(vi.mocked(ollamaClient.generate).mock.calls[0][0].think).toBeUndefined()
+      expect(useAppStore.getState().outputText).toBe('Hello world')
+      expect(useAppStore.getState().error).toBeNull()
+    })
+
+    it('collects streamed reasoning separately from the answer', async () => {
+      vi.mocked(ollamaClient.supportsThinking).mockResolvedValue(true)
+      useSettingsStore.setState({ reasoningMode: 'thinking', useStreaming: true })
+      vi.mocked(ollamaClient.generateStream).mockImplementation(
+        ((_req: unknown, _signal: unknown, onThinking?: (c: string) => void) => {
+          onThinking?.('weighing the tense')
+          return (async function* () {
+            yield 'Hello world'
+          })()
+        }) as never
+      )
+      const { result } = renderHook(() => useCorrection())
+
+      await act(async () => {
+        await result.current.correct('Hello wrold', 'improve')
+      })
+
+      expect(useAppStore.getState().thinkingText).toBe('weighing the tense')
+      expect(useAppStore.getState().outputText).toBe('Hello world')
+      expect(useAppStore.getState().isThinking).toBe(false)
+    })
+
+    it('clears a stale reasoning trace when a new run starts', async () => {
+      useAppStore.setState({ thinkingText: 'trace from the previous run' })
+      useSettingsStore.setState({ reasoningMode: 'instant', useStreaming: false })
+      const { result } = renderHook(() => useCorrection())
+
+      await act(async () => {
+        await result.current.correct('Hello wrold')
+      })
+
+      expect(useAppStore.getState().thinkingText).toBe('')
     })
   })
 })

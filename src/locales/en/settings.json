@@ -17,7 +17,9 @@
     "translationModel": "Translation Model",
     "translationModelDesc": "Recommended: aya:8b",
     "correctionModel": "Correction Model",
-    "correctionModelDesc": "Recommended: qwen2.5:7b"
+    "correctionModelDesc": "Recommended: qwen2.5:7b",
+    "reasoningModel": "Reasoning model",
+    "reasoningModelDesc": "Used only when Thinking is selected. Must support Ollama's thinking capability, e.g. qwen3:4b."
   },
   "streaming": {
     "label": "Streaming Output",

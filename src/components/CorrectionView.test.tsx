@@ -23,6 +23,7 @@ vi.mock('react-i18next', () => ({
         regenerate: 'Regenerate',
         copy: 'Copy',
         copied: 'Copied',
+        cancel: 'Cancel',
         generate: 'Generate',
         noChanges: 'No changes detected',
         changesAppear: 'Changes will appear here',
@@ -35,9 +36,11 @@ vi.mock('react-i18next', () => ({
 
 // Mock useCorrection hook
 const mockCorrect = vi.fn()
+const mockCancelCorrection = vi.fn()
 vi.mock('../hooks/useCorrection', () => ({
   useCorrection: () => ({
     correct: mockCorrect,
+    cancel: mockCancelCorrection,
   }),
 }))
 
@@ -199,13 +202,13 @@ describe('CorrectionView', () => {
     expect(screen.getByText('Generate')).not.toBeDisabled()
   })
 
-  it('calls correct with skipCache when generate clicked', () => {
+  it('calls correct through the cache when generate clicked', () => {
     useAppStore.setState({ inputText: 'Hello' })
     render(<CorrectionView />)
 
     fireEvent.click(screen.getByText('Generate'))
 
-    expect(mockCorrect).toHaveBeenCalledWith(undefined, undefined, { skipCache: true })
+    expect(mockCorrect).toHaveBeenCalledWith()
   })
 
   it('calls correct on Cmd+Enter', () => {
@@ -215,7 +218,7 @@ describe('CorrectionView', () => {
 
     fireEvent.keyDown(input, { key: 'Enter', metaKey: true })
 
-    expect(mockCorrect).toHaveBeenCalledWith(undefined, undefined, { skipCache: true })
+    expect(mockCorrect).toHaveBeenCalledWith()
   })
 
   it('calls correct on Ctrl+Enter', () => {
@@ -225,7 +228,7 @@ describe('CorrectionView', () => {
 
     fireEvent.keyDown(input, { key: 'Enter', ctrlKey: true })
 
-    expect(mockCorrect).toHaveBeenCalledWith(undefined, undefined, { skipCache: true })
+    expect(mockCorrect).toHaveBeenCalledWith()
   })
 
   describe('Copy functionality', () => {

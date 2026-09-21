@@ -8,7 +8,7 @@ import { changeLanguage } from "./i18n";
 
 function App() {
   const { t } = useTranslation("common");
-  const { isSetupComplete, ollamaInstalled, uiLanguage } = useSettingsStore();
+  const { isSetupComplete, uiLanguage } = useSettingsStore();
   const [mounted, setMounted] = useState(false);
 
   // Initialize theme system
@@ -31,8 +31,11 @@ function App() {
     );
   }
 
-  // Show setup wizard if setup not complete OR Ollama not installed
-  if (!isSetupComplete || !ollamaInstalled) {
+  // Onboarding is a one-time step. Live Ollama availability must not gate the
+  // main window: losing the connection there would strand the user in the
+  // wizard with no route back to Settings to correct the host. MainWindow
+  // surfaces a connection banner with Retry instead.
+  if (!isSetupComplete) {
     return <SetupWizard />;
   }
 

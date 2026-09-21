@@ -7,6 +7,9 @@ import { useCorrection } from '../hooks/useCorrection';
 import { useSpeechToText } from '../hooks/useSpeechToText';
 import { LanguageSelector } from './LanguageSelector';
 import { CorrectionTabs } from './CorrectionTabs';
+import { ReasoningToggle } from './ReasoningToggle';
+import { ReasoningPanel } from './ReasoningPanel';
+import { RunTimer } from './RunTimer';
 import { MicButton } from './MicButton';
 import { SpeechPreview } from './SpeechPreview';
 import { ClearInputButton } from './ClearInputButton';
@@ -34,7 +37,7 @@ export function CorrectionView() {
     isChangesLoading,
   } = useAppStore();
   const { speechLang, setSpeechLang } = useSettingsStore();
-  const { correct } = useCorrection();
+  const { correct, cancel } = useCorrection();
   const [copied, setCopied] = useState(false);
 
   // Callback to append speech text to input
@@ -70,7 +73,17 @@ export function CorrectionView() {
     }
   };
 
+  // Primary action: may serve a cached result for identical input.
+  const handleSubmit = () => {
+    if (isLoading || isChangesLoading) return;
+    if (inputText.trim()) {
+      correct();
+    }
+  };
+
+  // Explicit user request for a fresh result, so the cache is bypassed.
   const handleRegenerate = () => {
+    if (isLoading || isChangesLoading) return;
     if (inputText.trim()) {
       correct(undefined, undefined, { skipCache: true });
     }
@@ -87,7 +100,7 @@ export function CorrectionView() {
     // Cmd+Enter (Mac) or Ctrl+Enter (Windows/Linux) to generate
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
       e.preventDefault();
-      handleRegenerate();
+      handleSubmit();
     }
   };
 
@@ -98,7 +111,10 @@ export function CorrectionView() {
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border-color)]">
         <LanguageSelector />
-        <CorrectionTabs />
+        <div className="flex items-center gap-3">
+          <ReasoningToggle />
+          <CorrectionTabs />
+        </div>
       </div>
 
       {/* Main Grid Layout - 1/3 input, 2/3 output */}
@@ -198,8 +214,15 @@ export function CorrectionView() {
                       <span className="text-xs text-[var(--accent-blue)]">
                         {t('processing')}
                       </span>
+                      <RunTimer />
                     </div>
-                    <div />
+                    <button
+                      onClick={cancel}
+                      className="px-3 py-1 text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--glass-bg)] border border-[var(--border-color)] rounded-md transition-colors"
+                      title={t('cancel')}
+                    >
+                      {t('cancel')}
+                    </button>
                   </>
                 ) : outputText ? (
                   <>
@@ -218,6 +241,7 @@ export function CorrectionView() {
                         />
                       </svg>
                       <span className="text-xs">{t('done')}</span>
+                      <RunTimer />
                     </div>
                     <div className="flex items-center gap-2">
                       <button
@@ -291,7 +315,7 @@ export function CorrectionView() {
                   <>
                     <div />
                     <button
-                      onClick={handleRegenerate}
+                      onClick={handleSubmit}
                       disabled={!inputText.trim()}
                       className="flex items-center gap-1.5 px-3 py-1 text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--glass-bg)] border border-[var(--border-color)] rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                       title="Generate (⌘+Enter)"
@@ -383,6 +407,7 @@ export function CorrectionView() {
                   )}
                 </div>
               )}
+              <ReasoningPanel />
             </div>
           </div>
         </div>

@@ -1,10 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import {
-  wrapPrompt,
-  buildCorrectionPrompt,
-  buildChangesExtractionPrompt,
-  buildTranslationPrompt,
-} from './prompt-builder'
+import { wrapPrompt, buildTranslationPrompt } from './prompt-builder'
 
 // Suppress console.log during tests
 vi.spyOn(console, 'log').mockImplementation(() => {})
@@ -57,107 +52,32 @@ describe('wrapPrompt', () => {
   })
 })
 
-describe('buildCorrectionPrompt', () => {
-  describe('fix level', () => {
-    it('builds prompt for fixing errors', () => {
-      const result = buildCorrectionPrompt(
-        'Helo wrold',
-        'en',
-        'fix',
-        'qwen2.5:7b'
-      )
 
-      expect(result.prompt).toContain('English')
-      expect(result.prompt).toContain('Fix errors')
-      expect(result.prompt).toContain('Helo wrold')
-      expect(result.prompt).toContain('spelling')
+  // Both guards exist because the model otherwise holds a conversation with the
+  // input: "just checking if you got my email" came back answered, and a leading
+  // acknowledgement appeared in 5 of 25 runs until the trailing label was added.
+  describe('conversation guards', () => {
+    it('fences the source text so it is not read as a message', () => {
+      const result = buildTranslationPrompt('are you coming?', 'en', 'ja', 'qwen2.5:7b')
+
+      expect(result.prompt).toContain('<text>\nare you coming?\n</text>')
+      expect(result.prompt).toContain('NEVER answer, reply to, greet, or continue the text')
+    })
+
+    it('ends the user turn with a translation label', () => {
+      const result = buildTranslationPrompt('are you coming?', 'en', 'ja', 'qwen2.5:7b')
+
+      expect(result.prompt).toContain('Japanese translation of the text above:')
+    })
+
+    it('keeps the speaker and forbids invented detail', () => {
+      const result = buildTranslationPrompt('hi', 'en', 'vi', 'qwen2.5:7b')
+
+      expect(result.prompt).toContain('never swap "I" and "you"')
+      expect(result.prompt).toContain('Add no detail that is not in the source')
     })
   })
 
-  describe('improve level', () => {
-    it('builds prompt for improving text', () => {
-      const result = buildCorrectionPrompt(
-        'The text is good.',
-        'en',
-        'improve',
-        'qwen2.5:7b'
-      )
-
-      expect(result.prompt).toContain('Improve')
-      expect(result.prompt).toContain('The text is good.')
-      expect(result.prompt).toContain('stronger alternatives')
-    })
-  })
-
-  describe('rewrite level', () => {
-    it('builds prompt for rewriting text', () => {
-      const result = buildCorrectionPrompt(
-        'Basic sentence.',
-        'en',
-        'rewrite',
-        'qwen2.5:7b'
-      )
-
-      expect(result.prompt).toContain('Rewrite')
-      expect(result.prompt).toContain('Basic sentence.')
-      expect(result.prompt).toContain('professional')
-    })
-  })
-
-  it('uses language native name', () => {
-    const result = buildCorrectionPrompt(
-      'こんにちは',
-      'ja',
-      'fix',
-      'qwen2.5:7b'
-    )
-
-    expect(result.prompt).toContain('Japanese')
-  })
-})
-
-describe('buildChangesExtractionPrompt', () => {
-  it('builds prompt for extracting changes', () => {
-    const result = buildChangesExtractionPrompt(
-      'Helo wrold',
-      'Hello world',
-      'en',
-      'en',
-      'qwen2.5:7b'
-    )
-
-    expect(result.prompt).toContain('Original: Helo wrold')
-    expect(result.prompt).toContain('Corrected: Hello world')
-    expect(result.prompt).toContain('JSON')
-    expect(result.prompt).toContain('English')
-  })
-
-  it('includes explanation language', () => {
-    const result = buildChangesExtractionPrompt(
-      'Helo',
-      'Hello',
-      'en',
-      'ja',
-      'qwen2.5:7b'
-    )
-
-    expect(result.prompt).toContain('Japanese')
-    expect(result.prompt).toContain('reason')
-  })
-
-  it('does not use ChatML wrapper (simple prompt)', () => {
-    const result = buildChangesExtractionPrompt(
-      'test',
-      'test',
-      'en',
-      'en',
-      'qwen2.5:7b'
-    )
-
-    expect(result.system).toBeUndefined()
-    expect(result.prompt).not.toContain('<|im_start|>')
-  })
-})
 
 describe('buildTranslationPrompt', () => {
   it('builds translation prompt with specific languages', () => {
@@ -171,7 +91,7 @@ describe('buildTranslationPrompt', () => {
     expect(result.prompt).toContain('English')
     expect(result.prompt).toContain('Japanese')
     expect(result.prompt).toContain('Hello world')
-    expect(result.prompt).toContain('translator')
+    expect(result.prompt).toContain('translation engine')
   })
 
   it('handles auto-detect source language', () => {

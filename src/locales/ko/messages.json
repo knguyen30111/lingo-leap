@@ -6,7 +6,7 @@
     "disabled": "비활성화됨"
   },
   "errors": {
-    "ollamaConnection": "Ollama에 연결할 수 없습니다. localhost:11434에서 Ollama가 실행 중인지 확인하세요"
+    "ollamaConnection": "{{host}}에서 Ollama에 연결할 수 없습니다. Ollama가 실행 중인지 확인하거나 설정에서 호스트를 변경하세요."
   },
   "placeholders": {
     "enterTextTranslate": "번역할 텍스트를 입력하세요...",
@@ -21,5 +21,15 @@
     "improveDesc": "문법과 스타일",
     "rewrite": "다시 쓰기",
     "rewriteDesc": "완전히 다시 작성"
+  },
+  "reasoning": {
+    "label": "응답 속도",
+    "instant": "즉시",
+    "thinking": "추론",
+    "unsupported": "{{model}}은(는) 추론을 지원하지 않습니다. 설정에서 qwen3:4b 같은 추론 가능 모델을 선택하세요.",
+    "thinkingNow": "추론 중...",
+    "trace": "추론 과정",
+    "waiting": "모델을 기다리는 중...",
+    "notForFix": "'수정'에는 추론을 사용하지 않습니다. 철자와 문법을 기계적으로 처리하는 단계입니다. '개선' 또는 '다시 쓰기'를 선택하세요."
   }
 }

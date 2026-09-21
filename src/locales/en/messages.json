@@ -6,7 +6,7 @@
     "disabled": "Disabled"
   },
   "errors": {
-    "ollamaConnection": "Cannot connect to Ollama. Make sure it is running on localhost:11434"
+    "ollamaConnection": "Cannot connect to Ollama at {{host}}. Make sure Ollama is running, or change the host in Settings."
   },
   "placeholders": {
     "enterTextTranslate": "Enter text to translate...",
@@ -21,5 +21,15 @@
     "improveDesc": "Grammar and style",
     "rewrite": "Rewrite",
     "rewriteDesc": "Full clarity rewrite"
+  },
+  "reasoning": {
+    "label": "Response speed",
+    "instant": "Instant",
+    "thinking": "Thinking",
+    "unsupported": "{{model}} cannot reason. Pick a thinking-capable model such as qwen3:4b in Settings.",
+    "thinkingNow": "Reasoning...",
+    "trace": "Reasoning",
+    "waiting": "Waiting for the model...",
+    "notForFix": "Reasoning is not used for Fix - it is a mechanical spelling and grammar pass. Choose Improve or Rewrite."
   }
 }

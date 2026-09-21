@@ -67,7 +67,7 @@ const mockOllamaState = {
 describe('SetupWizard', () => {
   beforeEach(() => {
     useSettingsStore.setState({
-      setupComplete: false,
+      isSetupComplete: false,
       translationModel: 'gemma3:4b',
       correctionModel: 'gemma3:4b',
     })
