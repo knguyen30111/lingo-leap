@@ -10,6 +10,7 @@ import { LanguageSelector } from './LanguageSelector'
 import { MicButton } from './MicButton'
 import { SpeechPreview } from './SpeechPreview'
 import { ClearInputButton } from './ClearInputButton'
+import { RunTimer } from './RunTimer'
 
 const SPEECH_LANGS = [
   { code: 'en', label: 'EN' },
@@ -232,6 +233,7 @@ export function TranslationView() {
                     <span className="relative inline-flex rounded-full h-2 w-2 bg-[var(--accent-blue)]"></span>
                   </span>
                   <span className="text-xs text-[var(--accent-blue)]">{t('translating')}</span>
+                  <RunTimer />
                 </div>
                 <button
                   onClick={cancel}
@@ -248,6 +250,7 @@ export function TranslationView() {
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                   </svg>
                   <span className="text-xs">{t('done')}</span>
+                  <RunTimer />
                 </div>
                 <div className="flex items-center gap-2">
                   <button

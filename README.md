@@ -9,15 +9,17 @@ Offline translation and grammar correction app powered by local AI models. Avail
 ## Features
 
 - **Translation Mode** - Translate text between languages with auto-detection
-- **Correction Mode** - Fix grammar and spelling with three intensity levels:
-  - Light: Minor fixes only
-  - Medium: Grammar and style improvements
-  - Heavy: Full rewrite for clarity
+- **Correction Mode** - Improve text at three levels of intervention:
+  - Fix: spelling and grammar only, wording untouched
+  - Improve: tightens clarity while keeping the author's wording where it works
+  - Rewrite: restructures freely, still in plain language and the original register
 - **Instant or Thinking** - Choose per run whether a correction answers
-  immediately or reasons first, and see how long it took. Thinking applies to
-  the Improve and Rewrite levels and runs on its own model, which must advertise
-  Ollama's `thinking` capability (for example `qwen3:4b`). The plain Fix pass is
-  mechanical and always runs instantly.
+  immediately or reasons first, with the model's reasoning available in a
+  collapsible panel. Thinking applies to the Improve and Rewrite levels and runs
+  on its own model, which must advertise Ollama's `thinking` capability. The Fix
+  pass is mechanical and always runs instantly.
+- **Response Times** - Every translation and correction counts up while it runs
+  and reports how long it took, so a slow reasoning pass never looks like a hang
 - **Speech-to-Text** - Voice input with continuous recording and silence detection
 - **Language Swap** - One-click swap between source and target languages
 - **Offline First** - All processing happens locally via Ollama
@@ -35,7 +37,11 @@ Offline translation and grammar correction app powered by local AI models. Avail
 - [Ollama](https://ollama.com) installed and running
 - Required models:
   - `aya:8b` - Translation
-  - `qwen3:4b` - Grammar correction
+  - `qwen2.5:7b` - Correction
+- Optional model:
+  - `qwen3:4b` - Reasoning, only needed for the Thinking mode. Any model that
+    advertises Ollama's `thinking` capability works; pick it under
+    Settings > Reasoning model.
 
 ## Quick Start
 
@@ -49,6 +55,9 @@ Offline translation and grammar correction app powered by local AI models. Avail
 
    ```bash
    ollama pull aya:8b
+   ollama pull qwen2.5:7b
+
+   # optional, enables Thinking mode for Improve and Rewrite
    ollama pull qwen3:4b
    ```
 

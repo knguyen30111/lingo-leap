@@ -81,9 +81,12 @@ export const useAppStore = create<AppState>((set) => ({
   setEnabled: (enabled) => set({ isEnabled: enabled }),
   toggleEnabled: () => set((state) => ({ isEnabled: !state.isEnabled })),
 
-  setMode: (mode) => set({ mode, outputText: '', changes: [], error: null, thinkingText: '' }),
+  // A duration belongs to the result that produced it, so clearing the result
+  // must clear the timing with it.
+  setMode: (mode) =>
+    set({ mode, outputText: '', changes: [], error: null, thinkingText: '', lastRunMs: null, runStartedAt: null }),
   setCorrectionLevel: (level) =>
-    set({ correctionLevel: level, outputText: '', changes: [], error: null, thinkingText: '' }),
+    set({ correctionLevel: level, outputText: '', changes: [], error: null, thinkingText: '', lastRunMs: null }),
 
   setInputText: (text) => set({ inputText: text }),
   setOutputText: (text) => set({ outputText: text }),

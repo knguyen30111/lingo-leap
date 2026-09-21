@@ -325,4 +325,58 @@ describe('useTranslation', () => {
 
     expect(translatedResult).toBe('Xin chào thế giới')
   })
+
+  // A translation on a local model can take tens of seconds, so the view needs
+  // the same elapsed-time signal the correction view has.
+  describe('run timing', () => {
+    it('records how long a translation took', async () => {
+      const { result } = renderHook(() => useTranslation())
+
+      await act(async () => {
+        await result.current.translate('Hello world')
+      })
+
+      const state = useAppStore.getState()
+      expect(state.lastRunMs).not.toBeNull()
+      expect(state.lastRunMs).toBeGreaterThanOrEqual(0)
+      expect(state.runStartedAt).toBeNull()
+    })
+
+    it('marks a start time while the request is in flight', async () => {
+      let observedStart: number | null = null
+      mockTranslate.mockImplementation(async () => {
+        observedStart = useAppStore.getState().runStartedAt
+        return { translated: 'Xin chào' }
+      })
+      const { result } = renderHook(() => useTranslation())
+
+      await act(async () => {
+        await result.current.translate('Hello world')
+      })
+
+      expect(observedStart).not.toBeNull()
+    })
+
+    it('clears the start time when a translation fails', async () => {
+      mockTranslate.mockRejectedValue(new Error('boom'))
+      const { result } = renderHook(() => useTranslation())
+
+      await act(async () => {
+        await result.current.translate('Hello world').catch(() => {})
+      })
+
+      expect(useAppStore.getState().runStartedAt).toBeNull()
+    })
+
+    it('clears the start time when cancelled', async () => {
+      useAppStore.setState({ runStartedAt: Date.now() })
+      const { result } = renderHook(() => useTranslation())
+
+      act(() => {
+        result.current.cancel()
+      })
+
+      expect(useAppStore.getState().runStartedAt).toBeNull()
+    })
+  })
 })

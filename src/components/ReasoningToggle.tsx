@@ -12,8 +12,10 @@ const MODES: { value: ReasoningMode; labelKey: string; icon: string }[] = [
 
 export function ReasoningToggle() {
   const { t } = useTranslation(['messages', 'common'])
-  const { isLoading, isChangesLoading, correctionLevel, setOutputText, setChanges, setThinkingText } =
-    useAppStore()
+  const {
+    isLoading, isChangesLoading, correctionLevel,
+    setOutputText, setChanges, setThinkingText, setLastRunMs,
+  } = useAppStore()
   const { reasoningMode, setReasoningMode, reasoningModel, ollamaHost } = useSettingsStore()
   const [canThink, setCanThink] = useState<boolean | null>(null)
 
@@ -44,6 +46,7 @@ export function ReasoningToggle() {
     setOutputText('')
     setChanges([])
     setThinkingText('')
+    setLastRunMs(null)
   }
 
   const busy = isLoading || isChangesLoading
