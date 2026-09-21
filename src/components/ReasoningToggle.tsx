@@ -12,7 +12,8 @@ const MODES: { value: ReasoningMode; labelKey: string; icon: string }[] = [
 
 export function ReasoningToggle() {
   const { t } = useTranslation(['messages', 'common'])
-  const { isLoading, isChangesLoading, setOutputText, setChanges, setThinkingText } = useAppStore()
+  const { isLoading, isChangesLoading, correctionLevel, setOutputText, setChanges, setThinkingText } =
+    useAppStore()
   const { reasoningMode, setReasoningMode, reasoningModel, ollamaHost } = useSettingsStore()
   const [canThink, setCanThink] = useState<boolean | null>(null)
 
@@ -46,23 +47,30 @@ export function ReasoningToggle() {
   }
 
   const busy = isLoading || isChangesLoading
+  // A mechanical fix pass does not use reasoning, so the control reflects the
+  // mode that will actually run rather than the stored preference.
+  const levelBlocks = correctionLevel === 'fix'
+  const effectiveMode = levelBlocks ? 'instant' : reasoningMode
 
   return (
     <div className="segmented-control" role="group" aria-label={t('messages:reasoning.label')}>
       {MODES.map(({ value, labelKey, icon }) => {
-        const unsupported = value === 'thinking' && canThink === false
+        const unsupported =
+          value === 'thinking' && (canThink === false || levelBlocks)
         return (
           <button
             key={value}
             onClick={() => handleSelect(value)}
             disabled={busy || unsupported || (value === 'thinking' && canThink === null)}
-            aria-pressed={reasoningMode === value}
+            aria-pressed={effectiveMode === value}
             title={
               unsupported
-                ? t('messages:reasoning.unsupported', { model: reasoningModel })
+                ? levelBlocks
+                  ? t('messages:reasoning.notForFix')
+                  : t('messages:reasoning.unsupported', { model: reasoningModel })
                 : t(`messages:${labelKey}`)
             }
-            className={`segmented-control-item ${reasoningMode === value ? 'active' : ''}`}
+            className={`segmented-control-item ${effectiveMode === value ? 'active' : ''}`}
           >
             <span aria-hidden="true">{icon}</span> {t(`messages:${labelKey}`)}
           </button>

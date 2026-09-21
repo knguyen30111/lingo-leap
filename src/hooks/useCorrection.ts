@@ -208,8 +208,10 @@ export function useCorrection() {
       // Check cache (skip if regenerating)
       // Key on the model this run will actually use, so switching the reasoning
       // model does not serve results produced by the previous one.
-      const keyModel = reasoningMode === 'thinking' ? reasoningModel : correctionModel
-      const cacheKey = createCorrectionKey(textToProcess, detectedLang, levelToUse, keyModel, reasoningMode)
+      const keyModel =
+        reasoningMode === 'thinking' && levelToUse !== 'fix' ? reasoningModel : correctionModel
+      const effectiveMode = levelToUse === 'fix' ? 'instant' : reasoningMode
+      const cacheKey = createCorrectionKey(textToProcess, detectedLang, levelToUse, keyModel, effectiveMode)
       if (!skipCache) {
         const cached = translationCache.get(cacheKey)
         if (cached) {
@@ -241,10 +243,23 @@ export function useCorrection() {
       // wrapped in <think> tags. Measured on qwen3:4b, think:false returned 7606
       // characters of reasoning as the correction where omitting it returned 706
       // clean ones. Instant therefore omits the flag rather than disabling it.
+      // Reasoning is not offered for 'fix'. Measured on qwen3:4b, every one of
+      // four runs answered with an explanation of the errors - once with 2749
+      // characters discussing the prompt's own rules - instead of the corrected
+      // sentence, and restating the output contract only fixed half of them.
+      // Improve and rewrite comply reliably, and a mechanical spelling and
+      // grammar pass gains little from deliberation anyway.
+      const levelSupportsThinking = levelToUse !== 'fix'
       const wantsThinking =
-        reasoningMode === 'thinking' && (await ollamaClient.supportsThinking(reasoningModel))
+        reasoningMode === 'thinking' &&
+        levelSupportsThinking &&
+        (await ollamaClient.supportsThinking(reasoningModel))
       if (reasoningMode === 'thinking' && !wantsThinking) {
-        console.warn(`[Correction] ${reasoningModel} cannot think; running instant`)
+        console.warn(
+          levelSupportsThinking
+            ? `[Correction] ${reasoningModel} cannot think; running instant`
+            : `[Correction] reasoning is not used for '${levelToUse}'; running instant`
+        )
       }
       const think = wantsThinking ? true : undefined
       const activeModel = wantsThinking ? reasoningModel : correctionModel

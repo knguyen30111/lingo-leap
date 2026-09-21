@@ -173,4 +173,24 @@ describe('cleanModelOutput', () => {
       expect(cleanModelOutput('I think we should go.', 'qwen')).toBe('I think we should go.')
     })
   })
+
+  // qwen3 sometimes answers like a maths solution: an explanation followed by
+  // the result in \boxed{}. The braces hold the answer, the prose is workings.
+  describe('boxed answer', () => {
+    it('keeps only the boxed text after an explanation', () => {
+      const input =
+        'The errors are: "stor" is misspelled.\n\n\\boxed{\\text{I went to the store yesterday.}}'
+      expect(cleanModelOutput(input, 'qwen')).toBe('I went to the store yesterday.')
+    })
+
+    it('handles a boxed answer without the text wrapper', () => {
+      expect(cleanModelOutput('Working...\n\\boxed{I went to the store.}', 'qwen'))
+        .toBe('I went to the store.')
+    })
+
+    it('leaves output without a boxed answer untouched', () => {
+      expect(cleanModelOutput('I went to the store yesterday.', 'qwen'))
+        .toBe('I went to the store yesterday.')
+    })
+  })
 })

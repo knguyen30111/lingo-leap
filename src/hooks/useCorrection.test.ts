@@ -466,10 +466,26 @@ describe('useCorrection', () => {
       const { result } = renderHook(() => useCorrection())
 
       await act(async () => {
-        await result.current.correct('Hello wrold')
+        await result.current.correct('Hello wrold', 'improve')
       })
 
       expect(vi.mocked(ollamaClient.generate).mock.calls[0][0].think).toBe(true)
+    })
+
+
+    // fix-with-reasoning answered with an explanation rather than the corrected
+    // sentence in every sampled run, so the level never requests it.
+    it('never requests thinking for the fix level', async () => {
+      vi.mocked(ollamaClient.supportsThinking).mockResolvedValue(true)
+      useSettingsStore.setState({ reasoningMode: 'thinking', useStreaming: false })
+      const { result } = renderHook(() => useCorrection())
+
+      await act(async () => {
+        await result.current.correct('Hello wrold', 'fix')
+      })
+
+      expect(vi.mocked(ollamaClient.generate).mock.calls[0][0].think).toBeUndefined()
+      expect(useAppStore.getState().outputText).toBe('Hello world')
     })
 
     it('falls back to an instant run when the model cannot think', async () => {
@@ -500,7 +516,7 @@ describe('useCorrection', () => {
       const { result } = renderHook(() => useCorrection())
 
       await act(async () => {
-        await result.current.correct('Hello wrold')
+        await result.current.correct('Hello wrold', 'improve')
       })
 
       expect(useAppStore.getState().thinkingText).toBe('weighing the tense')

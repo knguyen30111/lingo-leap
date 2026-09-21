@@ -14,6 +14,7 @@ vi.mock('react-i18next', () => ({
         'messages:reasoning.instant': 'Instant',
         'messages:reasoning.thinking': 'Thinking',
         'messages:reasoning.unsupported': `${vars?.model ?? ''} cannot reason.`,
+        'messages:reasoning.notForFix': 'Reasoning is not used for Fix.',
       }
       return map[key] ?? key
     },
@@ -28,6 +29,7 @@ describe('ReasoningToggle', () => {
       ollamaHost: 'http://localhost:11434',
     })
     useAppStore.setState({
+      correctionLevel: 'improve',
       isLoading: false,
       isChangesLoading: false,
       outputText: '',
@@ -109,5 +111,37 @@ describe('ReasoningToggle', () => {
 
     await waitFor(() => expect(thinkingButton()).toBeDisabled())
     expect(screen.getByRole('button', { name: /Instant/ })).toBeDisabled()
+  })
+
+  // Measured on qwen3:4b, fix-with-reasoning answered with an explanation of the
+  // errors in every one of four runs instead of the corrected sentence.
+  describe('fix level', () => {
+    it('disables Thinking and explains why', async () => {
+      vi.spyOn(ollamaClient, 'supportsThinking').mockResolvedValue(true)
+      useAppStore.setState({ correctionLevel: 'fix' })
+      render(<ReasoningToggle />)
+
+      await waitFor(() => expect(thinkingButton()).toBeDisabled())
+      expect(thinkingButton().getAttribute('title')).toContain('not used for Fix')
+    })
+
+    it('shows Instant as the active mode even when Thinking is the stored preference', async () => {
+      vi.spyOn(ollamaClient, 'supportsThinking').mockResolvedValue(true)
+      useSettingsStore.setState({ reasoningMode: 'thinking' })
+      useAppStore.setState({ correctionLevel: 'fix' })
+      render(<ReasoningToggle />)
+
+      await waitFor(() => expect(thinkingButton()).toBeDisabled())
+      expect(screen.getByRole('button', { name: /Instant/ })).toHaveAttribute('aria-pressed', 'true')
+      expect(thinkingButton()).toHaveAttribute('aria-pressed', 'false')
+    })
+
+    it('keeps Thinking available at improve', async () => {
+      vi.spyOn(ollamaClient, 'supportsThinking').mockResolvedValue(true)
+      useAppStore.setState({ correctionLevel: 'improve' })
+      render(<ReasoningToggle />)
+
+      await waitFor(() => expect(thinkingButton()).not.toBeDisabled())
+    })
   })
 })

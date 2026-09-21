@@ -51,6 +51,13 @@ export function cleanModelOutput(text: string, _modelType?: ModelType): string {
     .replace(/^[\s\S]*?<\/think>/i, '')
     .trim()
 
+  // Reasoning models sometimes present the answer the way a maths solution is
+  // presented, wrapping it in \boxed{} after a written explanation. Real prose
+  // never contains that token, so when it appears the braced content is the
+  // answer and everything around it is workings.
+  const boxed = cleaned.match(/\\boxed\{(?:\\text\{)?([\s\S]*?)\}?\}\s*$/)
+  if (boxed && boxed[1].trim()) cleaned = boxed[1].trim()
+
   // The translation prompt fences the source in <text> tags to stop the model
   // replying to it instead of translating it. Smaller models sometimes copy the
   // fence into the answer, so drop the tags and anything the model prefixed

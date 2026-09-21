@@ -29,6 +29,7 @@
     "unsupported": "{{model}} cannot reason. Pick a thinking-capable model such as qwen3:4b in Settings.",
     "thinkingNow": "Reasoning...",
     "trace": "Reasoning",
-    "waiting": "Waiting for the model..."
+    "waiting": "Waiting for the model...",
+    "notForFix": "Reasoning is not used for Fix - it is a mechanical spelling and grammar pass. Choose Improve or Rewrite."
   }
 }
