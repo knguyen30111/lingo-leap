@@ -21,5 +21,14 @@
     "improveDesc": "文法とスタイル",
     "rewrite": "書き直し",
     "rewriteDesc": "完全に書き直し"
+  },
+  "reasoning": {
+    "label": "応答速度",
+    "instant": "即時",
+    "thinking": "熟考",
+    "unsupported": "{{model}} は推論に対応していません。設定で qwen3:4b などの推論対応モデルを選択してください。",
+    "thinkingNow": "推論中...",
+    "trace": "推論の過程",
+    "waiting": "モデルの応答を待っています..."
   }
 }

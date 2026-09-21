@@ -21,5 +21,14 @@
     "improveDesc": "문법과 스타일",
     "rewrite": "다시 쓰기",
     "rewriteDesc": "완전히 다시 작성"
+  },
+  "reasoning": {
+    "label": "응답 속도",
+    "instant": "즉시",
+    "thinking": "추론",
+    "unsupported": "{{model}}은(는) 추론을 지원하지 않습니다. 설정에서 qwen3:4b 같은 추론 가능 모델을 선택하세요.",
+    "thinkingNow": "추론 중...",
+    "trace": "추론 과정",
+    "waiting": "모델을 기다리는 중..."
   }
 }

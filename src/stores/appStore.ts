@@ -35,6 +35,18 @@ interface AppState {
   error: string | null
   setError: (error: string | null) => void
 
+  // Timing for the current and last correction run
+  runStartedAt: number | null
+  setRunStartedAt: (t: number | null) => void
+  lastRunMs: number | null
+  setLastRunMs: (ms: number | null) => void
+
+  // Reasoning trace (populated only when a thinking run is requested)
+  thinkingText: string
+  setThinkingText: (text: string) => void
+  isThinking: boolean
+  setThinking: (value: boolean) => void
+
   // Changes (for correction mode)
   changes: Array<{ from: string; to: string; reason: string }>
   setChanges: (changes: Array<{ from: string; to: string; reason: string }>) => void
@@ -57,6 +69,10 @@ const initialState = {
   error: null,
   changes: [],
   isChangesLoading: false,
+  thinkingText: '',
+  isThinking: false,
+  runStartedAt: null,
+  lastRunMs: null,
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -65,8 +81,9 @@ export const useAppStore = create<AppState>((set) => ({
   setEnabled: (enabled) => set({ isEnabled: enabled }),
   toggleEnabled: () => set((state) => ({ isEnabled: !state.isEnabled })),
 
-  setMode: (mode) => set({ mode, outputText: '', changes: [], error: null }),
-  setCorrectionLevel: (level) => set({ correctionLevel: level, outputText: '', changes: [], error: null }),
+  setMode: (mode) => set({ mode, outputText: '', changes: [], error: null, thinkingText: '' }),
+  setCorrectionLevel: (level) =>
+    set({ correctionLevel: level, outputText: '', changes: [], error: null, thinkingText: '' }),
 
   setInputText: (text) => set({ inputText: text }),
   setOutputText: (text) => set({ outputText: text }),
@@ -76,6 +93,12 @@ export const useAppStore = create<AppState>((set) => ({
 
   setLoading: (loading) => set({ isLoading: loading }),
   setError: (error) => set({ error }),
+
+  setRunStartedAt: (t) => set({ runStartedAt: t }),
+  setLastRunMs: (ms) => set({ lastRunMs: ms }),
+
+  setThinkingText: (text) => set({ thinkingText: text }),
+  setThinking: (value) => set({ isThinking: value }),
 
   setChanges: (changes) => set({ changes }),
   setChangesLoading: (loading) => set({ isChangesLoading: loading }),

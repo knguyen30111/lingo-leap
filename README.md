@@ -13,6 +13,10 @@ Offline translation and grammar correction app powered by local AI models. Avail
   - Light: Minor fixes only
   - Medium: Grammar and style improvements
   - Heavy: Full rewrite for clarity
+- **Instant or Thinking** - Choose per run whether correction answers immediately
+  or reasons first. Thinking requires a model that advertises Ollama's `thinking`
+  capability (for example `qwen3:4b`); with any other model the control is
+  disabled and corrections stay instant.
 - **Speech-to-Text** - Voice input with continuous recording and silence detection
 - **Language Swap** - One-click swap between source and target languages
 - **Offline First** - All processing happens locally via Ollama

@@ -21,5 +21,14 @@
     "improveDesc": "Grammar and style",
     "rewrite": "Rewrite",
     "rewriteDesc": "Full clarity rewrite"
+  },
+  "reasoning": {
+    "label": "Response speed",
+    "instant": "Instant",
+    "thinking": "Thinking",
+    "unsupported": "{{model}} cannot reason. Pick a thinking-capable model such as qwen3:4b in Settings.",
+    "thinkingNow": "Reasoning...",
+    "trace": "Reasoning",
+    "waiting": "Waiting for the model..."
   }
 }

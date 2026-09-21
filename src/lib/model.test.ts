@@ -149,4 +149,28 @@ describe('cleanModelOutput', () => {
         .toBe('Please send the text tomorrow.')
     })
   })
+
+  // A hybrid reasoner such as qwen3 emits its chain of thought inline when the
+  // separate thinking channel is off. Measured on qwen3:4b, that turned a 706
+  // character correction into 7606 characters of visible reasoning.
+  describe('leaked chain of thought', () => {
+    it('drops a complete think block', () => {
+      expect(cleanModelOutput('<think>first I check the tense</think>I went to the store.', 'qwen'))
+        .toBe('I went to the store.')
+    })
+
+    it('drops reasoning that arrives without an opening tag', () => {
+      expect(cleanModelOutput('We are given a sentence.\nLet me reason.</think>\n\nI went.', 'qwen'))
+        .toBe('I went.')
+    })
+
+    it('drops multiple think blocks', () => {
+      expect(cleanModelOutput('<think>a</think>Hello <think>b</think>world', 'qwen'))
+        .toBe('Hello world')
+    })
+
+    it('leaves an answer that merely mentions thinking alone', () => {
+      expect(cleanModelOutput('I think we should go.', 'qwen')).toBe('I think we should go.')
+    })
+  })
 })

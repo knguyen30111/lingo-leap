@@ -18,6 +18,11 @@ export interface PromptResult {
 // === Correction Types ===
 export type CorrectionLevel = 'fix' | 'improve' | 'rewrite'
 
+// How much the model is allowed to deliberate before answering.
+// 'instant' is a plain generation; 'thinking' asks Ollama for a reasoning pass
+// first, which only models advertising the "thinking" capability can serve.
+export type ReasoningMode = 'instant' | 'thinking'
+
 export interface Change {
   from: string
   to: string
@@ -53,6 +58,10 @@ export interface OllamaGenerateRequest {
   prompt: string
   system?: string
   stream?: boolean
+  // Ollama rejects this outright on a model without the capability
+  // ("<model> does not support thinking"), so it must only be sent after
+  // checking supportsThinking().
+  think?: boolean
   options?: {
     temperature?: number
     num_ctx?: number
@@ -63,9 +72,16 @@ export interface OllamaGenerateRequest {
 export interface OllamaGenerateResponse {
   model: string
   response: string
+  // Present only when think was requested; carries the reasoning pass, which
+  // Ollama keeps separate from the answer.
+  thinking?: string
   done: boolean
   total_duration?: number
   eval_count?: number
+}
+
+export interface OllamaShowResponse {
+  capabilities?: string[]
 }
 
 export interface OllamaModelInfo {

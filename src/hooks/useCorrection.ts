@@ -3,6 +3,7 @@ import { useAppStore, CorrectionLevel } from '../stores/appStore'
 import { useSettingsStore } from '../stores/settingsStore'
 import { ollamaClient } from '../lib/ollama-client'
 import { detectLanguage } from '../lib/language'
+import { cleanModelOutput } from '../lib/model'
 import { getCorrectionPrompt, getChangesExtractionPrompt } from '../lib/prompts'
 import { translationCache, createCorrectionKey } from '../lib/cache'
 
@@ -10,16 +11,6 @@ interface Change {
   from: string
   to: string
   reason: string
-}
-
-// Clean model output artifacts
-function cleanModelOutput(text: string): string {
-  return text
-    .replace(/<\|im_end\|>/g, '')
-    .replace(/<\|end\|>/g, '')
-    .replace(/<\|assistant\|>/g, '')
-    .replace(/<\|im_start\|>assistant\n?/g, '')
-    .trim()
 }
 
 export function useCorrection() {
@@ -32,9 +23,14 @@ export function useCorrection() {
     setError,
     setChanges,
     setChangesLoading,
+    setThinkingText,
+    setThinking,
+    setRunStartedAt,
+    setLastRunMs,
   } = useAppStore()
 
-  const { correctionModel, ollamaHost, useStreaming, explanationLang } = useSettingsStore()
+  const { correctionModel, reasoningModel, ollamaHost, useStreaming, explanationLang, reasoningMode } =
+    useSettingsStore()
   const abortRef = useRef<AbortController | null>(null)
   const changesAbortRef = useRef<AbortController | null>(null)
 
@@ -190,6 +186,13 @@ export function useCorrection() {
     setError(null)
     setOutputText('')
     setChanges([])
+    setThinkingText('')
+    setThinking(false)
+    // A reasoning run can take a minute, so the elapsed time is tracked from the
+    // moment the user asks rather than only reported at the end.
+    const startedAt = Date.now()
+    setRunStartedAt(startedAt)
+    setLastRunMs(null)
 
     try {
       ollamaClient.setBaseUrl(ollamaHost)
@@ -203,11 +206,16 @@ export function useCorrection() {
       console.log('[Correction] Explanation language:', explainLang)
 
       // Check cache (skip if regenerating)
-      const cacheKey = createCorrectionKey(textToProcess, detectedLang, levelToUse, correctionModel)
+      // Key on the model this run will actually use, so switching the reasoning
+      // model does not serve results produced by the previous one.
+      const keyModel = reasoningMode === 'thinking' ? reasoningModel : correctionModel
+      const cacheKey = createCorrectionKey(textToProcess, detectedLang, levelToUse, keyModel, reasoningMode)
       if (!skipCache) {
         const cached = translationCache.get(cacheKey)
         if (cached) {
           setOutputText(cached)
+          setLastRunMs(Date.now() - startedAt)
+          setRunStartedAt(null)
           setLoading(false)
           // Extract changes in background
           if (cached !== textToProcess) {
@@ -221,16 +229,44 @@ export function useCorrection() {
       const prompt = getCorrectionPrompt(textToProcess, detectedLang, levelToUse)
       console.log('[Correction] Using prompt for', detectedLang, 'level:', levelToUse)
 
+      // Two separate hazards decide this flag.
+      //
+      // Sending think to a model without the capability fails the whole request
+      // ("<model> does not support thinking"), so the mode is only honoured once
+      // the model confirms it.
+      //
+      // Sending think:false is worse than omitting it on a hybrid reasoner such
+      // as qwen3: the model reasons either way, and false only turns off the
+      // separate thinking channel, so the chain of thought lands in the answer
+      // wrapped in <think> tags. Measured on qwen3:4b, think:false returned 7606
+      // characters of reasoning as the correction where omitting it returned 706
+      // clean ones. Instant therefore omits the flag rather than disabling it.
+      const wantsThinking =
+        reasoningMode === 'thinking' && (await ollamaClient.supportsThinking(reasoningModel))
+      if (reasoningMode === 'thinking' && !wantsThinking) {
+        console.warn(`[Correction] ${reasoningModel} cannot think; running instant`)
+      }
+      const think = wantsThinking ? true : undefined
+      const activeModel = wantsThinking ? reasoningModel : correctionModel
+      setThinking(wantsThinking)
+
+      let thinkingBuffer = ''
+      const onThinking = (chunk: string) => {
+        thinkingBuffer += chunk
+        setThinkingText(thinkingBuffer)
+      }
+
       let result = ''
       if (useStreaming) {
         for await (const chunk of ollamaClient.generateStream({
-          model: correctionModel,
+          model: activeModel,
           prompt,
+          think,
           options: {
             temperature: 0.3,
             num_ctx: 2048,
           },
-        }, signal)) {
+        }, signal, wantsThinking ? onThinking : undefined)) {
           result += chunk
           const cleaned = cleanModelOutput(result)
           setOutputText(cleaned)
@@ -238,8 +274,9 @@ export function useCorrection() {
         result = cleanModelOutput(result)
       } else {
         const response = await ollamaClient.generate({
-          model: correctionModel,
+          model: activeModel,
           prompt,
+          think,
           options: {
             temperature: 0.3,
             num_ctx: 2048,
@@ -248,6 +285,8 @@ export function useCorrection() {
         result = cleanModelOutput(response)
         setOutputText(result)
       }
+
+      setThinking(false)
 
       // Cache result
       translationCache.set(cacheKey, result)
@@ -260,6 +299,8 @@ export function useCorrection() {
         console.log('[Changes] No changes detected (result === input)')
       }
 
+      setLastRunMs(Date.now() - startedAt)
+      setRunStartedAt(null)
       setLoading(false)
       return result
     } catch (err) {
@@ -268,6 +309,7 @@ export function useCorrection() {
       }
       const errorMsg = err instanceof Error ? err.message : 'Correction failed'
       setError(errorMsg)
+      setRunStartedAt(null)
       setLoading(false)
       throw err
     }
@@ -278,7 +320,13 @@ export function useCorrection() {
     ollamaHost,
     useStreaming,
     explanationLang,
+    reasoningMode,
+    reasoningModel,
     setOutputText,
+    setThinkingText,
+    setThinking,
+    setRunStartedAt,
+    setLastRunMs,
     setLoading,
     setError,
     setChanges,
@@ -298,7 +346,9 @@ export function useCorrection() {
     }
     setLoading(false)
     setChangesLoading(false)
-  }, [setLoading, setChangesLoading])
+    setThinking(false)
+    setRunStartedAt(null)
+  }, [setLoading, setChangesLoading, setThinking, setRunStartedAt])
 
   const setLevel = useCallback((level: CorrectionLevel) => {
     setCorrectionLevel(level)
